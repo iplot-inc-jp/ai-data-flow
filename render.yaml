@@ -12,9 +12,8 @@ services:
     runtime: node
     region: singapore
     plan: free
-    rootDir: backend
-    buildCommand: pnpm install && pnpm prisma generate && pnpm build
-    startCommand: pnpm start:prod
+    buildCommand: cd backend && pnpm install && pnpm prisma generate && pnpm build
+    startCommand: cd backend && pnpm start:prod
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -41,9 +40,8 @@ services:
     runtime: node
     region: singapore
     plan: free
-    rootDir: frontend
-    buildCommand: pnpm install && pnpm build
-    startCommand: pnpm start
+    buildCommand: cd frontend && pnpm install && pnpm build
+    startCommand: cd frontend && pnpm start
     envVars:
       - key: NODE_ENV
         value: production
