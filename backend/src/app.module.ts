@@ -59,6 +59,7 @@ import {
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
+import { HealthController } from './presentation/controllers/health.controller';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import {
     PrismaModule,
   ],
   controllers: [
+    HealthController,
     AuthController,
     OrganizationController,
     ProjectController,

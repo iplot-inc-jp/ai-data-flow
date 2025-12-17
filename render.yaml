@@ -1,0 +1,51 @@
+databases:
+  - name: dataflow-db
+    databaseName: dataflow
+    user: dataflow
+    plan: free
+    region: singapore
+
+services:
+  # Backend API
+  - type: web
+    name: dataflow-backend
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: pnpm install && pnpm prisma generate && pnpm build
+    startCommand: pnpm start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5021
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dataflow-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRATION
+        value: 7d
+
+  # Frontend
+  - type: web
+    name: dataflow-frontend
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: frontend
+    buildCommand: pnpm install && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: dataflow-backend
+          property: hostport
+          envVarKey: RENDER_EXTERNAL_URL
+
