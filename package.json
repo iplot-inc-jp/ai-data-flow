@@ -1,0 +1,34 @@
+{
+  "name": "dataflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "データカタログ × 業務フロー統合プラットフォーム",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "pnpm run --parallel dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:backend": "pnpm --filter backend start:dev",
+    "build": "pnpm run --parallel build",
+    "build:frontend": "pnpm --filter frontend build",
+    "build:backend": "pnpm --filter backend build",
+    "lint": "pnpm run --parallel lint",
+    "docker:up": "docker-compose -f backend/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f backend/docker-compose.yml down",
+    "docker:logs": "docker-compose -f backend/docker-compose.yml logs -f",
+    "db:migrate": "pnpm --filter @dataflow/backend exec prisma migrate dev --schema=./prisma/schema.prisma",
+    "db:generate": "pnpm --filter @dataflow/backend exec prisma generate --schema=./prisma/schema.prisma",
+    "db:studio": "pnpm --filter @dataflow/backend exec prisma studio --schema=./prisma/schema.prisma",
+    "db:seed": "pnpm --filter @dataflow/backend exec prisma db seed",
+    "db:reset": "pnpm --filter @dataflow/backend exec prisma migrate reset --schema=./prisma/schema.prisma --force"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}
+

@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: dataflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dataflow
+      POSTGRES_PASSWORD: dataflow
+      POSTGRES_DB: dataflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NestJS Backend (development)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dataflow-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://dataflow:dataflow@postgres:5432/dataflow?schema=public
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      PORT: 5021
+      NODE_ENV: production
+    ports:
+      - "5021:5021"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+
