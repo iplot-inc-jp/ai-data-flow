@@ -17,6 +17,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   FileText,
+  Grid3X3,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState, useMemo, useEffect } from 'react'
@@ -84,6 +85,7 @@ export default function DashboardLayout({
     if (projectId) {
       const projectNav = [
         { name: 'データカタログ', href: `/dashboard/projects/${projectId}/catalog`, icon: Database },
+        { name: 'CRUD表', href: `/dashboard/projects/${projectId}/crud-matrix`, icon: Grid3X3 },
         { name: '業務フロー', href: `/dashboard/projects/${projectId}/flows`, icon: GitBranch },
         { name: '要求定義', href: `/dashboard/projects/${projectId}/requirements`, icon: FileText },
         { name: 'ロール', href: `/dashboard/projects/${projectId}/roles`, icon: Users },
@@ -157,7 +159,7 @@ export default function DashboardLayout({
           <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
             {navigation.map((item, index) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
-              const isProjectMenu = projectId && index >= 2 && index <= 5 // カタログ、フロー、ロール、プロジェクト設定
+              const isProjectMenu = projectId && index >= 2 && index <= 7 // カタログ、CRUD表、フロー、要求定義、ロール、プロジェクト設定
               
               return (
                 <div key={item.name}>
