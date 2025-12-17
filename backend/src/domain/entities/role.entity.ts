@@ -18,6 +18,8 @@ export interface ReconstructRoleProps {
   type: RoleType;
   description: string | null;
   color: string | null;
+  order?: number;
+  laneHeight?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -32,6 +34,8 @@ export class Role extends BaseEntity {
   private _type: RoleType;
   private _description: string | null;
   private _color: string | null;
+  private _order: number;
+  private _laneHeight: number;
 
   private constructor(
     id: string,
@@ -40,6 +44,8 @@ export class Role extends BaseEntity {
     type: RoleType,
     description: string | null,
     color: string | null,
+    order: number,
+    laneHeight: number,
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -49,6 +55,8 @@ export class Role extends BaseEntity {
     this._type = type;
     this._description = description;
     this._color = color;
+    this._order = order;
+    this._laneHeight = laneHeight;
   }
 
   /**
@@ -81,6 +89,8 @@ export class Role extends BaseEntity {
       props.type,
       props.description?.trim() || null,
       color,
+      0, // default order
+      120, // default laneHeight
       now,
       now,
     );
@@ -97,6 +107,8 @@ export class Role extends BaseEntity {
       props.type,
       props.description,
       props.color,
+      props.order ?? 0,
+      props.laneHeight ?? 120,
       props.createdAt,
       props.updatedAt,
     );
@@ -164,6 +176,14 @@ export class Role extends BaseEntity {
     return this._color;
   }
 
+  get order(): number {
+    return this._order;
+  }
+
+  get laneHeight(): number {
+    return this._laneHeight;
+  }
+
   /**
    * ロールが人間かどうか
    */
@@ -176,6 +196,25 @@ export class Role extends BaseEntity {
    */
   isSystem(): boolean {
     return this._type === 'SYSTEM';
+  }
+
+  /**
+   * 並び順を変更
+   */
+  changeOrder(order: number): void {
+    this._order = order;
+    this.touch();
+  }
+
+  /**
+   * レーン高さを変更
+   */
+  changeLaneHeight(height: number): void {
+    if (height < 60 || height > 500) {
+      throw new ValidationError('Lane height must be between 60 and 500');
+    }
+    this._laneHeight = height;
+    this.touch();
   }
 }
 

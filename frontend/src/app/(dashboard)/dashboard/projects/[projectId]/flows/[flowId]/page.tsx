@@ -1,14 +1,24 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ArrowLeft, FileCode, Loader2 } from 'lucide-react';
+import { ArrowLeft, FileCode, Loader2, Eye } from 'lucide-react';
 import { BPMNFlowViewer, FlowData, Role } from '@/components/flow-editor/BPMNFlowViewer';
+import mermaid from 'mermaid';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+
+// Mermaid初期化
+if (typeof window !== 'undefined') {
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'default',
+    securityLevel: 'loose',
+  });
+}
 
 export default function ProjectFlowDetailPage() {
   const params = useParams();
@@ -254,7 +264,7 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
-  // エッジ削除
+  // エッジ削除（ノード位置を維持するためローカルで更新）
   const handleEdgeDelete = useCallback(
     async (edgeId: string) => {
       if (!flowData) return;
@@ -266,12 +276,20 @@ export default function ProjectFlowDetailPage() {
         });
 
         if (!res.ok) throw new Error('Failed to delete edge');
-        fetchFlowData(flowData.id);
+        
+        // ノード位置を維持するためローカルでエッジを削除
+        setFlowData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            edges: prev.edges.filter((e) => e.id !== edgeId),
+          };
+        });
       } catch (err) {
         console.error('Failed to delete edge:', err);
       }
     },
-    [flowData, fetchFlowData, getHeaders]
+    [flowData, getHeaders]
   );
 
   // 子フロー作成
@@ -300,6 +318,80 @@ export default function ProjectFlowDetailPage() {
     },
     [flowData, fetchFlowData, getHeaders]
   );
+
+  // ロール並び替え
+  const handleRoleReorder = useCallback(
+    async (roleId: string, direction: 'up' | 'down') => {
+      const currentIndex = roles.findIndex((r) => r.id === roleId);
+      if (currentIndex === -1) return;
+      
+      const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+      if (newIndex < 0 || newIndex >= roles.length) return;
+
+      // ローカルで先に並び替え
+      const newRoles = [...roles];
+      [newRoles[currentIndex], newRoles[newIndex]] = [newRoles[newIndex], newRoles[currentIndex]];
+      setRoles(newRoles);
+
+      // APIに並び順を保存
+      try {
+        const headers = getHeaders();
+        await fetch(`${API_URL}/api/roles/project/${projectId}/order`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ roleIds: newRoles.map((r) => r.id) }),
+        });
+      } catch (err) {
+        console.error('Failed to reorder roles:', err);
+        // エラー時は元に戻す
+        setRoles(roles);
+      }
+    },
+    [roles, projectId, getHeaders]
+  );
+
+  // レーン高さ更新
+  const handleLaneHeightUpdate = useCallback(
+    async (roleId: string, height: number) => {
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/roles/${roleId}/lane-height`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ laneHeight: height }),
+        });
+
+        if (res.ok) {
+          setRoles((prev) =>
+            prev.map((r) => (r.id === roleId ? { ...r, laneHeight: height } : r))
+          );
+        }
+      } catch (err) {
+        console.error('Failed to update lane height:', err);
+      }
+    },
+    [getHeaders]
+  );
+
+  // Mermaidプレビュー用のレンダリング
+  const [mermaidSvg, setMermaidSvg] = useState<string | null>(null);
+
+  const renderMermaid = useCallback(async () => {
+    if (!mermaidCode) return;
+    try {
+      const { svg } = await mermaid.render('mermaid-preview', mermaidCode);
+      setMermaidSvg(svg);
+    } catch (err) {
+      console.error('Failed to render mermaid:', err);
+      setMermaidSvg(null);
+    }
+  }, [mermaidCode]);
+
+  useEffect(() => {
+    if (showMermaid && mermaidCode) {
+      renderMermaid();
+    }
+  }, [showMermaid, mermaidCode, renderMermaid]);
 
   if (loading) {
     return (
@@ -377,23 +469,45 @@ export default function ProjectFlowDetailPage() {
           onEdgeCreate={handleEdgeCreate}
           onEdgeDelete={handleEdgeDelete}
           onChildFlowCreate={handleChildFlowCreate}
+          onRoleReorder={handleRoleReorder}
+          onLaneHeightUpdate={handleLaneHeightUpdate}
         />
       </div>
 
-      {/* Mermaidモーダル */}
+      {/* Mermaidモーダル（プレビュー機能付き） */}
       {showMermaid && mermaidCode && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[85vh] overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <h3 className="font-bold text-gray-900">Mermaid出力</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowMermaid(false)}>
                 ✕
               </Button>
             </div>
-            <div className="p-4 overflow-auto max-h-[60vh]">
-              <pre className="bg-gray-50 p-4 rounded-lg text-sm overflow-x-auto">
-                <code>{mermaidCode}</code>
-              </pre>
+            <div className="grid grid-cols-2 gap-4 p-4 overflow-auto max-h-[65vh]">
+              {/* コード */}
+              <div>
+                <div className="text-sm font-medium text-gray-700 mb-2">コード</div>
+                <pre className="bg-gray-50 p-4 rounded-lg text-xs overflow-auto max-h-[50vh] border border-gray-200">
+                  <code>{mermaidCode}</code>
+                </pre>
+              </div>
+              {/* プレビュー */}
+              <div>
+                <div className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <Eye className="w-4 h-4" />
+                  プレビュー
+                </div>
+                <div className="bg-white p-4 rounded-lg border border-gray-200 overflow-auto max-h-[50vh]">
+                  {mermaidSvg ? (
+                    <div dangerouslySetInnerHTML={{ __html: mermaidSvg }} />
+                  ) : (
+                    <div className="text-gray-400 text-sm text-center py-8">
+                      プレビュー読み込み中...
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
               <Button
@@ -402,7 +516,17 @@ export default function ProjectFlowDetailPage() {
                   navigator.clipboard.writeText(mermaidCode);
                 }}
               >
-                コピー
+                コードをコピー
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // マークダウン形式でコピー
+                  const markdown = '```mermaid\n' + mermaidCode + '\n```';
+                  navigator.clipboard.writeText(markdown);
+                }}
+              >
+                Markdown形式でコピー
               </Button>
               <Button onClick={() => setShowMermaid(false)}>閉じる</Button>
             </div>

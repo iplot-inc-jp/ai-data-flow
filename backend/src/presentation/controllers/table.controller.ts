@@ -63,6 +63,20 @@ class CreateCrudMappingDto {
   description?: string;
 }
 
+// CSVインポートDTO
+class ImportCsvDto {
+  projectId: string;
+  csv: string;
+}
+
+// CSVインポート結果
+interface CsvImportResult {
+  success: boolean;
+  tablesCreated: number;
+  columnsCreated: number;
+  errors: string[];
+}
+
 @ApiTags('Tables')
 @ApiBearerAuth()
 @Controller('tables')
@@ -233,6 +247,193 @@ export class TableController {
   async deleteCrudMapping(@Param('id') id: string) {
     await this.crudMappingRepository.delete(id);
     return { success: true };
+  }
+
+  // ========== CSV Import ==========
+
+  @Post('import/csv')
+  @ApiOperation({ summary: 'CSVからテーブルとカラムをインポート' })
+  async importCsv(@Body() dto: ImportCsvDto): Promise<CsvImportResult> {
+    const errors: string[] = [];
+    let tablesCreated = 0;
+    let columnsCreated = 0;
+    const tableMap = new Map<string, string>(); // tableName -> tableId
+
+    try {
+      // CSVをパース
+      const lines = dto.csv.trim().split('\n');
+      if (lines.length < 2) {
+        return { success: false, tablesCreated: 0, columnsCreated: 0, errors: ['CSVにデータがありません'] };
+      }
+
+      // ヘッダー行を取得
+      const headers = this.parseCsvLine(lines[0]);
+      const requiredHeaders = ['table_name', 'column_name'];
+      for (const required of requiredHeaders) {
+        if (!headers.includes(required)) {
+          return { success: false, tablesCreated: 0, columnsCreated: 0, errors: [`必須ヘッダー "${required}" がありません`] };
+        }
+      }
+
+      // データ行を処理
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const values = this.parseCsvLine(line);
+        const row: Record<string, string> = {};
+        headers.forEach((h, idx) => {
+          row[h] = values[idx] || '';
+        });
+
+        const tableName = row['table_name'];
+        const columnName = row['column_name'];
+
+        if (!tableName || !columnName) {
+          errors.push(`行 ${i + 1}: テーブル名またはカラム名が空です`);
+          continue;
+        }
+
+        // テーブルが存在しない場合は作成
+        if (!tableMap.has(tableName)) {
+          try {
+            // 既存テーブルを確認
+            const existingTables = await this.tableRepository.findByProjectId(dto.projectId);
+            const existing = existingTables.find((t) => t.name === tableName);
+            
+            if (existing) {
+              tableMap.set(tableName, existing.id);
+            } else {
+              const table = Table.create({
+                id: uuid(),
+                projectId: dto.projectId,
+                name: tableName,
+                displayName: row['table_display_name'] || tableName,
+                description: row['table_description'],
+              });
+              const saved = await this.tableRepository.save(table);
+              tableMap.set(tableName, saved.id);
+              tablesCreated++;
+            }
+          } catch (err) {
+            errors.push(`行 ${i + 1}: テーブル "${tableName}" の作成に失敗: ${err}`);
+            continue;
+          }
+        }
+
+        // カラムを作成
+        const tableId = tableMap.get(tableName);
+        if (!tableId) continue;
+
+        try {
+          // 既存カラムを確認
+          const existingColumns = await this.columnRepository.findByTableId(tableId);
+          const existingColumn = existingColumns.find((c) => c.name === columnName);
+          
+          if (!existingColumn) {
+            const column = Column.create({
+              id: uuid(),
+              tableId,
+              name: columnName,
+              displayName: row['display_name'] || columnName,
+              dataType: this.parseDataType(row['data_type']),
+              description: row['description'],
+              isPrimaryKey: row['is_primary_key']?.toLowerCase() === 'true',
+              isForeignKey: row['is_foreign_key']?.toLowerCase() === 'true',
+              isNullable: row['is_nullable']?.toLowerCase() !== 'false',
+              isUnique: row['is_unique']?.toLowerCase() === 'true',
+              defaultValue: row['default_value'],
+              foreignKeyTable: row['foreign_key_table'],
+              foreignKeyColumn: row['foreign_key_column'],
+              order: existingColumns.length,
+            });
+            await this.columnRepository.save(column);
+            columnsCreated++;
+          }
+        } catch (err) {
+          errors.push(`行 ${i + 1}: カラム "${columnName}" の作成に失敗: ${err}`);
+        }
+      }
+
+      return {
+        success: errors.length === 0,
+        tablesCreated,
+        columnsCreated,
+        errors,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        tablesCreated,
+        columnsCreated,
+        errors: [...errors, `インポートエラー: ${err}`],
+      };
+    }
+  }
+
+  @Get('import/csv/template')
+  @ApiOperation({ summary: 'CSVインポート用テンプレートを取得' })
+  getCsvTemplate() {
+    const template = `table_name,column_name,display_name,data_type,description,is_primary_key,is_foreign_key,is_nullable,is_unique,default_value,foreign_key_table,foreign_key_column
+users,id,ユーザーID,UUID,ユーザーの一意識別子,true,false,false,true,,,
+users,email,メールアドレス,STRING,ユーザーのメールアドレス,false,false,false,true,,,
+users,name,名前,STRING,ユーザー名,false,false,true,false,,,
+users,created_at,作成日時,DATETIME,レコード作成日時,false,false,false,false,,,
+orders,id,注文ID,UUID,注文の一意識別子,true,false,false,true,,,
+orders,user_id,ユーザーID,UUID,注文したユーザー,false,true,false,false,,users,id
+orders,total_amount,合計金額,INTEGER,注文の合計金額,false,false,false,false,0,,`;
+
+    return {
+      template,
+      headers: [
+        'table_name',
+        'column_name', 
+        'display_name',
+        'data_type',
+        'description',
+        'is_primary_key',
+        'is_foreign_key',
+        'is_nullable',
+        'is_unique',
+        'default_value',
+        'foreign_key_table',
+        'foreign_key_column',
+      ],
+      dataTypes: ['STRING', 'INTEGER', 'FLOAT', 'BOOLEAN', 'DATE', 'DATETIME', 'JSON', 'TEXT', 'UUID'],
+    };
+  }
+
+  private parseCsvLine(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+
+    return result;
+  }
+
+  private parseDataType(value?: string): any {
+    const validTypes = ['STRING', 'INTEGER', 'FLOAT', 'BOOLEAN', 'DATE', 'DATETIME', 'JSON', 'TEXT', 'UUID'];
+    const upper = value?.toUpperCase() || 'STRING';
+    return validTypes.includes(upper) ? upper : 'STRING';
   }
 
   private toResponse(table: Table) {

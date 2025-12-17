@@ -61,5 +61,17 @@ export class RoleResponseDto {
 
   @ApiProperty({ example: '#3B82F6', nullable: true })
   color: string | null;
+
+  @ApiProperty({ example: 0, description: '表示順序' })
+  order?: number;
+
+  @ApiProperty({ example: 120, description: 'スイムレーンの高さ' })
+  laneHeight?: number;
+
+  @ApiProperty()
+  createdAt?: Date;
+
+  @ApiProperty()
+  updatedAt?: Date;
 }
 

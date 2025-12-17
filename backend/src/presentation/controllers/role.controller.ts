@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import {
   CreateRoleUseCase,
@@ -11,6 +11,15 @@ import {
 } from '../dto';
 import { Inject } from '@nestjs/common';
 import { ROLE_REPOSITORY, RoleRepository } from '../../domain';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+
+class UpdateRoleOrderDto {
+  roleIds: string[]; // 並び替え後のロールID配列
+}
+
+class UpdateRoleLaneHeightDto {
+  laneHeight: number;
+}
 
 @ApiTags('ロール')
 @ApiBearerAuth()
@@ -21,6 +30,7 @@ export class RoleController {
     private readonly getRolesUseCase: GetRolesUseCase,
     @Inject(ROLE_REPOSITORY)
     private readonly roleRepository: RoleRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get('project/:projectId')
@@ -59,6 +69,71 @@ export class RoleController {
     return {
       ...result,
       type: result.type as RoleTypeDto,
+    };
+  }
+
+  @Put('project/:projectId/order')
+  @ApiOperation({ summary: 'ロールの並び順を更新' })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiResponse({ status: 200, description: '更新成功' })
+  async updateOrder(
+    @Param('projectId') projectId: string,
+    @Body() dto: UpdateRoleOrderDto,
+  ): Promise<RoleResponseDto[]> {
+    // トランザクションで一括更新
+    await this.prisma.$transaction(
+      dto.roleIds.map((roleId, index) =>
+        this.prisma.role.update({
+          where: { id: roleId },
+          data: { order: index },
+        })
+      )
+    );
+
+    // 更新後のロール一覧を返す
+    const roles = await this.prisma.role.findMany({
+      where: { projectId },
+      orderBy: { order: 'asc' },
+    });
+
+    return roles.map((r) => ({
+      id: r.id,
+      projectId: r.projectId,
+      name: r.name,
+      type: r.type as RoleTypeDto,
+      description: r.description,
+      color: r.color,
+      order: r.order,
+      laneHeight: r.laneHeight,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
+  @Put(':id/lane-height')
+  @ApiOperation({ summary: 'ロールのレーン高さを更新' })
+  @ApiParam({ name: 'id', description: 'ロールID' })
+  @ApiResponse({ status: 200, description: '更新成功' })
+  async updateLaneHeight(
+    @Param('id') id: string,
+    @Body() dto: UpdateRoleLaneHeightDto,
+  ): Promise<RoleResponseDto> {
+    const role = await this.prisma.role.update({
+      where: { id },
+      data: { laneHeight: dto.laneHeight },
+    });
+
+    return {
+      id: role.id,
+      projectId: role.projectId,
+      name: role.name,
+      type: role.type as RoleTypeDto,
+      description: role.description,
+      color: role.color,
+      order: role.order,
+      laneHeight: role.laneHeight,
+      createdAt: role.createdAt,
+      updatedAt: role.updatedAt,
     };
   }
 

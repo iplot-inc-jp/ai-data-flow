@@ -24,6 +24,8 @@ export class RoleRepositoryImpl implements RoleRepository {
       type: data.type as RoleType,
       description: data.description,
       color: data.color,
+      order: data.order,
+      laneHeight: data.laneHeight,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     });
@@ -32,7 +34,7 @@ export class RoleRepositoryImpl implements RoleRepository {
   async findByProjectId(projectId: string): Promise<Role[]> {
     const data = await this.prisma.role.findMany({
       where: { projectId },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { order: 'asc' },
     });
 
     return data.map((r) =>
@@ -43,6 +45,8 @@ export class RoleRepositoryImpl implements RoleRepository {
         type: r.type as RoleType,
         description: r.description,
         color: r.color,
+        order: r.order,
+        laneHeight: r.laneHeight,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       }),
@@ -66,6 +70,8 @@ export class RoleRepositoryImpl implements RoleRepository {
       type: data.type as RoleType,
       description: data.description,
       color: data.color,
+      order: data.order,
+      laneHeight: data.laneHeight,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     });
@@ -91,6 +97,8 @@ export class RoleRepositoryImpl implements RoleRepository {
         type: role.type,
         description: role.description,
         color: role.color,
+        order: role.order,
+        laneHeight: role.laneHeight,
         createdAt: role.createdAt,
         updatedAt: role.updatedAt,
       },
@@ -99,6 +107,8 @@ export class RoleRepositoryImpl implements RoleRepository {
         type: role.type,
         description: role.description,
         color: role.color,
+        order: role.order,
+        laneHeight: role.laneHeight,
         updatedAt: role.updatedAt,
       },
     });

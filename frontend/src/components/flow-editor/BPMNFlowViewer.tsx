@@ -41,6 +41,7 @@ import {
   Trash2,
   ChevronUp,
   ChevronDown,
+  GripHorizontal,
 } from 'lucide-react';
 
 // 型定義
@@ -62,6 +63,7 @@ export type Role = {
   color: string;
   type: string;
   order?: number;
+  laneHeight?: number;
 };
 
 export type FlowData = {
@@ -93,9 +95,11 @@ export type FlowData = {
   breadcrumbs: Array<{ id: string; name: string }>;
 };
 
-// スイムレーンの高さ
-const SWIMLANE_HEIGHT = 120;
+// スイムレーンの設定
+const DEFAULT_SWIMLANE_HEIGHT = 120;
 const SWIMLANE_HEADER_WIDTH = 100;
+const MIN_LANE_HEIGHT = 60;
+const MAX_LANE_HEIGHT = 400;
 
 // カスタムノードコンポーネント
 function CustomNode({ data, selected }: { data: FlowNodeData; id: string; selected?: boolean }) {
@@ -247,18 +251,62 @@ const edgeTypes = {
   editable: EditableEdge,
 };
 
-// スイムレーンヘッダーコンポーネント（ズーム対応）
+// 各ロールのY座標オフセットを計算するヘルパー
+function getRoleLaneOffsets(roles: Role[]): { roleId: string; top: number; height: number }[] {
+  let currentTop = 0;
+  return roles.map((role) => {
+    const height = role.laneHeight ?? DEFAULT_SWIMLANE_HEIGHT;
+    const offset = { roleId: role.id, top: currentTop, height };
+    currentTop += height;
+    return offset;
+  });
+}
+
+// スイムレーンヘッダーコンポーネント（ズーム対応、リサイズ対応）
 function SwimLaneHeaders({
   roles,
   viewport,
   onRoleReorder,
+  onLaneHeightUpdate,
 }: {
   roles: Role[];
   viewport: { x: number; y: number; zoom: number };
   onRoleReorder?: (roleId: string, direction: 'up' | 'down') => void;
+  onLaneHeightUpdate?: (roleId: string, height: number) => void;
 }) {
-  const scaledHeight = SWIMLANE_HEIGHT * viewport.zoom;
-  const offsetY = viewport.y;
+  const [resizing, setResizing] = useState<{ roleId: string; startY: number; startHeight: number } | null>(null);
+  const offsets = getRoleLaneOffsets(roles);
+
+  // リサイズハンドラー
+  const handleResizeStart = useCallback((e: React.MouseEvent, roleId: string, currentHeight: number) => {
+    e.preventDefault();
+    setResizing({ roleId, startY: e.clientY, startHeight: currentHeight });
+  }, []);
+
+  useEffect(() => {
+    if (!resizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaY = (e.clientY - resizing.startY) / viewport.zoom;
+      const newHeight = Math.max(MIN_LANE_HEIGHT, Math.min(MAX_LANE_HEIGHT, resizing.startHeight + deltaY));
+      
+      if (onLaneHeightUpdate) {
+        onLaneHeightUpdate(resizing.roleId, Math.round(newHeight));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setResizing(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizing, viewport.zoom, onLaneHeightUpdate]);
 
   return (
     <div 
@@ -271,68 +319,91 @@ function SwimLaneHeaders({
         zIndex: 20,
       }}
     >
-      {roles.map((role, index) => (
-        <div
-          key={role.id}
-          className="absolute flex items-center justify-between font-medium text-xs border-b group"
-          style={{
-            height: scaledHeight,
-            top: offsetY + index * scaledHeight,
-            left: 0,
-            width: SWIMLANE_HEADER_WIDTH,
-            backgroundColor: `${role.color}15`,
-            borderColor: '#e2e8f0',
-            color: role.color,
-            transition: 'top 0.1s ease-out, height 0.1s ease-out',
-          }}
-        >
-          <span className="truncate px-2 flex-1">{role.name}</span>
-          {onRoleReorder && (
-            <div className="flex flex-col opacity-0 group-hover:opacity-100 transition-opacity pr-1">
-              {index > 0 && (
-                <button
-                  onClick={() => onRoleReorder(role.id, 'up')}
-                  className="p-0.5 hover:bg-white/50 rounded"
-                  title="上に移動"
-                >
-                  <ChevronUp className="w-3 h-3" />
-                </button>
-              )}
-              {index < roles.length - 1 && (
-                <button
-                  onClick={() => onRoleReorder(role.id, 'down')}
-                  className="p-0.5 hover:bg-white/50 rounded"
-                  title="下に移動"
-                >
-                  <ChevronDown className="w-3 h-3" />
-                </button>
+      {roles.map((role, index) => {
+        const offset = offsets[index];
+        const scaledTop = viewport.y + offset.top * viewport.zoom;
+        const scaledHeight = offset.height * viewport.zoom;
+
+        return (
+          <div
+            key={role.id}
+            className="absolute flex flex-col font-medium text-xs border-b group"
+            style={{
+              height: scaledHeight,
+              top: scaledTop,
+              left: 0,
+              width: SWIMLANE_HEADER_WIDTH,
+              backgroundColor: `${role.color}15`,
+              borderColor: '#e2e8f0',
+              color: role.color,
+              transition: resizing ? 'none' : 'top 0.1s ease-out, height 0.1s ease-out',
+            }}
+          >
+            <div className="flex items-center justify-between flex-1 px-1">
+              <span className="truncate flex-1 text-center">{role.name}</span>
+              {onRoleReorder && (
+                <div className="flex flex-col opacity-0 group-hover:opacity-100 transition-opacity">
+                  {index > 0 && (
+                    <button
+                      onClick={() => onRoleReorder(role.id, 'up')}
+                      className="p-0.5 hover:bg-white/50 rounded"
+                      title="上に移動"
+                    >
+                      <ChevronUp className="w-3 h-3" />
+                    </button>
+                  )}
+                  {index < roles.length - 1 && (
+                    <button
+                      onClick={() => onRoleReorder(role.id, 'down')}
+                      className="p-0.5 hover:bg-white/50 rounded"
+                      title="下に移動"
+                    >
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
-      ))}
+            {/* リサイズハンドル */}
+            {onLaneHeightUpdate && (
+              <div
+                className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize opacity-0 group-hover:opacity-100 flex items-center justify-center bg-gray-200/50 hover:bg-gray-300/50"
+                onMouseDown={(e) => handleResizeStart(e, role.id, offset.height)}
+                title="ドラッグして高さを調整"
+              >
+                <GripHorizontal className="w-4 h-3 text-gray-500" />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 // スイムレーン背景コンポーネント（React Flow内で使用）
 function SwimLaneBackgrounds({ roles }: { roles: Role[] }) {
+  const offsets = getRoleLaneOffsets(roles);
+  
   return (
     <>
-      {roles.map((role, index) => (
-        <div
-          key={role.id}
-          className="absolute border-b pointer-events-none"
-          style={{
-            top: index * SWIMLANE_HEIGHT,
-            left: 0,
-            right: 0,
-            height: SWIMLANE_HEIGHT,
-            backgroundColor: `${role.color}05`,
-            borderColor: `${role.color}20`,
-          }}
-        />
-      ))}
+      {roles.map((role, index) => {
+        const offset = offsets[index];
+        return (
+          <div
+            key={role.id}
+            className="absolute border-b pointer-events-none"
+            style={{
+              top: offset.top,
+              left: 0,
+              right: 0,
+              height: offset.height,
+              backgroundColor: `${role.color}05`,
+              borderColor: `${role.color}20`,
+            }}
+          />
+        );
+      })}
     </>
   );
 }
@@ -353,6 +424,7 @@ function BPMNFlowViewerInner({
   onEdgeDelete,
   onChildFlowCreate,
   onRoleReorder,
+  onLaneHeightUpdate,
 }: {
   flowData: FlowData;
   roles: Role[];
@@ -368,6 +440,7 @@ function BPMNFlowViewerInner({
   onEdgeDelete?: (edgeId: string) => void;
   onChildFlowCreate?: (nodeId: string, name?: string) => void;
   onRoleReorder?: (roleId: string, direction: 'up' | 'down') => void;
+  onLaneHeightUpdate?: (roleId: string, height: number) => void;
 }) {
   const { fitView, screenToFlowPosition } = useReactFlow();
   const viewport = useViewport();
@@ -386,26 +459,36 @@ function BPMNFlowViewerInner({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // ロールIDからY座標を計算
+  // ロールのオフセット情報を取得
+  const roleOffsets = useMemo(() => getRoleLaneOffsets(roles), [roles]);
+
+  // ロールIDからY座標を計算（各ロールの高さを考慮）
   const getRoleY = useCallback(
     (roleId?: string) => {
-      if (!roleId || roles.length === 0) return SWIMLANE_HEIGHT / 2;
-      const roleIndex = roles.findIndex((r) => r.id === roleId);
-      if (roleIndex === -1) return SWIMLANE_HEIGHT / 2;
-      return roleIndex * SWIMLANE_HEIGHT + SWIMLANE_HEIGHT / 2;
+      if (!roleId || roles.length === 0) return DEFAULT_SWIMLANE_HEIGHT / 2;
+      const offset = roleOffsets.find((o) => o.roleId === roleId);
+      if (!offset) return DEFAULT_SWIMLANE_HEIGHT / 2;
+      return offset.top + offset.height / 2;
     },
-    [roles]
+    [roles, roleOffsets]
   );
 
-  // Y座標からロールIDを計算
+  // Y座標からロールIDを計算（各ロールの高さを考慮）
   const getRoleIdFromY = useCallback(
     (y: number) => {
       if (roles.length === 0) return undefined;
-      const roleIndex = Math.floor(y / SWIMLANE_HEIGHT);
-      if (roleIndex < 0 || roleIndex >= roles.length) return undefined;
-      return roles[roleIndex].id;
+      for (const offset of roleOffsets) {
+        if (y >= offset.top && y < offset.top + offset.height) {
+          return offset.roleId;
+        }
+      }
+      // 範囲外の場合は最後のロール
+      if (y >= roleOffsets[roleOffsets.length - 1]?.top) {
+        return roleOffsets[roleOffsets.length - 1]?.roleId;
+      }
+      return roleOffsets[0]?.roleId;
     },
-    [roles]
+    [roles, roleOffsets]
   );
 
   // ノードとエッジを変換
@@ -638,6 +721,7 @@ function BPMNFlowViewerInner({
         roles={roles} 
         viewport={viewport}
         onRoleReorder={onRoleReorder}
+        onLaneHeightUpdate={onLaneHeightUpdate}
       />
 
       <div style={{ marginLeft: SWIMLANE_HEADER_WIDTH, height: '100%' }}>
@@ -928,6 +1012,7 @@ export function BPMNFlowViewer(props: {
   onEdgeDelete?: (edgeId: string) => void;
   onChildFlowCreate?: (nodeId: string, name?: string) => void;
   onRoleReorder?: (roleId: string, direction: 'up' | 'down') => void;
+  onLaneHeightUpdate?: (roleId: string, height: number) => void;
 }) {
   return (
     <ReactFlowProvider>

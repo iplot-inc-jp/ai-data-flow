@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -16,7 +17,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft } from 'lucide-react';
+import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -36,8 +37,18 @@ export default function ProjectCatalogPage() {
   const [tables, setTables] = useState<TableData[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [newTable, setNewTable] = useState({ name: '', displayName: '', description: '' });
+  const [csvContent, setCsvContent] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    success: boolean;
+    tablesCreated: number;
+    columnsCreated: number;
+    errors: string[];
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
@@ -92,6 +103,84 @@ export default function ProjectCatalogPage() {
     }
   };
 
+  // CSVテンプレートをダウンロード
+  const handleDownloadTemplate = async () => {
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/tables/import/csv/template`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        const blob = new Blob([data.template], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'data_catalog_template.csv';
+        link.click();
+      }
+    } catch (err) {
+      console.error('Failed to download template:', err);
+    }
+  };
+
+  // ファイル選択ハンドラー
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target?.result as string;
+        setCsvContent(content);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  // CSVインポート実行
+  const handleImportCsv = async () => {
+    if (!csvContent.trim()) return;
+
+    setImporting(true);
+    setImportResult(null);
+
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/tables/import/csv`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          projectId,
+          csv: csvContent,
+        }),
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        setImportResult(result);
+        if (result.success || result.tablesCreated > 0 || result.columnsCreated > 0) {
+          await fetchTables();
+        }
+      }
+    } catch (err) {
+      setImportResult({
+        success: false,
+        tablesCreated: 0,
+        columnsCreated: 0,
+        errors: ['インポートに失敗しました'],
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // インポートダイアログを閉じる
+  const closeImportDialog = () => {
+    setIsImportDialogOpen(false);
+    setCsvContent('');
+    setImportResult(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const filteredTables = tables.filter(
     (table) =>
       table.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -123,13 +212,145 @@ export default function ProjectCatalogPage() {
             <p className="text-gray-500 mt-1">テーブルとカラムのメタデータを管理</p>
           </div>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-blue-600 hover:bg-blue-700">
-              <Plus className="h-4 w-4 mr-2" />
-              テーブル追加
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          {/* CSVインポートボタン */}
+          <Dialog open={isImportDialogOpen} onOpenChange={(open) => {
+            if (!open) closeImportDialog();
+            else setIsImportDialogOpen(true);
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="border-gray-300">
+                <Upload className="h-4 w-4 mr-2" />
+                CSVインポート
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-white border-gray-200 max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-gray-900">CSVからインポート</DialogTitle>
+                <DialogDescription className="text-gray-500">
+                  CSVファイルからテーブルとカラムを一括インポートします
+                </DialogDescription>
+              </DialogHeader>
+              
+              {!importResult ? (
+                <div className="space-y-4 py-4">
+                  {/* テンプレートダウンロード */}
+                  <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-blue-600" />
+                      <span className="text-sm text-blue-700">CSVテンプレート</span>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                      <Download className="h-4 w-4 mr-1" />
+                      ダウンロード
+                    </Button>
+                  </div>
+
+                  {/* ファイル選択 */}
+                  <div className="space-y-2">
+                    <Label className="text-gray-700">CSVファイルを選択</Label>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileSelect}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                  </div>
+
+                  {/* CSVプレビュー/編集 */}
+                  <div className="space-y-2">
+                    <Label className="text-gray-700">CSVデータ（直接編集も可能）</Label>
+                    <Textarea
+                      value={csvContent}
+                      onChange={(e) => setCsvContent(e.target.value)}
+                      placeholder={`table_name,column_name,display_name,data_type,description,is_primary_key,is_foreign_key,is_nullable,is_unique,default_value,foreign_key_table,foreign_key_column
+users,id,ユーザーID,UUID,ユーザーの識別子,true,false,false,true,,,
+users,email,メールアドレス,STRING,メールアドレス,false,false,false,true,,,`}
+                      className="bg-white border-gray-300 text-gray-900 font-mono text-xs h-48"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="py-6">
+                  {/* インポート結果 */}
+                  <div className={`p-4 rounded-lg ${importResult.success ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                    <div className="flex items-center gap-2 mb-3">
+                      {importResult.success ? (
+                        <Check className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <AlertCircle className="h-5 w-5 text-amber-600" />
+                      )}
+                      <span className={`font-medium ${importResult.success ? 'text-green-700' : 'text-amber-700'}`}>
+                        {importResult.success ? 'インポート完了' : '一部エラーあり'}
+                      </span>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <p className="text-gray-700">
+                        作成されたテーブル: <strong>{importResult.tablesCreated}</strong>
+                      </p>
+                      <p className="text-gray-700">
+                        作成されたカラム: <strong>{importResult.columnsCreated}</strong>
+                      </p>
+                    </div>
+                    {importResult.errors.length > 0 && (
+                      <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm">
+                        <p className="font-medium text-red-700 mb-1">エラー:</p>
+                        <ul className="list-disc list-inside text-red-600 text-xs space-y-1">
+                          {importResult.errors.slice(0, 5).map((err, i) => (
+                            <li key={i}>{err}</li>
+                          ))}
+                          {importResult.errors.length > 5 && (
+                            <li>...他 {importResult.errors.length - 5} 件のエラー</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter>
+                {!importResult ? (
+                  <>
+                    <Button variant="outline" onClick={closeImportDialog} className="border-gray-300 text-gray-700">
+                      キャンセル
+                    </Button>
+                    <Button
+                      className="bg-blue-600 hover:bg-blue-700"
+                      onClick={handleImportCsv}
+                      disabled={!csvContent.trim() || importing}
+                    >
+                      {importing ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          インポート中...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          インポート実行
+                        </>
+                      )}
+                    </Button>
+                  </>
+                ) : (
+                  <Button onClick={closeImportDialog}>
+                    閉じる
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* テーブル追加ボタン */}
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-blue-600 hover:bg-blue-700">
+                <Plus className="h-4 w-4 mr-2" />
+                テーブル追加
+              </Button>
+            </DialogTrigger>
           <DialogContent className="bg-white border-gray-200">
             <DialogHeader>
               <DialogTitle className="text-gray-900">新規テーブル作成</DialogTitle>
@@ -179,6 +400,7 @@ export default function ProjectCatalogPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Search */}

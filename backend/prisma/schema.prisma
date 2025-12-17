@@ -24,6 +24,7 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   organizationMembers OrganizationMember[]
+  settings           UserSetting?
 
   @@map("users")
 }
@@ -81,6 +82,7 @@ model Project {
   tables        Table[]
   roles         Role[]
   businessFlows BusinessFlow[]
+  requirements  Requirement[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -97,6 +99,8 @@ model Role {
   type        RoleType @default(HUMAN)
   description String?
   color       String?
+  order       Int      @default(0)
+  laneHeight  Int      @default(120) @map("lane_height") // スイムレーンの高さ
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -198,6 +202,7 @@ model BusinessFlow {
   // この業務フローに紐づく業務ブロック（親フローのノード）
   parentNode   FlowNode?      @relation("NodeChildFlow")
   crudMappings CrudMapping[]
+  requirementMappings RequirementFlowMapping[]
 
   @@map("business_flows")
 }
@@ -225,6 +230,7 @@ model FlowNode {
   crudMappings  CrudMapping[]
   sourceEdges   FlowEdge[]     @relation("SourceNode")
   targetEdges   FlowEdge[]     @relation("TargetNode")
+  requirementMappings RequirementFlowMapping[]
 
   @@map("flow_nodes")
 }
@@ -286,6 +292,7 @@ model CrudMapping {
   role     Role          @relation(fields: [roleId], references: [id], onDelete: Cascade)
   flow     BusinessFlow? @relation(fields: [flowId], references: [id], onDelete: SetNull)
   flowNode FlowNode?     @relation(fields: [flowNodeId], references: [id], onDelete: SetNull)
+  requirementMappings RequirementCrudMapping[]
 
   @@map("crud_mappings")
 }
@@ -337,4 +344,114 @@ model InterfaceColumn {
 
   @@unique([interfaceId, columnId])
   @@map("interface_columns")
+}
+
+// ===========================================
+// ユーザー設定（APIキー等）
+// ===========================================
+
+model UserSetting {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  // API Keys（暗号化して保存）
+  anthropicApiKey String? @map("anthropic_api_key")
+  openaiApiKey    String? @map("openai_api_key")
+  // その他の設定
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+// ===========================================
+// 要求定義（階層構造）
+// ===========================================
+
+model Requirement {
+  id          String            @id @default(uuid())
+  projectId   String            @map("project_id")
+  // 階層構造
+  parentId    String?           @map("parent_id")
+  depth       Int               @default(0)
+  order       Int               @default(0)
+  // 要求内容
+  code        String?           // 要求番号（例：REQ-001）
+  title       String
+  description String?           @db.Text
+  // 元の自然言語入力
+  originalText String?          @map("original_text") @db.Text
+  // 要求タイプ
+  type        RequirementType   @default(FUNCTIONAL)
+  priority    RequirementPriority @default(MEDIUM)
+  status      RequirementStatus @default(DRAFT)
+  // メタデータ
+  metadata    Json              @default("{}")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent   Requirement?  @relation("RequirementHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Requirement[] @relation("RequirementHierarchy")
+  
+  // 業務フロー・CRUDとの紐付け
+  flowMappings    RequirementFlowMapping[]
+  crudMappings    RequirementCrudMapping[]
+
+  @@map("requirements")
+}
+
+enum RequirementType {
+  FUNCTIONAL        // 機能要求
+  NON_FUNCTIONAL    // 非機能要求
+  BUSINESS_RULE     // ビジネスルール
+  CONSTRAINT        // 制約
+  INTERFACE         // インターフェース要求
+  DATA              // データ要求
+}
+
+enum RequirementPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum RequirementStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  IMPLEMENTED
+  VERIFIED
+}
+
+// 要求と業務フローの紐付け
+model RequirementFlowMapping {
+  id            String @id @default(uuid())
+  requirementId String @map("requirement_id")
+  flowId        String @map("flow_id")
+  flowNodeId    String? @map("flow_node_id")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  requirement Requirement  @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  flow        BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  flowNode    FlowNode?    @relation(fields: [flowNodeId], references: [id], onDelete: SetNull)
+
+  @@map("requirement_flow_mappings")
+}
+
+// 要求とCRUDマッピングの紐付け
+model RequirementCrudMapping {
+  id            String @id @default(uuid())
+  requirementId String @map("requirement_id")
+  crudMappingId String @map("crud_mapping_id")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  requirement Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  crudMapping CrudMapping @relation(fields: [crudMappingId], references: [id], onDelete: Cascade)
+
+  @@map("requirement_crud_mappings")
 }

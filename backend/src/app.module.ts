@@ -60,6 +60,9 @@ import {
   DomainExceptionFilter,
 } from './presentation';
 import { HealthController } from './presentation/controllers/health.controller';
+import { RequirementController } from './presentation/controllers/requirement.controller';
+import { UserSettingsController } from './presentation/controllers/user-settings.controller';
+import { ClaudeService } from './infrastructure/services/claude.service';
 
 @Module({
   imports: [
@@ -87,6 +90,8 @@ import { HealthController } from './presentation/controllers/health.controller';
     RoleController,
     TableController,
     BusinessFlowController,
+    RequirementController,
+    UserSettingsController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -147,6 +152,9 @@ import { HealthController } from './presentation/controllers/health.controller';
     GetProjectsUseCase,
     CreateRoleUseCase,
     GetRolesUseCase,
+
+    // ========== Services ==========
+    ClaudeService,
 
     // ========== Global Guards ==========
     {
