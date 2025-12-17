@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Put, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { IsArray, IsString, IsNumber, IsOptional } from 'class-validator';
 import {
   CreateRoleUseCase,
   GetRolesUseCase,
@@ -14,10 +15,13 @@ import { ROLE_REPOSITORY, RoleRepository } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 
 class UpdateRoleOrderDto {
+  @IsArray()
+  @IsString({ each: true })
   roleIds: string[]; // 並び替え後のロールID配列
 }
 
 class UpdateRoleLaneHeightDto {
+  @IsNumber()
   laneHeight: number;
 }
 
@@ -57,7 +61,7 @@ export class RoleController {
   @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
   @ApiResponse({ status: 409, description: '同名のロールが既に存在します' })
   async create(
-    @Body() dto: CreateRoleRequestDto & { projectId: string },
+    @Body() dto: CreateRoleRequestDto,
   ): Promise<RoleResponseDto> {
     const result = await this.createRoleUseCase.execute({
       projectId: dto.projectId,

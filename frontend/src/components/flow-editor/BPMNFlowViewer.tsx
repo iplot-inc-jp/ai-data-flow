@@ -101,6 +101,72 @@ const SWIMLANE_HEADER_WIDTH = 100;
 const MIN_LANE_HEIGHT = 60;
 const MAX_LANE_HEIGHT = 400;
 
+// 各ロールのY座標オフセットを計算するヘルパー
+function getRoleLaneOffsets(roles: Role[]): { roleId: string; top: number; height: number }[] {
+  let currentTop = 0;
+  return roles.map((role) => {
+    const height = role.laneHeight ?? DEFAULT_SWIMLANE_HEIGHT;
+    const offset = { roleId: role.id, top: currentTop, height };
+    currentTop += height;
+    return offset;
+  });
+}
+
+// スイムレーン背景コンポーネント（ビューポート変換対応）
+function SwimLaneBackground({
+  roles,
+  viewport,
+}: {
+  roles: Role[];
+  viewport: { x: number; y: number; zoom: number };
+}) {
+  const offsets = getRoleLaneOffsets(roles);
+  const totalHeight = offsets.reduce((sum, o) => sum + o.height, 0);
+  const LARGE_WIDTH = 10000; // 十分大きな幅
+
+  return (
+    <div
+      className="absolute pointer-events-none"
+      style={{
+        left: 0,
+        top: 0,
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        zIndex: 0,
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          left: viewport.x,
+          top: viewport.y,
+          transform: `scale(${viewport.zoom})`,
+          transformOrigin: '0 0',
+        }}
+      >
+        {roles.map((role, index) => {
+          const offset = offsets[index];
+          return (
+            <div
+              key={role.id}
+              style={{
+                position: 'absolute',
+                left: -LARGE_WIDTH / 2,
+                top: offset.top,
+                width: LARGE_WIDTH,
+                height: offset.height,
+                backgroundColor: `${role.color}08`,
+                borderBottom: `2px solid ${role.color}30`,
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // カスタムノードコンポーネント
 function CustomNode({ data, selected }: { data: FlowNodeData; id: string; selected?: boolean }) {
   const getNodeStyle = () => {
@@ -250,17 +316,6 @@ const nodeTypes = {
 const edgeTypes = {
   editable: EditableEdge,
 };
-
-// 各ロールのY座標オフセットを計算するヘルパー
-function getRoleLaneOffsets(roles: Role[]): { roleId: string; top: number; height: number }[] {
-  let currentTop = 0;
-  return roles.map((role) => {
-    const height = role.laneHeight ?? DEFAULT_SWIMLANE_HEIGHT;
-    const offset = { roleId: role.id, top: currentTop, height };
-    currentTop += height;
-    return offset;
-  });
-}
 
 // スイムレーンヘッダーコンポーネント（ズーム対応、リサイズ対応）
 function SwimLaneHeaders({

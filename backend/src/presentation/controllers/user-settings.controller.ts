@@ -5,16 +5,24 @@ import {
   Body,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { IsString, IsOptional, IsObject } from 'class-validator';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { v4 as uuid } from 'uuid';
 
 class UpdateApiKeysDto {
+  @IsOptional()
+  @IsString()
   anthropicApiKey?: string;
+
+  @IsOptional()
+  @IsString()
   openaiApiKey?: string;
 }
 
 class UpdateSettingsDto {
+  @IsOptional()
+  @IsObject()
   settings?: Record<string, any>;
 }
 

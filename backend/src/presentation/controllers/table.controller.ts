@@ -9,6 +9,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsArray, IsIn } from 'class-validator';
 import {
   TABLE_REPOSITORY,
   ITableRepository,
@@ -23,49 +24,131 @@ import { v4 as uuid } from 'uuid';
 
 // DTOs
 class CreateTableDto {
+  @IsString()
   projectId: string;
+
+  @IsString()
   name: string;
+
+  @IsOptional()
+  @IsString()
   displayName?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   tags?: string[];
 }
 
 class UpdateTableDto {
+  @IsOptional()
+  @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
   displayName?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   tags?: string[];
 }
 
 class CreateColumnDto {
+  @IsString()
   name: string;
+
+  @IsOptional()
+  @IsString()
   displayName?: string;
+
+  @IsOptional()
+  @IsString()
   dataType?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsBoolean()
   isPrimaryKey?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   isForeignKey?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   isNullable?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   isUnique?: boolean;
+
+  @IsOptional()
+  @IsString()
   defaultValue?: string;
+
+  @IsOptional()
+  @IsString()
   foreignKeyTable?: string;
+
+  @IsOptional()
+  @IsString()
   foreignKeyColumn?: string;
+
+  @IsOptional()
+  @IsNumber()
   order?: number;
 }
 
 class CreateCrudMappingDto {
+  @IsString()
   columnId: string;
+
+  @IsIn(['CREATE', 'READ', 'UPDATE', 'DELETE'])
   operation: 'CREATE' | 'READ' | 'UPDATE' | 'DELETE';
+
+  @IsString()
   roleId: string;
+
+  @IsOptional()
+  @IsString()
   flowId?: string;
+
+  @IsOptional()
+  @IsString()
   flowNodeId?: string;
+
+  @IsOptional()
+  @IsString()
   how?: string;
+
+  @IsOptional()
+  @IsString()
   condition?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 }
 
 // CSVインポートDTO
 class ImportCsvDto {
+  @IsString()
   projectId: string;
+
+  @IsString()
   csv: string;
 }
 

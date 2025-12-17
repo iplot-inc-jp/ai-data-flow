@@ -11,6 +11,10 @@ export enum RoleTypeDto {
  * ロール作成リクエストDTO
  */
 export class CreateRoleRequestDto {
+  @ApiProperty({ example: 'uuid-project-xxxx', description: 'プロジェクトID' })
+  @IsString()
+  projectId: string;
+
   @ApiProperty({ example: '管理者', description: 'ロール名' })
   @IsString()
   @MinLength(1, { message: 'ロール名は必須です' })

@@ -10,6 +10,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { IsString, IsOptional, IsNumber } from 'class-validator';
 import {
   BUSINESS_FLOW_REPOSITORY,
   IBusinessFlowRepository,
@@ -26,49 +27,113 @@ import { v4 as uuid } from 'uuid';
 
 // DTOs
 class CreateBusinessFlowDto {
+  @IsString()
   projectId: string;
+
+  @IsString()
   name: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
   parentId?: string;
 }
 
 class UpdateBusinessFlowDto {
+  @IsOptional()
+  @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 }
 
 class CreateFlowNodeDto {
+  @IsOptional()
+  @IsString()
   type?: string;
+
+  @IsString()
   label: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsNumber()
   positionX: number;
+
+  @IsNumber()
   positionY: number;
+
+  @IsOptional()
+  @IsString()
   roleId?: string;
 }
 
 class UpdateFlowNodeDto {
+  @IsOptional()
+  @IsString()
   type?: string;
+
+  @IsOptional()
+  @IsString()
   label?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsNumber()
   positionX?: number;
+
+  @IsOptional()
+  @IsNumber()
   positionY?: number;
+
+  @IsOptional()
+  @IsString()
   roleId?: string;
 }
 
 class CreateFlowEdgeDto {
+  @IsString()
   sourceNodeId: string;
+
+  @IsString()
   targetNodeId: string;
+
+  @IsOptional()
+  @IsString()
   label?: string;
+
+  @IsOptional()
+  @IsString()
   condition?: string;
 }
 
 class UpdateFlowEdgeDto {
+  @IsOptional()
+  @IsString()
   label?: string;
+
+  @IsOptional()
+  @IsString()
   condition?: string;
 }
 
 class CreateChildFlowDto {
-  name: string;
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 }
 
