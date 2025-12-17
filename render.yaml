@@ -12,7 +12,7 @@ services:
     runtime: node
     region: singapore
     plan: free
-    buildCommand: cd backend && pnpm install && pnpm prisma generate && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm build
+    buildCommand: cd backend && pnpm install && pnpm prisma generate && pnpm prisma migrate resolve --rolled-back 20241217000001_add_requirements_and_user_settings || true && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm build
     startCommand: cd backend && pnpm start:prod
     healthCheckPath: /api/health
     envVars:
