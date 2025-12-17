@@ -7,9 +7,20 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // Enable CORS
+  const allowedOrigins: string[] = [
+    'http://localhost:3000',
+    'http://localhost:3003',
+    'https://dataflow-frontend-05c3.onrender.com',
+  ];
+  if (process.env.FRONTEND_URL) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+  }
+  
   app.enableCors({
-    origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:3003'],
+    origin: allowedOrigins,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
 
   // Global validation pipe
