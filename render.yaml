@@ -46,7 +46,4 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: dataflow-backend
-          property: host
+        value: https://dataflow-backend-gntx.onrender.com
