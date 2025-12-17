@@ -16,6 +16,7 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeft,
+  FileText,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState, useMemo, useEffect } from 'react'
@@ -84,6 +85,7 @@ export default function DashboardLayout({
       const projectNav = [
         { name: 'データカタログ', href: `/dashboard/projects/${projectId}/catalog`, icon: Database },
         { name: '業務フロー', href: `/dashboard/projects/${projectId}/flows`, icon: GitBranch },
+        { name: '要求定義', href: `/dashboard/projects/${projectId}/requirements`, icon: FileText },
         { name: 'ロール', href: `/dashboard/projects/${projectId}/roles`, icon: Users },
         { name: 'プロジェクト設定', href: `/dashboard/projects/${projectId}/settings`, icon: Settings },
       ]
