@@ -27,19 +27,20 @@ import {
   EdgeProps,
   Handle,
   Position,
+  useViewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 import {
   ChevronLeft,
   Layers,
   Edit,
   Plus,
-  Copy,
   Trash2,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 
 // 型定義
@@ -60,6 +61,7 @@ export type Role = {
   name: string;
   color: string;
   type: string;
+  order?: number;
 };
 
 export type FlowData = {
@@ -98,70 +100,47 @@ const SWIMLANE_HEADER_WIDTH = 100;
 // カスタムノードコンポーネント
 function CustomNode({ data, selected }: { data: FlowNodeData; id: string; selected?: boolean }) {
   const getNodeStyle = () => {
-    const baseStyle = `px-4 py-2 rounded-lg border-2 shadow-md min-w-[100px] text-center transition-all ${
-      selected ? 'ring-2 ring-blue-500 ring-offset-2' : ''
-    }`;
+    const baseClasses = 'px-3 py-2 rounded-lg border-2 shadow-sm min-w-[100px] text-center transition-all';
+    const selectedClasses = selected ? 'ring-2 ring-blue-500 ring-offset-2' : '';
 
     switch (data.type) {
       case 'START':
-        return `${baseStyle} bg-green-100 border-green-500 text-green-800 rounded-full`;
+        return `${baseClasses} ${selectedClasses} bg-emerald-50 border-emerald-400 text-emerald-700`;
       case 'END':
-        return `${baseStyle} bg-red-100 border-red-500 text-red-800 rounded-full`;
+        return `${baseClasses} ${selectedClasses} bg-rose-50 border-rose-400 text-rose-700`;
       case 'DECISION':
-        return `${baseStyle} bg-amber-100 border-amber-500 text-amber-800`;
+        return `${baseClasses} ${selectedClasses} bg-amber-50 border-amber-400 text-amber-700 rotate-0`;
       case 'SYSTEM_INTEGRATION':
-        return `${baseStyle} bg-purple-100 border-purple-500 text-purple-800`;
-      case 'MANUAL_OPERATION':
-        return `${baseStyle} bg-orange-100 border-orange-500 text-orange-800`;
-      case 'DATA_STORE':
-        return `${baseStyle} bg-cyan-100 border-cyan-500 text-cyan-800 rounded-b-3xl`;
-      case 'BUSINESS_BLOCK':
-        return `${baseStyle} bg-indigo-100 border-indigo-500 text-indigo-800`;
+        return `${baseClasses} ${selectedClasses} bg-violet-50 border-violet-400 text-violet-700`;
       default:
-        return `${baseStyle} bg-blue-100 border-blue-500 text-blue-800`;
+        return `${baseClasses} ${selectedClasses} bg-sky-50 border-sky-400 text-sky-700`;
     }
   };
 
-  // DECISION ノードはひし形にする
-  if (data.type === 'DECISION') {
-    return (
-      <div className="relative" style={{ width: 100, height: 60 }}>
-        <Handle type="target" position={Position.Left} style={{ left: -8, background: '#64748b' }} />
-        <div
-          className={`absolute inset-0 flex items-center justify-center ${selected ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
-          style={{
-            backgroundColor: '#fef3c7',
-            border: '2px solid #f59e0b',
-            transform: 'rotate(45deg)',
-            borderRadius: 8,
-          }}
-        >
-          <div className="font-medium text-xs text-amber-800" style={{ transform: 'rotate(-45deg)' }}>
-            {data.label}
-          </div>
-        </div>
-        <Handle type="source" position={Position.Right} style={{ right: -8, background: '#64748b' }} />
-        <Handle type="source" position={Position.Bottom} id="bottom" style={{ bottom: -8, background: '#64748b' }} />
-      </div>
-    );
-  }
-
   return (
     <div className={getNodeStyle()}>
-      <Handle type="target" position={Position.Left} style={{ background: '#64748b' }} />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="w-2 h-2 !bg-gray-400"
+      />
       <div className="font-medium text-sm">{data.label}</div>
       {data.hasChildFlow && (
-        <div className="text-xs mt-1 text-gray-500 flex items-center justify-center gap-1">
+        <div className="text-xs text-indigo-500 mt-1 flex items-center justify-center gap-1">
           <Layers className="w-3 h-3" />
           詳細あり
         </div>
       )}
-      <Handle type="source" position={Position.Right} style={{ background: '#64748b' }} />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="w-2 h-2 !bg-gray-400"
+      />
     </div>
   );
 }
 
-// 編集可能なエッジラベルコンポーネント
+// 編集可能なエッジコンポーネント
 function EditableEdge({
   id,
   sourceX,
@@ -173,6 +152,7 @@ function EditableEdge({
   label,
   style,
   markerEnd,
+  selected,
   data,
 }: EdgeProps & { data?: { onLabelUpdate?: (id: string, label: string) => void } }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -186,10 +166,10 @@ function EditableEdge({
     targetY,
     sourcePosition,
     targetPosition,
-    borderRadius: 10,
   });
 
-  const handleDoubleClick = () => {
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     setIsEditing(true);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
@@ -212,7 +192,16 @@ function EditableEdge({
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
+      <BaseEdge 
+        id={id} 
+        path={edgePath} 
+        style={{
+          ...style,
+          strokeWidth: selected ? 3 : 2,
+          stroke: selected ? '#3b82f6' : '#64748b',
+        }} 
+        markerEnd={markerEnd} 
+      />
       {(label || isEditing) && (
         <EdgeLabelRenderer>
           <div
@@ -235,7 +224,9 @@ function EditableEdge({
             ) : (
               <div
                 onDoubleClick={handleDoubleClick}
-                className="px-2 py-0.5 text-xs bg-white border border-gray-300 rounded shadow-sm cursor-pointer hover:bg-blue-50 hover:border-blue-400"
+                className={`px-2 py-0.5 text-xs bg-white border rounded shadow-sm cursor-pointer hover:bg-blue-50 ${
+                  selected ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                }`}
                 title="ダブルクリックで編集"
               >
                 {label}
@@ -256,6 +247,96 @@ const edgeTypes = {
   editable: EditableEdge,
 };
 
+// スイムレーンヘッダーコンポーネント（ズーム対応）
+function SwimLaneHeaders({
+  roles,
+  viewport,
+  onRoleReorder,
+}: {
+  roles: Role[];
+  viewport: { x: number; y: number; zoom: number };
+  onRoleReorder?: (roleId: string, direction: 'up' | 'down') => void;
+}) {
+  const scaledHeight = SWIMLANE_HEIGHT * viewport.zoom;
+  const offsetY = viewport.y;
+
+  return (
+    <div 
+      className="absolute top-0 left-0 pointer-events-auto overflow-hidden"
+      style={{ 
+        width: SWIMLANE_HEADER_WIDTH,
+        height: '100%',
+        backgroundColor: 'white',
+        borderRight: '2px solid #e2e8f0',
+        zIndex: 20,
+      }}
+    >
+      {roles.map((role, index) => (
+        <div
+          key={role.id}
+          className="absolute flex items-center justify-between font-medium text-xs border-b group"
+          style={{
+            height: scaledHeight,
+            top: offsetY + index * scaledHeight,
+            left: 0,
+            width: SWIMLANE_HEADER_WIDTH,
+            backgroundColor: `${role.color}15`,
+            borderColor: '#e2e8f0',
+            color: role.color,
+            transition: 'top 0.1s ease-out, height 0.1s ease-out',
+          }}
+        >
+          <span className="truncate px-2 flex-1">{role.name}</span>
+          {onRoleReorder && (
+            <div className="flex flex-col opacity-0 group-hover:opacity-100 transition-opacity pr-1">
+              {index > 0 && (
+                <button
+                  onClick={() => onRoleReorder(role.id, 'up')}
+                  className="p-0.5 hover:bg-white/50 rounded"
+                  title="上に移動"
+                >
+                  <ChevronUp className="w-3 h-3" />
+                </button>
+              )}
+              {index < roles.length - 1 && (
+                <button
+                  onClick={() => onRoleReorder(role.id, 'down')}
+                  className="p-0.5 hover:bg-white/50 rounded"
+                  title="下に移動"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// スイムレーン背景コンポーネント（React Flow内で使用）
+function SwimLaneBackgrounds({ roles }: { roles: Role[] }) {
+  return (
+    <>
+      {roles.map((role, index) => (
+        <div
+          key={role.id}
+          className="absolute border-b pointer-events-none"
+          style={{
+            top: index * SWIMLANE_HEIGHT,
+            left: 0,
+            right: 0,
+            height: SWIMLANE_HEIGHT,
+            backgroundColor: `${role.color}05`,
+            borderColor: `${role.color}20`,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
 // メインのフロービューアー（内部）
 function BPMNFlowViewerInner({
   flowData,
@@ -271,6 +352,7 @@ function BPMNFlowViewerInner({
   onNodeDelete,
   onEdgeDelete,
   onChildFlowCreate,
+  onRoleReorder,
 }: {
   flowData: FlowData;
   roles: Role[];
@@ -285,8 +367,10 @@ function BPMNFlowViewerInner({
   onNodeDelete?: (nodeId: string) => void;
   onEdgeDelete?: (edgeId: string) => void;
   onChildFlowCreate?: (nodeId: string, name?: string) => void;
+  onRoleReorder?: (roleId: string, direction: 'up' | 'down') => void;
 }) {
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
+  const viewport = useViewport();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedFlowName, setEditedFlowName] = useState(flowData.name);
   const [editedFlowDescription, setEditedFlowDescription] = useState(flowData.description || '');
@@ -299,14 +383,15 @@ function BPMNFlowViewerInner({
     flowX?: number;
     flowY?: number;
   } | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ロールIDからY座標を計算
   const getRoleY = useCallback(
     (roleId?: string) => {
-      if (!roleId || roles.length === 0) return 60;
+      if (!roleId || roles.length === 0) return SWIMLANE_HEIGHT / 2;
       const roleIndex = roles.findIndex((r) => r.id === roleId);
-      if (roleIndex === -1) return 60;
+      if (roleIndex === -1) return SWIMLANE_HEIGHT / 2;
       return roleIndex * SWIMLANE_HEIGHT + SWIMLANE_HEIGHT / 2;
     },
     [roles]
@@ -330,7 +415,7 @@ function BPMNFlowViewerInner({
         id: node.id,
         type: 'custom',
         position: {
-          x: node.positionX + SWIMLANE_HEADER_WIDTH + 20,
+          x: node.positionX + 20,
           y: getRoleY(node.roleId) - 30,
         },
         data: {
@@ -370,11 +455,11 @@ function BPMNFlowViewerInner({
   // 初期化時にフィット
   useEffect(() => {
     setTimeout(() => {
-      fitView({ padding: 0.2 });
+      fitView({ padding: 0.3 });
     }, 100);
   }, [fitView, flowData.id]);
 
-  // ノードデータが変更されたら更新
+  // ノードとエッジの更新
   useEffect(() => {
     setNodes(initialNodes);
   }, [initialNodes, setNodes]);
@@ -383,7 +468,7 @@ function BPMNFlowViewerInner({
     setEdges(initialEdges);
   }, [initialEdges, setEdges]);
 
-  // フロー名と説明の同期
+  // フロー名の同期
   useEffect(() => {
     setEditedFlowName(flowData.name);
     setEditedFlowDescription(flowData.description || '');
@@ -394,19 +479,16 @@ function BPMNFlowViewerInner({
     (changes: NodeChange<Node<FlowNodeData>>[]) => {
       setNodes((nds) => applyNodeChanges(changes, nds));
 
-      // ドラッグ終了時に位置を保存し、ロールを更新
       changes.forEach((change) => {
         if (change.type === 'position' && change.dragging === false && change.position) {
           const nodeId = change.id;
-          const newX = change.position.x - SWIMLANE_HEADER_WIDTH - 20;
+          const newX = change.position.x;
           const newY = change.position.y;
 
-          // 位置を保存
           if (onNodePositionUpdate) {
             onNodePositionUpdate(nodeId, { x: newX, y: newY });
           }
 
-          // Y座標からロールを判定して更新
           const newRoleId = getRoleIdFromY(newY + 30);
           const currentNode = flowData.nodes.find((n) => n.id === nodeId);
           if (newRoleId && currentNode && newRoleId !== currentNode.roleId) {
@@ -432,7 +514,6 @@ function BPMNFlowViewerInner({
   const onConnect = useCallback(
     (connection: Connection) => {
       if (connection.source && connection.target) {
-        // 一時的にUIに追加
         const newEdge: Edge = {
           id: `temp-${Date.now()}`,
           source: connection.source,
@@ -444,7 +525,6 @@ function BPMNFlowViewerInner({
         };
         setEdges((eds) => addEdge(newEdge, eds));
 
-        // バックエンドに保存
         if (onEdgeCreate) {
           onEdgeCreate(connection.source, connection.target);
         }
@@ -471,7 +551,7 @@ function BPMNFlowViewerInner({
     setIsEditingTitle(false);
   };
 
-  // コンテキストメニュー表示
+  // コンテキストメニュー表示（ノード）
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
@@ -484,25 +564,32 @@ function BPMNFlowViewerInner({
     [setContextMenu]
   );
 
+  // コンテキストメニュー表示（キャンバス）
   const onPaneContextMenu = useCallback(
     (event: MouseEvent | React.MouseEvent) => {
       event.preventDefault();
-      // フローキャンバス上の座標を計算（簡易版）
-      const rect = containerRef.current?.getBoundingClientRect();
-      const flowX = rect ? event.clientX - rect.left - SWIMLANE_HEADER_WIDTH : 200;
-      const flowY = rect ? event.clientY - rect.top : 100;
+      const flowPosition = screenToFlowPosition({ x: event.clientX, y: event.clientY });
       
       setContextMenu({
         x: event.clientX,
         y: event.clientY,
         isCanvas: true,
-        flowX,
-        flowY,
+        flowX: flowPosition.x,
+        flowY: flowPosition.y,
       });
     },
-    [setContextMenu]
+    [setContextMenu, screenToFlowPosition]
   );
 
+  // エッジクリック（選択）
+  const onEdgeClick = useCallback(
+    (_: React.MouseEvent, edge: Edge) => {
+      setSelectedEdgeId(edge.id);
+    },
+    []
+  );
+
+  // エッジ右クリック
   const onEdgeContextMenu = useCallback(
     (event: React.MouseEvent, edge: Edge) => {
       event.preventDefault();
@@ -515,6 +602,23 @@ function BPMNFlowViewerInner({
     [setContextMenu]
   );
 
+  // キーボードイベント（Delete/Backspaceで選択したエッジを削除）
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedEdgeId && onEdgeDelete) {
+        onEdgeDelete(selectedEdgeId);
+        setSelectedEdgeId(null);
+      }
+    },
+    [selectedEdgeId, onEdgeDelete]
+  );
+
+  // ペインクリック（選択解除）
+  const onPaneClick = useCallback(() => {
+    setContextMenu(null);
+    setSelectedEdgeId(null);
+  }, []);
+
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
   }, []);
@@ -523,74 +627,35 @@ function BPMNFlowViewerInner({
   const totalHeight = Math.max(roles.length * SWIMLANE_HEIGHT, 400);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-white">
-      {/* BPMNスタイルのスイムレーン（固定位置） */}
-      <div 
-        className="absolute top-0 left-0 h-full pointer-events-none"
-        style={{ 
-          width: SWIMLANE_HEADER_WIDTH,
-          zIndex: 10,
-          backgroundColor: 'white',
-          borderRight: '2px solid #e2e8f0',
-        }}
-      >
-        {roles.map((role, index) => (
-          <div
-            key={role.id}
-            className="flex items-center justify-center font-medium text-xs border-b"
-            style={{
-              height: SWIMLANE_HEIGHT,
-              backgroundColor: `${role.color}15`,
-              borderColor: '#e2e8f0',
-              color: role.color,
-              position: 'absolute',
-              top: index * SWIMLANE_HEIGHT,
-              left: 0,
-              width: SWIMLANE_HEADER_WIDTH,
-            }}
-          >
-            <span className="truncate px-2">{role.name}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* スイムレーン背景（ReactFlow内で表示） */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          top: 0,
-          left: SWIMLANE_HEADER_WIDTH,
-          right: 0,
-          height: totalHeight,
-          zIndex: 0,
-        }}
-      >
-        {roles.map((role, index) => (
-          <div
-            key={role.id}
-            className="absolute w-full border-b"
-            style={{
-              top: index * SWIMLANE_HEIGHT,
-              height: SWIMLANE_HEIGHT,
-              backgroundColor: `${role.color}08`,
-              borderColor: '#e2e8f0',
-            }}
-          />
-        ))}
-      </div>
+    <div 
+      ref={containerRef} 
+      className="relative w-full h-full bg-white"
+      onKeyDown={onKeyDown}
+      tabIndex={0}
+    >
+      {/* スイムレーンヘッダー（ズーム対応） */}
+      <SwimLaneHeaders 
+        roles={roles} 
+        viewport={viewport}
+        onRoleReorder={onRoleReorder}
+      />
 
       <div style={{ marginLeft: SWIMLANE_HEADER_WIDTH, height: '100%' }}>
         <ReactFlow
           nodes={nodes}
-          edges={edges}
+          edges={edges.map(edge => ({
+            ...edge,
+            selected: edge.id === selectedEdgeId,
+          }))}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeDoubleClick={handleNodeDoubleClick}
           onNodeContextMenu={onNodeContextMenu}
+          onEdgeClick={onEdgeClick}
           onEdgeContextMenu={onEdgeContextMenu}
           onPaneContextMenu={onPaneContextMenu}
-          onPaneClick={closeContextMenu}
+          onPaneClick={onPaneClick}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           connectionMode={ConnectionMode.Loose}
@@ -600,6 +665,7 @@ function BPMNFlowViewerInner({
           maxZoom={2}
           snapToGrid
           snapGrid={[10, 10]}
+          deleteKeyCode={['Delete', 'Backspace']}
           defaultEdgeOptions={{
             type: 'editable',
             style: { strokeWidth: 2, stroke: '#64748b' },
@@ -608,6 +674,22 @@ function BPMNFlowViewerInner({
           className="bg-gray-50"
           style={{ height: '100%' }}
         >
+          {/* スイムレーン背景 */}
+          <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: -1 }}>
+            {roles.map((role, index) => (
+              <rect
+                key={role.id}
+                x={0}
+                y={index * SWIMLANE_HEIGHT}
+                width="100%"
+                height={SWIMLANE_HEIGHT}
+                fill={`${role.color}08`}
+                stroke={`${role.color}20`}
+                strokeWidth={1}
+              />
+            ))}
+          </svg>
+
           <Background color="#cbd5e1" gap={20} />
           <Controls className="bg-white border border-gray-200 rounded-lg shadow-sm" />
           <MiniMap
@@ -655,52 +737,57 @@ function BPMNFlowViewerInner({
             </div>
           </Panel>
 
-          {/* フロー名 */}
-          <Panel position="top-center" className="bg-white border border-gray-200 rounded-lg shadow-sm px-4 py-2">
+          {/* フロー名・説明（編集可能） */}
+          <Panel position="top-center" className="mt-2">
             {isEditingTitle ? (
-              <div className="flex flex-col gap-2">
-                <div>
-                  <Label htmlFor="flow-name" className="sr-only">
-                    フロー名
-                  </Label>
-                  <Input
-                    id="flow-name"
-                    value={editedFlowName}
-                    onChange={(e) => setEditedFlowName(e.target.value)}
-                    className="text-lg font-bold text-gray-900"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="flow-description" className="sr-only">
-                    説明
-                  </Label>
-                  <Textarea
-                    id="flow-description"
-                    value={editedFlowDescription}
-                    onChange={(e) => setEditedFlowDescription(e.target.value)}
-                    placeholder="フローの説明を入力"
-                    className="text-xs text-gray-500"
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setIsEditingTitle(false)}>
-                    キャンセル
-                  </Button>
-                  <Button size="sm" onClick={handleTitleSave}>
-                    保存
-                  </Button>
+              <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-4 min-w-[300px]">
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">フロー名</label>
+                    <Input
+                      value={editedFlowName}
+                      onChange={(e) => setEditedFlowName(e.target.value)}
+                      className="mt-1"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">説明</label>
+                    <Textarea
+                      value={editedFlowDescription}
+                      onChange={(e) => setEditedFlowDescription(e.target.value)}
+                      className="mt-1"
+                      rows={2}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditedFlowName(flowData.name);
+                        setEditedFlowDescription(flowData.description || '');
+                        setIsEditingTitle(false);
+                      }}
+                    >
+                      キャンセル
+                    </Button>
+                    <Button size="sm" onClick={handleTitleSave}>
+                      保存
+                    </Button>
+                  </div>
                 </div>
               </div>
             ) : (
               <div
                 onClick={() => setIsEditingTitle(true)}
-                className="cursor-pointer group relative"
+                className="bg-white border border-gray-200 rounded-lg shadow-sm px-4 py-2 cursor-pointer hover:bg-gray-50 transition-colors group relative"
               >
-                <h2 className="font-bold text-gray-900 group-hover:text-blue-600 transition-colors">
+                <h2 className="font-bold text-gray-900 text-center">
                   {flowData.name}
                 </h2>
                 {flowData.description && (
-                  <p className="text-xs text-gray-500">{flowData.description}</p>
+                  <p className="text-xs text-gray-500 text-center">{flowData.description}</p>
                 )}
                 <Edit className="w-3 h-3 absolute -right-4 top-1/2 -translate-y-1/2 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
@@ -810,9 +897,16 @@ function BPMNFlowViewerInner({
         </div>
       )}
 
+      {/* 選択中のエッジがある場合のヒント */}
+      {selectedEdgeId && (
+        <div className="absolute top-4 right-4 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700 z-10">
+          矢印を選択中 - Delete/Backspaceキーで削除
+        </div>
+      )}
+
       {/* ヒント */}
       <div className="absolute bottom-4 right-4 bg-white/90 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 z-10">
-        💡 ノードからドラッグで矢印作成 ｜ ラベルをダブルクリックで編集 ｜ タイトルをクリックで編集
+        💡 矢印クリックで選択→Delete削除 ｜ ラベルダブルクリックで編集 ｜ 右クリックでメニュー
       </div>
     </div>
   );
@@ -833,6 +927,7 @@ export function BPMNFlowViewer(props: {
   onNodeDelete?: (nodeId: string) => void;
   onEdgeDelete?: (edgeId: string) => void;
   onChildFlowCreate?: (nodeId: string, name?: string) => void;
+  onRoleReorder?: (roleId: string, direction: 'up' | 'down') => void;
 }) {
   return (
     <ReactFlowProvider>
@@ -840,4 +935,3 @@ export function BPMNFlowViewer(props: {
     </ReactFlowProvider>
   );
 }
-

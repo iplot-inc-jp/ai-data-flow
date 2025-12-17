@@ -29,6 +29,11 @@ services:
         generateValue: true
       - key: JWT_EXPIRATION
         value: 7d
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: dataflow-frontend
+          property: host
 
   # Frontend
   - type: web
@@ -46,6 +51,4 @@ services:
         fromService:
           type: web
           name: dataflow-backend
-          property: hostport
-          envVarKey: RENDER_EXTERNAL_URL
-
+          property: host
