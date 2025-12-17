@@ -767,7 +767,9 @@ function BPMNFlowViewerInner({
                 className="w-full px-3 py-2 text-sm text-left hover:bg-gray-100 flex items-center gap-2"
                 onClick={() => {
                   if (onNodeCreate) {
-                    onNodeCreate('PROCESS', contextMenu.flowX || 200, contextMenu.flowY || 100);
+                    const x = typeof contextMenu.flowX === 'number' ? contextMenu.flowX : 200;
+                    const y = typeof contextMenu.flowY === 'number' ? contextMenu.flowY : 100;
+                    onNodeCreate('PROCESS', x, y);
                   }
                   closeContextMenu();
                 }}
@@ -779,7 +781,9 @@ function BPMNFlowViewerInner({
                 className="w-full px-3 py-2 text-sm text-left hover:bg-gray-100 flex items-center gap-2"
                 onClick={() => {
                   if (onNodeCreate) {
-                    onNodeCreate('DECISION', contextMenu.flowX || 200, contextMenu.flowY || 100);
+                    const x = typeof contextMenu.flowX === 'number' ? contextMenu.flowX : 200;
+                    const y = typeof contextMenu.flowY === 'number' ? contextMenu.flowY : 150;
+                    onNodeCreate('DECISION', x, y);
                   }
                   closeContextMenu();
                 }}
@@ -791,7 +795,9 @@ function BPMNFlowViewerInner({
                 className="w-full px-3 py-2 text-sm text-left hover:bg-gray-100 flex items-center gap-2"
                 onClick={() => {
                   if (onNodeCreate) {
-                    onNodeCreate('SYSTEM_INTEGRATION', contextMenu.flowX || 200, contextMenu.flowY || 100);
+                    const x = typeof contextMenu.flowX === 'number' ? contextMenu.flowX : 200;
+                    const y = typeof contextMenu.flowY === 'number' ? contextMenu.flowY : 200;
+                    onNodeCreate('SYSTEM_INTEGRATION', x, y);
                   }
                   closeContextMenu();
                 }}
