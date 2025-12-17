@@ -11,6 +11,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { IsString, IsOptional, IsNumber } from 'class-validator';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService, RequirementParseResult } from '../../infrastructure/services/claude.service';
 import { v4 as uuid } from 'uuid';
@@ -18,39 +19,94 @@ import { CurrentUser, CurrentUserPayload } from '../decorators';
 
 // DTOs
 class CreateRequirementDto {
+  @IsString()
   projectId: string;
+
+  @IsOptional()
+  @IsString()
   parentId?: string;
+
+  @IsString()
   title: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
   originalText?: string;
+
+  @IsOptional()
+  @IsString()
   type?: string;
+
+  @IsOptional()
+  @IsString()
   priority?: string;
+
+  @IsOptional()
+  @IsString()
   status?: string;
 }
 
 class UpdateRequirementDto {
+  @IsOptional()
+  @IsString()
   title?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
   type?: string;
+
+  @IsOptional()
+  @IsString()
   priority?: string;
+
+  @IsOptional()
+  @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsNumber()
   order?: number;
 }
 
 class ParseRequirementsDto {
+  @IsString()
   projectId: string;
+
+  @IsString()
   text: string;
+
+  @IsOptional()
+  @IsString()
   parentId?: string;
 }
 
 class LinkFlowDto {
+  @IsString()
   flowId: string;
+
+  @IsOptional()
+  @IsString()
   flowNodeId?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 }
 
 class LinkCrudDto {
+  @IsString()
   crudMappingId: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 }
 
