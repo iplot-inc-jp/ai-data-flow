@@ -32,6 +32,7 @@ import {
   Trash2,
   Copy,
   FolderPlus,
+  type LucideIcon,
 } from 'lucide-react';
 
 // ノードタイプ
@@ -263,7 +264,7 @@ function ContextMenuComponent({
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (menuRef.current && !menuRef.current.contains(e.target as globalThis.Node | null)) {
         onClose();
       }
     };
@@ -273,20 +274,20 @@ function ContextMenuComponent({
 
   if (!menu.show) return null;
 
-  const nodeMenuItems = [
+  const nodeMenuItems: Array<{ action: string; label: string; icon: LucideIcon; danger?: boolean }> = [
     { action: 'edit', label: '編集', icon: Edit2 },
     { action: 'createChildFlow', label: '詳細フロー作成', icon: FolderPlus },
     { action: 'duplicate', label: '複製', icon: Copy },
     { action: 'delete', label: '削除', icon: Trash2, danger: true },
   ];
 
-  const canvasMenuItems = [
+  const canvasMenuItems: Array<{ action: string; label: string; icon: LucideIcon; danger?: boolean }> = [
     { action: 'addProcess', label: '処理ノード追加', icon: Plus },
     { action: 'addDecision', label: '分岐ノード追加', icon: Plus },
     { action: 'addBusinessBlock', label: '業務ブロック追加', icon: FolderPlus },
   ];
 
-  const edgeMenuItems = [
+  const edgeMenuItems: Array<{ action: string; label: string; icon: LucideIcon; danger?: boolean }> = [
     { action: 'editEdge', label: 'ラベルを編集', icon: Edit2 },
     { action: 'deleteEdge', label: '削除', icon: Trash2, danger: true },
   ];
@@ -449,7 +450,7 @@ function FlowViewerInner({
   }, []);
 
   // 右クリックメニュー（キャンバス）
-  const handlePaneContextMenu = useCallback((e: React.MouseEvent) => {
+  const handlePaneContextMenu = useCallback((e: MouseEvent | React.MouseEvent) => {
     e.preventDefault();
     setContextMenu({
       show: true,

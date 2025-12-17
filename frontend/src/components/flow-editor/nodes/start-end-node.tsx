@@ -10,7 +10,7 @@ interface StartEndNodeData {
 }
 
 export const StartEndNode = memo(({ data, selected }: NodeProps) => {
-  const nodeData = data as StartEndNodeData
+  const nodeData = data as unknown as StartEndNodeData
   const isStart = nodeData.isStart
 
   return (

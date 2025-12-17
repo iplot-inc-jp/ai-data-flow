@@ -9,7 +9,7 @@ import {
   ProjectResponseDto,
 } from '../dto';
 import { CurrentUser, CurrentUserPayload } from '../decorators/current-user.decorator';
-import { PROJECT_REPOSITORY, IProjectRepository } from '../../domain';
+import { PROJECT_REPOSITORY, ProjectRepository } from '../../domain';
 
 @ApiTags('プロジェクト')
 @ApiBearerAuth()
@@ -17,7 +17,7 @@ import { PROJECT_REPOSITORY, IProjectRepository } from '../../domain';
 export class ProjectByIdController {
   constructor(
     @Inject(PROJECT_REPOSITORY)
-    private readonly projectRepository: IProjectRepository,
+    private readonly projectRepository: ProjectRepository,
   ) {}
 
   @Get(':id')
@@ -36,8 +36,6 @@ export class ProjectByIdController {
       name: project.name,
       slug: project.slug,
       description: project.description,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
     };
   }
 }

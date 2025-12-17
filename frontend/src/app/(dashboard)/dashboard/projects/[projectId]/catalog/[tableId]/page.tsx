@@ -320,10 +320,14 @@ export default function ProjectTableDetailPage() {
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1">
                         {column.isPrimaryKey && (
-                          <Key className="w-4 h-4 text-amber-500" title="Primary Key" />
+                          <span title="Primary Key">
+                            <Key className="w-4 h-4 text-amber-500" />
+                          </span>
                         )}
                         {column.isForeignKey && (
-                          <LinkIcon className="w-4 h-4 text-blue-500" title="Foreign Key" />
+                          <span title="Foreign Key">
+                            <LinkIcon className="w-4 h-4 text-blue-500" />
+                          </span>
                         )}
                       </div>
                       <div>

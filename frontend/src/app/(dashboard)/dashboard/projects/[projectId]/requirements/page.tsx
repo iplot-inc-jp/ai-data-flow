@@ -268,18 +268,18 @@ export default function RequirementsPage() {
                 <p className="text-sm text-gray-500 mt-1 line-clamp-2">{req.description}</p>
               )}
               {/* 紐付け情報 */}
-              {(req.flowMappings?.length || req.crudMappings?.length) && (
+              {((req.flowMappings?.length ?? 0) > 0 || (req.crudMappings?.length ?? 0) > 0) && (
                 <div className="flex gap-2 mt-2">
-                  {req.flowMappings?.length > 0 && (
+                  {(req.flowMappings?.length ?? 0) > 0 && (
                     <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
                       <LinkIcon className="h-3 w-3 inline mr-1" />
-                      {req.flowMappings.length} フロー
+                      {req.flowMappings?.length} フロー
                     </span>
                   )}
-                  {req.crudMappings?.length > 0 && (
+                  {(req.crudMappings?.length ?? 0) > 0 && (
                     <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded">
                       <LinkIcon className="h-3 w-3 inline mr-1" />
-                      {req.crudMappings.length} CRUD
+                      {req.crudMappings?.length} CRUD
                     </span>
                   )}
                 </div>

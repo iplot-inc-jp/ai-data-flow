@@ -10,7 +10,7 @@ interface DataStoreNodeData {
 }
 
 export const DataStoreNode = memo(({ data, selected }: NodeProps) => {
-  const nodeData = data as DataStoreNodeData
+  const nodeData = data as unknown as DataStoreNodeData
 
   return (
     <div

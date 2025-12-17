@@ -707,7 +707,7 @@ function BPMNFlowViewerInner({
   }, []);
 
   // 全体の高さを計算
-  const totalHeight = Math.max(roles.length * SWIMLANE_HEIGHT, 400);
+  const totalHeight = Math.max(roles.length * DEFAULT_SWIMLANE_HEIGHT, 400);
 
   return (
     <div 
@@ -764,9 +764,9 @@ function BPMNFlowViewerInner({
               <rect
                 key={role.id}
                 x={0}
-                y={index * SWIMLANE_HEIGHT}
+                y={index * DEFAULT_SWIMLANE_HEIGHT}
                 width="100%"
-                height={SWIMLANE_HEIGHT}
+                height={DEFAULT_SWIMLANE_HEIGHT}
                 fill={`${role.color}08`}
                 stroke={`${role.color}20`}
                 strokeWidth={1}

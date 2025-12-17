@@ -9,7 +9,7 @@ interface DecisionNodeData {
 }
 
 export const DecisionNode = memo(({ data, selected }: NodeProps) => {
-  const nodeData = data as DecisionNodeData
+  const nodeData = data as unknown as DecisionNodeData
 
   return (
     <div

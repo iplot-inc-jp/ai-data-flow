@@ -11,7 +11,7 @@ interface ProcessNodeData {
 }
 
 export const ProcessNode = memo(({ data, selected }: NodeProps) => {
-  const nodeData = data as ProcessNodeData
+  const nodeData = data as unknown as ProcessNodeData
 
   return (
     <div
