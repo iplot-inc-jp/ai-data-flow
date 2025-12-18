@@ -2,8 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { 
   FolderOpen, 
   Plus, 
@@ -13,7 +11,9 @@ import {
   GitBranch, 
   Users,
   Clock,
-  Sparkles
+  Zap,
+  Activity,
+  TrendingUp,
 } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
@@ -50,13 +50,11 @@ export default function DashboardPage() {
       try {
         const headers = getHeaders()
         
-        // 組織一覧を取得
         const orgsRes = await fetch(`${API_URL}/api/organizations`, { headers })
         if (orgsRes.ok) {
           const orgsData = await orgsRes.json()
           setOrganizations(orgsData)
           
-          // 各組織のプロジェクトを取得
           const allProjects: Project[] = []
           for (const org of orgsData) {
             const projRes = await fetch(`${API_URL}/api/organizations/${org.id}/projects`, { headers })
@@ -65,7 +63,6 @@ export default function DashboardPage() {
               allProjects.push(...projData)
             }
           }
-          // 更新日時でソート
           allProjects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
           setProjects(allProjects)
         }
@@ -93,186 +90,218 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[400px]">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground font-mono">Loading...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">ダッシュボード</h1>
-          <p className="text-gray-500 mt-1">プロジェクトを選択して作業を開始</p>
+          <h1 className="text-3xl font-bold text-foreground">ダッシュボード</h1>
+          <p className="text-muted-foreground mt-1">プロジェクトを選択して作業を開始</p>
         </div>
         <Link href="/dashboard/projects">
-          <Button className="bg-blue-600 hover:bg-blue-700">
-            <Plus className="h-4 w-4 mr-2" />
+          <button className="btn-glow flex items-center gap-2">
+            <Plus className="h-4 w-4" />
             新規プロジェクト
-          </Button>
+          </button>
         </Link>
       </div>
 
-      {/* プロジェクトがない場合 */}
+      {/* Empty state */}
       {projects.length === 0 ? (
-        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 shadow-sm">
-          <CardContent className="py-12">
-            <div className="flex flex-col items-center text-center">
-              <div className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center mb-6">
-                <Sparkles className="h-10 w-10 text-blue-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                DataFlowへようこそ！
-              </h2>
-              <p className="text-gray-600 mb-6 max-w-md">
-                まずはプロジェクトを作成しましょう。プロジェクト内でデータカタログ、業務フロー、ロールを管理できます。
-              </p>
-              <Link href="/dashboard/projects">
-                <Button size="lg" className="bg-blue-600 hover:bg-blue-700">
-                  <FolderOpen className="h-5 w-5 mr-2" />
-                  プロジェクトを作成
-                </Button>
-              </Link>
+        <div className="blueprint-card p-12">
+          <div className="flex flex-col items-center text-center">
+            <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 glow-cyan">
+              <Zap className="h-10 w-10 text-primary" />
             </div>
-          </CardContent>
-        </Card>
+            <h2 className="text-2xl font-bold text-foreground mb-3">
+              DataFlowへようこそ！
+            </h2>
+            <p className="text-muted-foreground mb-8 max-w-md">
+              まずはプロジェクトを作成しましょう。プロジェクト内でデータカタログ、業務フロー、ロールを管理できます。
+            </p>
+            <Link href="/dashboard/projects">
+              <button className="btn-glow flex items-center gap-2 text-lg px-8 py-4">
+                <FolderOpen className="h-5 w-5" />
+                プロジェクトを作成
+              </button>
+            </Link>
+          </div>
+        </div>
       ) : (
         <>
-          {/* 統計 */}
+          {/* Stats Grid */}
           <div className="grid gap-4 md:grid-cols-3">
-            <Card className="bg-white border-gray-200 shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-gray-500">プロジェクト数</CardTitle>
-                <FolderOpen className="h-4 w-4 text-blue-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-gray-900">{projects.length}</div>
-                <p className="text-xs text-gray-500">作成済みのプロジェクト</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-white border-gray-200 shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-gray-500">組織数</CardTitle>
-                <Users className="h-4 w-4 text-purple-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-gray-900">{organizations.length}</div>
-                <p className="text-xs text-gray-500">所属している組織</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-white border-gray-200 shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-gray-500">最終更新</CardTitle>
-                <Clock className="h-4 w-4 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-lg font-bold text-gray-900 truncate">
-                  {projects[0]?.name || '-'}
+            {[
+              { 
+                label: 'プロジェクト数', 
+                value: projects.length, 
+                sub: '作成済みのプロジェクト',
+                icon: FolderOpen,
+                color: 'cyan'
+              },
+              { 
+                label: '組織数', 
+                value: organizations.length, 
+                sub: '所属している組織',
+                icon: Users,
+                color: 'purple'
+              },
+              { 
+                label: '最終更新', 
+                value: projects[0]?.name || '-', 
+                sub: projects[0] ? formatDate(projects[0].updatedAt) : '-',
+                icon: Activity,
+                color: 'emerald',
+                isText: true
+              },
+            ].map((stat, i) => (
+              <div 
+                key={i} 
+                className="blueprint-card p-5 animate-slide-up"
+                style={{ animationDelay: `${i * 0.1}s` }}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
+                      {stat.label}
+                    </p>
+                    <p className={`${stat.isText ? 'text-lg' : 'text-3xl'} font-bold text-foreground`}>
+                      {stat.value}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">{stat.sub}</p>
+                  </div>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                    stat.color === 'cyan' ? 'bg-cyan-500/10 text-cyan-400' :
+                    stat.color === 'purple' ? 'bg-purple-500/10 text-purple-400' :
+                    'bg-emerald-500/10 text-emerald-400'
+                  }`}>
+                    <stat.icon className="h-5 w-5" />
+                  </div>
                 </div>
-                <p className="text-xs text-gray-500">
-                  {projects[0] ? formatDate(projects[0].updatedAt) : '-'}
-                </p>
-              </CardContent>
-            </Card>
+              </div>
+            ))}
           </div>
 
-          {/* プロジェクト一覧 */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card className="bg-white border-gray-200 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-gray-900">最近のプロジェクト</CardTitle>
-                <CardDescription className="text-gray-500">
-                  プロジェクトを選択して作業を開始
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {projects.slice(0, 5).map((project) => (
+          {/* Two column layout */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Recent Projects */}
+            <div className="blueprint-card overflow-hidden">
+              <div className="px-6 py-4 border-b border-border">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-semibold text-foreground">最近のプロジェクト</h2>
+                    <p className="text-sm text-muted-foreground">プロジェクトを選択して作業を開始</p>
+                  </div>
+                  <span className="tech-label">{projects.length} 件</span>
+                </div>
+              </div>
+              <div className="divide-y divide-border">
+                {projects.slice(0, 5).map((project, i) => (
                   <Link 
                     key={project.id} 
-                    href={`/dashboard/projects/${project.id}`} 
-                    className="block"
+                    href={`/dashboard/projects/${project.id}`}
+                    className="flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors group animate-slide-up"
+                    style={{ animationDelay: `${i * 0.05}s` }}
                   >
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-gray-50 hover:bg-blue-50 transition-colors border border-gray-200 hover:border-blue-200">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                          <FolderOpen className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{project.name}</p>
-                          <p className="text-sm text-gray-500">
-                            {project.description || '説明なし'}
-                          </p>
-                        </div>
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                        <FolderOpen className="h-5 w-5 text-primary" />
                       </div>
-                      <ArrowRight className="h-5 w-5 text-gray-400" />
+                      <div>
+                        <p className="font-medium text-foreground group-hover:text-primary transition-colors">
+                          {project.name}
+                        </p>
+                        <p className="text-sm text-muted-foreground line-clamp-1">
+                          {project.description || '説明なし'}
+                        </p>
+                      </div>
                     </div>
+                    <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
                   </Link>
                 ))}
-                {projects.length > 5 && (
-                  <Link href="/dashboard/projects" className="block">
-                    <div className="text-center py-2 text-sm text-blue-600 hover:text-blue-700">
-                      すべてのプロジェクトを表示 →
-                    </div>
+              </div>
+              {projects.length > 5 && (
+                <div className="px-6 py-3 border-t border-border">
+                  <Link 
+                    href="/dashboard/projects" 
+                    className="text-sm text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+                  >
+                    すべてのプロジェクトを表示
+                    <ArrowRight className="h-4 w-4" />
                   </Link>
-                )}
-              </CardContent>
-            </Card>
+                </div>
+              )}
+            </div>
 
-            <Card className="bg-white border-gray-200 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-gray-900">クイックガイド</CardTitle>
-                <CardDescription className="text-gray-500">
-                  DataFlowの使い方
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-100">
-                  <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
-                    1
+            {/* Quick Guide */}
+            <div className="blueprint-card overflow-hidden">
+              <div className="px-6 py-4 border-b border-border">
+                <h2 className="font-semibold text-foreground">クイックガイド</h2>
+                <p className="text-sm text-muted-foreground">DataFlowの使い方</p>
+              </div>
+              <div className="p-4 space-y-3">
+                {[
+                  { 
+                    step: 1, 
+                    title: 'プロジェクトを選択', 
+                    desc: '左のリストからプロジェクトを選ぶか、新規作成します',
+                    active: true
+                  },
+                  { 
+                    step: 2, 
+                    title: 'ロールを定義', 
+                    desc: '業務を担当する人・システムを登録します',
+                    active: false
+                  },
+                  { 
+                    step: 3, 
+                    title: '業務フローを作成', 
+                    desc: 'BPMNスタイルで業務プロセスを可視化します',
+                    active: false
+                  },
+                  { 
+                    step: 4, 
+                    title: 'データカタログを整備', 
+                    desc: 'テーブルとカラムを登録し、業務フローと紐付けます',
+                    active: false
+                  },
+                ].map((item, i) => (
+                  <div 
+                    key={i}
+                    className={`flex items-start gap-4 p-4 rounded-lg transition-colors animate-slide-up ${
+                      item.active 
+                        ? 'bg-primary/10 border border-primary/30' 
+                        : 'bg-secondary/30 border border-transparent hover:border-border'
+                    }`}
+                    style={{ animationDelay: `${i * 0.1}s` }}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-mono font-bold text-sm flex-shrink-0 ${
+                      item.active 
+                        ? 'bg-primary text-primary-foreground' 
+                        : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {item.step}
+                    </div>
+                    <div>
+                      <p className={`font-medium ${item.active ? 'text-primary' : 'text-foreground'}`}>
+                        {item.title}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {item.desc}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium text-gray-900">プロジェクトを選択</p>
-                    <p className="text-sm text-gray-600">
-                      左のリストからプロジェクトを選ぶか、新規作成します
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
-                  <div className="w-8 h-8 rounded-full bg-gray-400 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
-                    2
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">ロールを定義</p>
-                    <p className="text-sm text-gray-600">
-                      業務を担当する人・システムを登録します
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
-                  <div className="w-8 h-8 rounded-full bg-gray-400 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
-                    3
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">業務フローを作成</p>
-                    <p className="text-sm text-gray-600">
-                      BPMNスタイルで業務プロセスを可視化します
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
-                  <div className="w-8 h-8 rounded-full bg-gray-400 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
-                    4
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">データカタログを整備</p>
-                    <p className="text-sm text-gray-600">
-                      テーブルとカラムを登録し、業務フローと紐付けます
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                ))}
+              </div>
+            </div>
           </div>
         </>
       )}
