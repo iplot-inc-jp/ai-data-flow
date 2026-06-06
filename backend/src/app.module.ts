@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 
 // Domain
 import {
@@ -14,6 +15,10 @@ import {
   BUSINESS_FLOW_REPOSITORY,
   FLOW_NODE_REPOSITORY,
   CRUD_MAPPING_REPOSITORY,
+  PROJECT_PHASE_REPOSITORY,
+  GAP_ITEM_REPOSITORY,
+  ISSUE_TREE_REPOSITORY,
+  ISSUE_NODE_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -29,6 +34,32 @@ import {
   GetProjectsUseCase,
   CreateRoleUseCase,
   GetRolesUseCase,
+  // ProjectPhase
+  CreatePhaseUseCase,
+  GetPhasesUseCase,
+  GetPhaseUseCase,
+  InitializePhasesUseCase,
+  UpdatePhaseUseCase,
+  TransitionPhaseUseCase,
+  DeletePhaseUseCase,
+  // GapItem
+  CreateGapItemUseCase,
+  GetGapItemsUseCase,
+  GetGapItemUseCase,
+  UpdateGapItemUseCase,
+  ResolveGapItemUseCase,
+  ReopenGapItemUseCase,
+  DeleteGapItemUseCase,
+  // IssueTree
+  CreateIssueTreeUseCase,
+  GetIssueTreesUseCase,
+  GetIssueTreeUseCase,
+  UpdateIssueTreeUseCase,
+  DeleteIssueTreeUseCase,
+  AddIssueNodeUseCase,
+  UpdateIssueNodeUseCase,
+  DeleteIssueNodeUseCase,
+  SetNodeVerificationUseCase,
 } from './application';
 
 // Infrastructure
@@ -43,6 +74,10 @@ import {
   PrismaBusinessFlowRepository,
   PrismaFlowNodeRepository,
   PrismaCrudMappingRepository,
+  ProjectPhaseRepositoryImpl,
+  GapItemRepositoryImpl,
+  IssueTreeRepositoryImpl,
+  IssueNodeRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -56,13 +91,30 @@ import {
   RoleController,
   TableController,
   BusinessFlowController,
+  ProjectPhaseController,
+  PhaseByIdController,
+  GapItemController,
+  GapItemByIdController,
+  IssueTreeController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
 import { HealthController } from './presentation/controllers/health.controller';
 import { RequirementController } from './presentation/controllers/requirement.controller';
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
+import { ApiKeyController } from './presentation/controllers/api-key.controller';
+import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
+import { CodeCatalogController } from './presentation/controllers/code-catalog.controller';
+import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
+import { AttachmentController } from './presentation/controllers/attachment.controller';
+import { SubProjectController } from './presentation/controllers/sub-project.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
+import { ApiKeyService } from './infrastructure/services/api-key.service';
+import { CryptoService } from './infrastructure/services/crypto.service';
+import { GithubService } from './infrastructure/services/github.service';
+import { CodeExtractionService } from './infrastructure/services/code-extraction.service';
+import { SyncService } from './infrastructure/services/sync.service';
+import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.service';
 
 @Module({
   imports: [
@@ -79,6 +131,7 @@ import { ClaudeService } from './infrastructure/services/claude.service';
       }),
       inject: [ConfigService],
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
   ],
   controllers: [
@@ -90,8 +143,19 @@ import { ClaudeService } from './infrastructure/services/claude.service';
     RoleController,
     TableController,
     BusinessFlowController,
+    ProjectPhaseController,
+    PhaseByIdController,
+    GapItemController,
+    GapItemByIdController,
+    IssueTreeController,
     RequirementController,
     UserSettingsController,
+    ApiKeyController,
+    GithubConnectionController,
+    CodeCatalogController,
+    DatabaseConnectionController,
+    AttachmentController,
+    SubProjectController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -141,6 +205,22 @@ import { ClaudeService } from './infrastructure/services/claude.service';
       provide: CRUD_MAPPING_REPOSITORY,
       useClass: PrismaCrudMappingRepository,
     },
+    {
+      provide: PROJECT_PHASE_REPOSITORY,
+      useClass: ProjectPhaseRepositoryImpl,
+    },
+    {
+      provide: GAP_ITEM_REPOSITORY,
+      useClass: GapItemRepositoryImpl,
+    },
+    {
+      provide: ISSUE_TREE_REPOSITORY,
+      useClass: IssueTreeRepositoryImpl,
+    },
+    {
+      provide: ISSUE_NODE_REPOSITORY,
+      useClass: IssueNodeRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -152,9 +232,41 @@ import { ClaudeService } from './infrastructure/services/claude.service';
     GetProjectsUseCase,
     CreateRoleUseCase,
     GetRolesUseCase,
+    // ProjectPhase
+    CreatePhaseUseCase,
+    GetPhasesUseCase,
+    GetPhaseUseCase,
+    InitializePhasesUseCase,
+    UpdatePhaseUseCase,
+    TransitionPhaseUseCase,
+    DeletePhaseUseCase,
+    // GapItem
+    CreateGapItemUseCase,
+    GetGapItemsUseCase,
+    GetGapItemUseCase,
+    UpdateGapItemUseCase,
+    ResolveGapItemUseCase,
+    ReopenGapItemUseCase,
+    DeleteGapItemUseCase,
+    // IssueTree
+    CreateIssueTreeUseCase,
+    GetIssueTreesUseCase,
+    GetIssueTreeUseCase,
+    UpdateIssueTreeUseCase,
+    DeleteIssueTreeUseCase,
+    AddIssueNodeUseCase,
+    UpdateIssueNodeUseCase,
+    DeleteIssueNodeUseCase,
+    SetNodeVerificationUseCase,
 
     // ========== Services ==========
     ClaudeService,
+    ApiKeyService,
+    CryptoService,
+    GithubService,
+    CodeExtractionService,
+    SyncService,
+    SyncSchedulerService,
 
     // ========== Global Guards ==========
     {

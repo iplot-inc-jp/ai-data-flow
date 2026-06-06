@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,7 +20,14 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -28,6 +38,25 @@ type TableData = {
   description?: string;
   tags: string[];
   columnsCount?: number;
+};
+
+type DatabaseConnection = {
+  id: string;
+  name: string;
+  dialect?: string;
+  // connString is never returned in full / used for display only
+  createdAt?: string;
+};
+
+type SchemaAnalyzeResult = {
+  tables: number;
+  columns: number;
+  statuses: number;
+};
+
+type IntrospectResult = {
+  tables: number;
+  columns: number;
 };
 
 export default function ProjectCatalogPage() {
@@ -49,6 +78,28 @@ export default function ProjectCatalogPage() {
     errors: string[];
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const howToRef = useRef<HTMLSpanElement>(null);
+
+  // スキーマから取り込み(AI)
+  const [isSchemaDialogOpen, setIsSchemaDialogOpen] = useState(false);
+  const [schemaText, setSchemaText] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
+  const [schemaResult, setSchemaResult] = useState<SchemaAnalyzeResult | null>(null);
+
+  // DB直結（複数）
+  const [dbConnections, setDbConnections] = useState<DatabaseConnection[]>([]);
+  const [dbLoading, setDbLoading] = useState(false);
+  const [isAddDbDialogOpen, setIsAddDbDialogOpen] = useState(false);
+  const [newDbConn, setNewDbConn] = useState({ name: '', dialect: 'postgres', connString: '' });
+  const [savingDb, setSavingDb] = useState(false);
+  const [dbDialogError, setDbDialogError] = useState<string | null>(null);
+  // 接続ごとの解析(introspect)結果・状態
+  const [introspectingId, setIntrospectingId] = useState<string | null>(null);
+  const [introspectResults, setIntrospectResults] = useState<Record<string, IntrospectResult>>({});
+  const [introspectErrors, setIntrospectErrors] = useState<Record<string, string>>({});
+  const [deletingDbId, setDeletingDbId] = useState<string | null>(null);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
@@ -73,9 +124,177 @@ export default function ProjectCatalogPage() {
     }
   }, [projectId, getHeaders]);
 
+  const fetchDbConnections = useCallback(async () => {
+    setDbLoading(true);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/database-connections`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setDbConnections(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch database connections:', err);
+    } finally {
+      setDbLoading(false);
+    }
+  }, [projectId, getHeaders]);
+
   useEffect(() => {
     fetchTables();
-  }, [fetchTables]);
+    fetchDbConnections();
+  }, [fetchTables, fetchDbConnections]);
+
+  // キーボードショートカット
+  useKeyboardShortcuts([
+    { combo: 'mod+enter', handler: () => setIsCreateDialogOpen(true) },
+    { combo: 'n', handler: () => setIsCreateDialogOpen(true) },
+    {
+      combo: '/',
+      handler: (e) => {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      },
+    },
+    {
+      combo: 'shift+/',
+      handler: () => howToRef.current?.querySelector('button')?.click(),
+    },
+  ]);
+
+  // スキーマから取り込み(AI)
+  const handleAnalyzeSchema = async () => {
+    if (!schemaText.trim()) return;
+    setAnalyzing(true);
+    setSchemaError(null);
+    setSchemaResult(null);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/catalog/analyze-schema`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ schemaText }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setSchemaResult({
+          tables: result?.tables ?? 0,
+          columns: result?.columns ?? 0,
+          statuses: result?.statuses ?? 0,
+        });
+        await fetchTables();
+      } else {
+        const body = await res.json().catch(() => null);
+        setSchemaError(body?.message || 'スキーマの解析に失敗しました');
+      }
+    } catch (err) {
+      setSchemaError('スキーマの解析に失敗しました');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const closeSchemaDialog = () => {
+    setIsSchemaDialogOpen(false);
+    setSchemaText('');
+    setSchemaError(null);
+    setSchemaResult(null);
+  };
+
+  // DB接続を追加
+  const handleAddDbConnection = async () => {
+    if (!newDbConn.name.trim() || !newDbConn.connString.trim()) return;
+    setSavingDb(true);
+    setDbDialogError(null);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/database-connections`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          name: newDbConn.name,
+          dialect: newDbConn.dialect,
+          connString: newDbConn.connString,
+        }),
+      });
+      if (res.ok) {
+        await fetchDbConnections();
+        setIsAddDbDialogOpen(false);
+        setNewDbConn({ name: '', dialect: 'postgres', connString: '' });
+      } else {
+        const body = await res.json().catch(() => null);
+        setDbDialogError(body?.message || 'DB接続の追加に失敗しました');
+      }
+    } catch (err) {
+      setDbDialogError('DB接続の追加に失敗しました');
+    } finally {
+      setSavingDb(false);
+    }
+  };
+
+  // 解析(introspect)
+  const handleIntrospect = async (id: string) => {
+    setIntrospectingId(id);
+    setIntrospectErrors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/database-connections/${id}/introspect`, {
+        method: 'POST',
+        headers,
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setIntrospectResults((prev) => ({
+          ...prev,
+          [id]: { tables: result?.tables ?? 0, columns: result?.columns ?? 0 },
+        }));
+        await fetchTables();
+      } else {
+        const body = await res.json().catch(() => null);
+        setIntrospectErrors((prev) => ({
+          ...prev,
+          [id]: body?.message || '解析に失敗しました',
+        }));
+      }
+    } catch (err) {
+      setIntrospectErrors((prev) => ({ ...prev, [id]: '解析に失敗しました' }));
+    } finally {
+      setIntrospectingId(null);
+    }
+  };
+
+  // DB接続を削除
+  const handleDeleteDbConnection = async (id: string) => {
+    setDeletingDbId(id);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/database-connections/${id}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (res.ok) {
+        await fetchDbConnections();
+        setIntrospectResults((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        setIntrospectErrors((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to delete database connection:', err);
+    } finally {
+      setDeletingDbId(null);
+    }
+  };
 
   const handleCreateTable = async () => {
     if (!newTable.name) return;
@@ -208,11 +427,125 @@ export default function ProjectCatalogPage() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">データカタログ</h1>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+              データカタログ
+              <HelpTooltip text="システムが扱うデータの「設計図の一覧」です。テーブル（データのまとまり）とカラム（項目）のメタデータを一元管理し、CRUD表やER図の元データになります。" />
+            </h1>
             <p className="text-gray-500 mt-1">テーブルとカラムのメタデータを管理</p>
           </div>
         </div>
         <div className="flex gap-2">
+          <span ref={howToRef} className="inline-flex">
+            <HowToPanel
+              steps={[
+                'データの取り込み方法は3通り。①「DB直結」で接続文字列を登録し解析、②「スキーマから取り込み(AI)」でDDL/SQL/Prismaを貼り付けてAI解析、③「テーブル追加」で手動作成。',
+                'DB直結またはスキーマ貼付で取り込むと、テーブル・カラム・ステータスがAIにより自動生成されます。',
+                '生成・作成されたテーブルカードをクリックすると詳細画面でカラムやCRUD操作を編集できます。',
+                '検索ボックスでテーブル名・表示名・説明を絞り込めます。',
+              ]}
+              shortcuts={[
+                { keys: '⌘/Ctrl+Enter', desc: 'テーブル追加ダイアログを開く' },
+                { keys: 'n', desc: 'テーブル追加ダイアログを開く' },
+                { keys: '/', desc: '検索ボックスにフォーカス' },
+                { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+              ]}
+            />
+          </span>
+          {/* スキーマから取り込み(AI) */}
+          <Dialog open={isSchemaDialogOpen} onOpenChange={(open) => {
+            if (!open) closeSchemaDialog();
+            else setIsSchemaDialogOpen(true);
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50">
+                <Sparkles className="h-4 w-4 mr-2" />
+                スキーマから取り込み(AI)
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-white border-gray-200 max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-gray-900 flex items-center gap-2">
+                  スキーマから取り込み(AI)
+                  <HelpTooltip text="DBに接続せず、設計図テキスト（DDL/SQL/Prisma）を貼り付けるだけでAIがテーブル・カラム・ステータスを推定生成します。設計途中や接続情報が無い場面向け。実DBがある場合は「DB直結」の方が正確です。" />
+                </DialogTitle>
+                <DialogDescription className="text-gray-500">
+                  DDL/SQL/Prisma など任意のスキーマテキストを貼り付けると、AIが解析してテーブル/カラム/ステータスを生成します。生成結果は既存のカタログ編集UIから編集できます。
+                </DialogDescription>
+              </DialogHeader>
+
+              {!schemaResult ? (
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label className="text-gray-700">スキーマテキスト（DDL / SQL / Prisma など）</Label>
+                    <Textarea
+                      value={schemaText}
+                      onChange={(e) => setSchemaText(e.target.value)}
+                      placeholder={`CREATE TABLE users (\n  id UUID PRIMARY KEY,\n  email VARCHAR(255) NOT NULL UNIQUE,\n  status VARCHAR(20)\n);\n\n-- または Prisma\nmodel User {\n  id    String @id\n  email String @unique\n}`}
+                      className="bg-white border-gray-300 text-gray-900 font-mono text-xs h-64"
+                    />
+                  </div>
+                  {schemaError && (
+                    <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                      {schemaError}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="py-6">
+                  <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Check className="h-5 w-5 text-green-600" />
+                      <span className="font-medium text-green-700">解析完了</span>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <p className="text-gray-700">
+                        生成されたテーブル: <strong>{schemaResult.tables}</strong>
+                      </p>
+                      <p className="text-gray-700">
+                        生成されたカラム: <strong>{schemaResult.columns}</strong>
+                      </p>
+                      <p className="text-gray-700">
+                        生成されたステータス: <strong>{schemaResult.statuses}</strong>
+                      </p>
+                    </div>
+                    <p className="mt-3 text-xs text-gray-500">
+                      生成されたテーブル/カラムは各テーブルの詳細画面から編集できます。
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter>
+                {!schemaResult ? (
+                  <>
+                    <Button variant="outline" onClick={closeSchemaDialog} className="border-gray-300 text-gray-700">
+                      キャンセル
+                    </Button>
+                    <Button
+                      className="bg-violet-600 hover:bg-violet-700"
+                      onClick={handleAnalyzeSchema}
+                      disabled={!schemaText.trim() || analyzing}
+                    >
+                      {analyzing ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          解析中...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4 mr-2" />
+                          AIで解析
+                        </>
+                      )}
+                    </Button>
+                  </>
+                ) : (
+                  <Button onClick={closeSchemaDialog}>閉じる</Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* CSVインポートボタン */}
           <Dialog open={isImportDialogOpen} onOpenChange={(open) => {
             if (!open) closeImportDialog();
@@ -403,11 +736,200 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
         </div>
       </div>
 
+      {/* 取り込みの説明 */}
+      <div className="flex items-start gap-2 p-3 bg-violet-50 border border-violet-200 rounded-lg">
+        <Sparkles className="h-5 w-5 text-violet-600 mt-0.5 shrink-0" />
+        <p className="text-sm text-violet-800">
+          DB直結 or スキーマ貼付でAIが解析し、テーブル/カラム/ステータスを生成。結果は編集可能。
+        </p>
+      </div>
+
+      {/* DB直結（複数） */}
+      <Card className="bg-white border-gray-200">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center">
+                <Server className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div>
+                <CardTitle className="text-gray-900 text-lg flex items-center gap-2">
+                  DB直結（複数）
+                  <HelpTooltip text="既存DBに接続文字列で直接つなぎ、解析(introspect)で実テーブル定義をそのまま取り込む方法。実装済みのDBが正解なので最も正確ですが、稼働中DBへの接続情報が必要です。一方「スキーマから取り込み(AI)」はDDL/SQLテキストを貼るだけで、接続不要・設計段階でも使えます。" />
+                </CardTitle>
+                <p className="text-xs text-gray-500">接続文字列を登録し、解析(introspect)でスキーマを取り込みます（解析は現在 postgres に対応）</p>
+              </div>
+            </div>
+            <Dialog open={isAddDbDialogOpen} onOpenChange={(open) => {
+              setIsAddDbDialogOpen(open);
+              if (open) setDbDialogError(null);
+            }}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                  <Plus className="h-4 w-4 mr-2" />
+                  DB接続を追加
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-white border-gray-200">
+                <DialogHeader>
+                  <DialogTitle className="text-gray-900">DB接続を追加</DialogTitle>
+                  <DialogDescription className="text-gray-500">
+                    データベースへの直接接続を登録します。接続文字列は安全に保存されます。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="db-name" className="text-gray-700">接続名</Label>
+                    <Input
+                      id="db-name"
+                      placeholder="本番DB"
+                      value={newDbConn.name}
+                      onChange={(e) => setNewDbConn({ ...newDbConn, name: e.target.value })}
+                      className="bg-white border-gray-300 text-gray-900"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="db-dialect" className="text-gray-700">方言 (dialect)</Label>
+                    <Select
+                      value={newDbConn.dialect}
+                      onValueChange={(value) => setNewDbConn({ ...newDbConn, dialect: value })}
+                    >
+                      <SelectTrigger id="db-dialect" className="bg-white border-gray-300 text-gray-900">
+                        <SelectValue placeholder="方言を選択" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white">
+                        <SelectItem value="postgres">postgres</SelectItem>
+                        <SelectItem value="mysql">mysql</SelectItem>
+                        <SelectItem value="sqlite">sqlite</SelectItem>
+                        <SelectItem value="mssql">mssql</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="db-connstring" className="text-gray-700">接続文字列 (connString)</Label>
+                    <Input
+                      id="db-connstring"
+                      type="password"
+                      placeholder="postgresql://user:pass@host:5432/db"
+                      value={newDbConn.connString}
+                      onChange={(e) => setNewDbConn({ ...newDbConn, connString: e.target.value })}
+                      className="bg-white border-gray-300 text-gray-900 font-mono"
+                    />
+                  </div>
+                  {dbDialogError && (
+                    <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                      {dbDialogError}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAddDbDialogOpen(false)} className="border-gray-300 text-gray-700">
+                    キャンセル
+                  </Button>
+                  <Button
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={handleAddDbConnection}
+                    disabled={!newDbConn.name.trim() || !newDbConn.connString.trim() || savingDb}
+                  >
+                    {savingDb ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        追加中...
+                      </>
+                    ) : (
+                      '追加'
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {dbLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+            </div>
+          ) : dbConnections.length > 0 ? (
+            <div className="space-y-3">
+              {dbConnections.map((conn) => {
+                const result = introspectResults[conn.id];
+                const error = introspectErrors[conn.id];
+                return (
+                  <div
+                    key={conn.id}
+                    className="flex items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900 truncate">{conn.name}</span>
+                        {conn.dialect && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
+                            {conn.dialect}
+                          </span>
+                        )}
+                      </div>
+                      {result && (
+                        <p className="text-xs text-emerald-700 mt-1">
+                          解析完了: テーブル <strong>{result.tables}</strong> / カラム <strong>{result.columns}</strong>
+                        </p>
+                      )}
+                      {error && (
+                        <p className="text-xs text-red-600 mt-1">{error}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                        onClick={() => handleIntrospect(conn.id)}
+                        disabled={introspectingId === conn.id}
+                      >
+                        {introspectingId === conn.id ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            解析中...
+                          </>
+                        ) : (
+                          <>
+                            <ScanLine className="h-4 w-4 mr-1" />
+                            解析(introspect)
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => handleDeleteDbConnection(conn.id)}
+                        disabled={deletingDbId === conn.id}
+                      >
+                        {deletingDbId === conn.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400 py-4 text-center">
+              DB接続がありません。「DB接続を追加」から登録してください。
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
         <Input
-          placeholder="テーブルを検索..."
+          ref={searchInputRef}
+          placeholder="テーブルを検索...（/ でフォーカス）"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400"

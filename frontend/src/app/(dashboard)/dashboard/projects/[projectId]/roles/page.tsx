@@ -24,6 +24,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Users, Plus, User, Monitor, HelpCircle, Pencil, Trash2, Loader2, ChevronLeft } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -130,6 +133,20 @@ export default function ProjectRolesPage() {
     '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16',
   ];
 
+  // キーボードショートカット
+  const openHowTo = useCallback(() => {
+    document
+      .getElementById('howto-trigger-roles')
+      ?.querySelector<HTMLButtonElement>('button')
+      ?.click();
+  }, []);
+
+  useKeyboardShortcuts([
+    { combo: 'n', handler: () => setIsCreateDialogOpen(true) },
+    { combo: 'mod+enter', handler: () => setIsCreateDialogOpen(true) },
+    { combo: 'shift+/', handler: openHowTo },
+  ]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[400px]">
@@ -150,10 +167,29 @@ export default function ProjectRolesPage() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">ロール管理</h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-3xl font-bold text-gray-900">ロール管理</h1>
+              <HelpTooltip text="ロールとは業務フローの「スイムレーン」に並ぶ担当主体です。人（顧客・営業など）／システム（基幹システム・外部APIなど）／その他に分類し、誰が・何が処理を担うのかを表します。" />
+            </div>
             <p className="text-gray-500 mt-1">業務を担当する主体（人・システム）を定義</p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          <span id="howto-trigger-roles" className="contents">
+            <HowToPanel
+              steps={[
+                '「ロール追加」を押し、ロール名（例：顧客、受注システム）を入力します。',
+                '種別を 人／システム／その他 から選びます。種別ごとにアイコンと色で区別されます。',
+                'スイムレーンカラーを選びます。この色は業務フロー図のレーンの色として使われます。',
+                '作成したロールは各カードから編集・削除でき、いくつのフローで使用中かも確認できます。',
+              ]}
+              shortcuts={[
+                { keys: 'N', desc: 'ロール追加ダイアログを開く' },
+                { keys: '⌘/Ctrl+Enter', desc: 'ロール追加ダイアログを開く' },
+                { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+              ]}
+            />
+          </span>
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button className="bg-blue-600 hover:bg-blue-700">
@@ -230,6 +266,7 @@ export default function ProjectRolesPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Roles Grid */}

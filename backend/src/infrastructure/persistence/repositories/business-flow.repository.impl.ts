@@ -64,6 +64,9 @@ export class PrismaBusinessFlowRepository implements IBusinessFlowRepository {
       name: flow.name,
       description: flow.description,
       version: flow.version,
+      kind: flow.kind,
+      confidence: flow.confidence,
+      subProjectId: flow.subProjectId,
       parentId: flow.parentId,
       depth: flow.depth,
     };
@@ -87,6 +90,9 @@ export class PrismaBusinessFlowRepository implements IBusinessFlowRepository {
     name: string;
     description: string | null;
     version: number;
+    kind?: string;
+    confidence?: string;
+    subProjectId?: string | null;
     parentId: string | null;
     depth: number;
     createdAt: Date;
@@ -98,6 +104,9 @@ export class PrismaBusinessFlowRepository implements IBusinessFlowRepository {
       name: record.name,
       description: record.description,
       version: record.version,
+      kind: (record.kind as 'ASIS' | 'TOBE') ?? 'ASIS',
+      confidence: (record.confidence as 'HYPOTHESIS' | 'CONFIRMED') ?? 'HYPOTHESIS',
+      subProjectId: record.subProjectId ?? null,
       parentId: record.parentId,
       depth: record.depth,
       createdAt: record.createdAt,

@@ -1,12 +1,33 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ArrowLeft, FileCode, Loader2, Eye } from 'lucide-react';
-import { BPMNFlowViewer, FlowData, Role } from '@/components/flow-editor/BPMNFlowViewer';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  ArrowLeft,
+  FileCode,
+  Loader2,
+  Eye,
+  Users,
+  Wand2,
+  AlertCircle,
+} from 'lucide-react';
+import { SwimlaneCanvas } from '@/components/flow-editor/SwimlaneCanvas';
+import type { FlowData, Role } from '@/components/flow-editor/flow-types';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import mermaid from 'mermaid';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
@@ -33,6 +54,26 @@ export default function ProjectFlowDetailPage() {
   const [flowHistory, setFlowHistory] = useState<string[]>([]);
   const [mermaidCode, setMermaidCode] = useState<string | null>(null);
   const [showMermaid, setShowMermaid] = useState(false);
+
+  // 表示ロール選択（フローごとに localStorage 永続化）
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[] | null>(null);
+  const [showRolePanel, setShowRolePanel] = useState(false);
+  const rolePanelRef = useRef<HTMLDivElement | null>(null);
+
+  // ロールのチェックを外したとき、そのロールに属するノードを再割当するダイアログ
+  const [reassign, setReassign] = useState<{
+    roleId: string;
+    nodes: { id: string; label: string; targetRoleId: string }[];
+  } | null>(null);
+  const [reassignBusy, setReassignBusy] = useState(false);
+
+  // Mermaid から生成ダイアログ
+  const [showMermaidImport, setShowMermaidImport] = useState(false);
+  const [mermaidImportText, setMermaidImportText] = useState('');
+  const [mermaidImporting, setMermaidImporting] = useState(false);
+  const [mermaidImportError, setMermaidImportError] = useState<string | null>(null);
+
+  const howToRef = useRef<HTMLDivElement | null>(null);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
@@ -158,24 +199,6 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
-  // ノード位置更新
-  const handleNodePositionUpdate = useCallback(
-    async (nodeId: string, position: { x: number; y: number }) => {
-      if (!flowData) return;
-      try {
-        const headers = getHeaders();
-        await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes/${nodeId}`, {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify({ positionX: position.x, positionY: position.y }),
-        });
-      } catch (err) {
-        console.error('Failed to update node position:', err);
-      }
-    },
-    [flowData, getHeaders]
-  );
-
   // ノードロール更新
   const handleNodeRoleUpdate = useCallback(
     async (nodeId: string, roleId: string) => {
@@ -197,10 +220,42 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
-  // ノード作成
-  const handleNodeCreate = useCallback(
-    async (type: string, x: number, y: number) => {
+  // ノード更新（ラベル/種別/ロール/並び順/メタデータ）
+  // SwimlaneCanvas が右サイドバー保存・ドラッグ完了（order/roleId 変更）で呼ぶ
+  const handleNodeUpdate = useCallback(
+    async (
+      nodeId: string,
+      patch: {
+        label?: string;
+        type?: string;
+        roleId?: string;
+        order?: number;
+        metadata?: Record<string, unknown>;
+      }
+    ) => {
       if (!flowData) return;
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes/${nodeId}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(patch),
+        });
+
+        if (!res.ok) throw new Error('Failed to update node');
+        fetchFlowData(flowData.id);
+      } catch (err) {
+        console.error('Failed to update node:', err);
+      }
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
+  // ノード作成（構造ベース：位置はサーバ側0固定、描画は自動レイアウト）
+  const handleNodeCreate = useCallback(
+    async (input: { type: string; roleId?: string; afterNodeId?: string }) => {
+      if (!flowData) return;
+      const { type, roleId } = input;
       try {
         const headers = getHeaders();
         const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes`, {
@@ -209,8 +264,9 @@ export default function ProjectFlowDetailPage() {
           body: JSON.stringify({
             type,
             label: type === 'DECISION' ? '条件分岐' : type === 'SYSTEM_INTEGRATION' ? 'システム連携' : '新規処理',
-            positionX: x,
-            positionY: y,
+            positionX: 0,
+            positionY: 0,
+            ...(roleId ? { roleId } : {}),
           }),
         });
 
@@ -319,59 +375,187 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
-  // ロール並び替え
-  const handleRoleReorder = useCallback(
-    async (roleId: string, direction: 'up' | 'down') => {
-      const currentIndex = roles.findIndex((r) => r.id === roleId);
-      if (currentIndex === -1) return;
-      
-      const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-      if (newIndex < 0 || newIndex >= roles.length) return;
+  // ===========================================
+  // 表示ロール選択（フローごと localStorage 永続化）
+  // ===========================================
+  const rolesStorageKey = useMemo(() => `flow-roles-${flowId}`, [flowId]);
 
-      // ローカルで先に並び替え
-      const newRoles = [...roles];
-      [newRoles[currentIndex], newRoles[newIndex]] = [newRoles[newIndex], newRoles[currentIndex]];
-      setRoles(newRoles);
-
-      // APIに並び順を保存
-      try {
-        const headers = getHeaders();
-        await fetch(`${API_URL}/api/roles/project/${projectId}/order`, {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify({ roleIds: newRoles.map((r) => r.id) }),
-        });
-      } catch (err) {
-        console.error('Failed to reorder roles:', err);
-        // エラー時は元に戻す
-        setRoles(roles);
-      }
-    },
-    [roles, projectId, getHeaders]
-  );
-
-  // レーン高さ更新
-  const handleLaneHeightUpdate = useCallback(
-    async (roleId: string, height: number) => {
-      try {
-        const headers = getHeaders();
-        const res = await fetch(`${API_URL}/api/roles/${roleId}/lane-height`, {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify({ laneHeight: height }),
-        });
-
-        if (res.ok) {
-          setRoles((prev) =>
-            prev.map((r) => (r.id === roleId ? { ...r, laneHeight: height } : r))
-          );
+  // roles 取得・flow 切替時に選択状態を初期化（保存値があれば復元、無ければ全選択）
+  useEffect(() => {
+    if (roles.length === 0) {
+      setSelectedRoleIds(null);
+      return;
+    }
+    const allIds = roles.map((r) => r.id);
+    let next = allIds;
+    try {
+      const raw = localStorage.getItem(rolesStorageKey);
+      if (raw) {
+        const saved = JSON.parse(raw) as string[];
+        if (Array.isArray(saved)) {
+          // 既に存在するロールのみに絞り込む
+          const filtered = saved.filter((id) => allIds.includes(id));
+          next = filtered.length > 0 ? filtered : allIds;
         }
-      } catch (err) {
-        console.error('Failed to update lane height:', err);
+      }
+    } catch {
+      next = allIds;
+    }
+    setSelectedRoleIds(next);
+  }, [roles, rolesStorageKey]);
+
+  // 表示対象のロール（選択中のみ）
+  const visibleRoles = useMemo(() => {
+    if (selectedRoleIds === null) return roles;
+    const set = new Set(selectedRoleIds);
+    return roles.filter((r) => set.has(r.id));
+  }, [roles, selectedRoleIds]);
+
+  // 選択状態を保存しつつ更新
+  const persistSelectedRoles = useCallback(
+    (ids: string[]) => {
+      setSelectedRoleIds(ids);
+      try {
+        localStorage.setItem(rolesStorageKey, JSON.stringify(ids));
+      } catch {
+        /* noop */
       }
     },
-    [getHeaders]
+    [rolesStorageKey]
   );
+
+  // ロールのチェック切替
+  const toggleRole = useCallback(
+    (roleId: string, checked: boolean) => {
+      const current = selectedRoleIds ?? roles.map((r) => r.id);
+
+      if (checked) {
+        persistSelectedRoles(Array.from(new Set([...current, roleId])));
+        return;
+      }
+
+      // 外す場合：このフロー内で当該ロールに割り当てられたノードがあるか確認
+      const affected = (flowData?.nodes ?? []).filter((n) => n.roleId === roleId);
+      if (affected.length === 0) {
+        persistSelectedRoles(current.filter((id) => id !== roleId));
+        return;
+      }
+
+      // 再割当先候補（外そうとしているロール以外）
+      const otherRoles = roles.filter((r) => r.id !== roleId);
+      const defaultTarget = otherRoles[0]?.id ?? '';
+      setReassign({
+        roleId,
+        nodes: affected.map((n) => ({
+          id: n.id,
+          label: n.label,
+          targetRoleId: defaultTarget,
+        })),
+      });
+    },
+    [selectedRoleIds, roles, flowData, persistSelectedRoles]
+  );
+
+  // 再割当ダイアログの確定：各ノードの roleId を更新 → 再取得 → チェックを外す
+  const handleReassignConfirm = useCallback(async () => {
+    if (!reassign || !flowData) return;
+    setReassignBusy(true);
+    try {
+      const headers = getHeaders();
+      for (const node of reassign.nodes) {
+        if (!node.targetRoleId || node.targetRoleId === reassign.roleId) continue;
+        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes/${node.id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ roleId: node.targetRoleId }),
+        });
+        if (!res.ok) throw new Error('Failed to reassign node role');
+      }
+
+      const removedRoleId = reassign.roleId;
+      setReassign(null);
+      // 当該ロールのチェックを外す
+      const current = selectedRoleIds ?? roles.map((r) => r.id);
+      persistSelectedRoles(current.filter((id) => id !== removedRoleId));
+      // 再取得（再割当の反映）
+      fetchFlowData(flowData.id);
+    } catch (err) {
+      console.error('Failed to reassign nodes:', err);
+    } finally {
+      setReassignBusy(false);
+    }
+  }, [reassign, flowData, getHeaders, selectedRoleIds, roles, persistSelectedRoles, fetchFlowData]);
+
+  // ===========================================
+  // Mermaid から生成（import）
+  // ===========================================
+  const handleMermaidImport = useCallback(async () => {
+    if (!flowData || !mermaidImportText.trim()) return;
+    setMermaidImporting(true);
+    setMermaidImportError(null);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/import-mermaid`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ mermaid: mermaidImportText }),
+      });
+      if (!res.ok) {
+        let msg = 'Mermaidの取り込みに失敗しました';
+        try {
+          const body = await res.json();
+          if (body?.message) msg = Array.isArray(body.message) ? body.message.join(', ') : body.message;
+        } catch {
+          /* noop */
+        }
+        throw new Error(msg);
+      }
+      setShowMermaidImport(false);
+      setMermaidImportText('');
+      fetchFlowData(flowData.id);
+    } catch (err) {
+      setMermaidImportError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setMermaidImporting(false);
+    }
+  }, [flowData, mermaidImportText, getHeaders, fetchFlowData]);
+
+  // キーボードショートカット
+  // ⌘/Ctrl+S … ブラウザ保存を抑止しつつ Mermaid出力（フローはノード編集時に自動保存される）
+  // ⌘/Ctrl+I … mermaidから生成、Shift+/（?） … 操作方法
+  useKeyboardShortcuts([
+    {
+      combo: 'shift+/',
+      handler: () => howToRef.current?.querySelector('button')?.click(),
+    },
+    {
+      combo: 'mod+s',
+      whenTyping: true,
+      handler: () => {
+        if (flowData) fetchMermaid();
+      },
+    },
+    {
+      combo: 'mod+i',
+      whenTyping: true,
+      handler: () => {
+        setMermaidImportError(null);
+        setShowMermaidImport(true);
+      },
+    },
+  ]);
+
+  // ロールパネル外クリックで閉じる
+  useEffect(() => {
+    if (!showRolePanel) return;
+    const onDown = (e: MouseEvent) => {
+      if (rolePanelRef.current && !rolePanelRef.current.contains(e.target as Node)) {
+        setShowRolePanel(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [showRolePanel]);
 
   // Mermaidプレビュー用のレンダリング
   const [mermaidSvg, setMermaidSvg] = useState<string | null>(null);
@@ -441,36 +625,134 @@ export default function ProjectFlowDetailPage() {
     <div className="space-y-4 h-full">
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
-        <Link href={`/dashboard/projects/${projectId}/flows`}>
-          <Button variant="ghost" className="text-gray-600">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            フロー一覧
+        <div className="flex items-center gap-2">
+          <Link href={`/dashboard/projects/${projectId}/flows`}>
+            <Button variant="ghost" className="text-gray-600">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              フロー一覧
+            </Button>
+          </Link>
+          <span className="hidden items-center gap-1.5 text-sm font-medium text-gray-700 sm:inline-flex">
+            業務フロー編集
+            <HelpTooltip text="役割（ロール）ごとのスイムレーン上で処理を並べ、矢印でつなぐ図です。ノードのドラッグでロール移動・並び替えができ、ダブルクリックで子フローに潜れます。" />
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* 操作ガイド */}
+          <div ref={howToRef}>
+            <HowToPanel
+              title="業務フロー編集の使い方"
+              steps={[
+                'ノードをドラッグすると、別のロール（スイムレーン）への移動や並び替えができます。',
+                'ノードのハンドルから別のノードへドラッグすると矢印（接続）を引けます。ノードを選ぶと右パネルでラベル・種別を編集できます。',
+                '右上のツールバーで縦／横の向きを切り替え、PNG出力で図を画像として保存できます。',
+                '「mermaidから生成」で Mermaid 記法を貼り付けて一括作成、「Mermaid出力」で図を Mermaid コードとして書き出せます。',
+                '「ロール」で表示するスイムレーンを絞り込み。ノードをダブルクリックすると子フローへ移動します。',
+              ]}
+              shortcuts={[
+                { keys: '⌘/Ctrl+S', desc: 'Mermaid出力を開く（自動保存のため上書き保存は不要）' },
+                { keys: '⌘/Ctrl+I', desc: 'mermaidから生成ダイアログを開く' },
+                { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+              ]}
+            />
+          </div>
+          {/* ロール表示選択 */}
+          <div className="relative" ref={rolePanelRef}>
+            <Button
+              variant="outline"
+              onClick={() => setShowRolePanel((v) => !v)}
+              className="text-gray-600"
+            >
+              <Users className="w-4 h-4 mr-2" />
+              ロール
+              {selectedRoleIds && roles.length > 0 && (
+                <span className="ml-2 text-xs text-gray-500">
+                  {selectedRoleIds.length}/{roles.length}
+                </span>
+              )}
+            </Button>
+            {showRolePanel && (
+              <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3">
+                <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                  表示するロール
+                  <HelpTooltip text="ロールはスイムレーン（担当者・部署）です。チェックを外すと、そのレーンを図から非表示にできます（割り当て済みノードは再割当を求められます）。" />
+                </div>
+                {roles.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-2">ロールがありません</p>
+                ) : (
+                  <div className="space-y-1 max-h-72 overflow-auto">
+                    {roles.map((r) => {
+                      const checked = selectedRoleIds
+                        ? selectedRoleIds.includes(r.id)
+                        : true;
+                      return (
+                        <label
+                          key={r.id}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => toggleRole(r.id, e.target.checked)}
+                            className="rounded border-gray-300"
+                          />
+                          <span
+                            className="inline-block w-3 h-3 rounded-sm shrink-0"
+                            style={{ backgroundColor: r.color }}
+                          />
+                          <span className="text-sm text-gray-800 truncate">{r.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="mt-3 pt-2 border-t border-gray-100 flex justify-end">
+                  <button
+                    type="button"
+                    className="text-xs text-blue-600 hover:underline"
+                    onClick={() => persistSelectedRoles(roles.map((rr) => rr.id))}
+                  >
+                    すべて表示
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setMermaidImportError(null);
+              setShowMermaidImport(true);
+            }}
+            className="text-gray-600"
+          >
+            <Wand2 className="w-4 h-4 mr-2" />
+            mermaidから生成
           </Button>
-        </Link>
-        <Button variant="outline" onClick={fetchMermaid} className="text-gray-600">
-          <FileCode className="w-4 h-4 mr-2" />
-          Mermaid出力
-        </Button>
+          <Button variant="outline" onClick={fetchMermaid} className="text-gray-600">
+            <FileCode className="w-4 h-4 mr-2" />
+            Mermaid出力
+          </Button>
+        </div>
       </div>
 
       {/* フロービューアー */}
       <div className="h-[calc(100vh-200px)] border border-gray-200 rounded-lg overflow-hidden">
-        <BPMNFlowViewer
+        <SwimlaneCanvas
           flowData={flowData}
-          roles={roles}
-          onNodeDoubleClick={handleNodeDoubleClick}
+          roles={visibleRoles}
           onBack={flowHistory.length > 1 ? handleBack : undefined}
-          onFlowUpdate={handleFlowUpdate}
-          onEdgeLabelUpdate={handleEdgeLabelUpdate}
-          onNodePositionUpdate={handleNodePositionUpdate}
-          onNodeRoleUpdate={handleNodeRoleUpdate}
-          onNodeCreate={handleNodeCreate}
-          onNodeDelete={handleNodeDelete}
-          onEdgeCreate={handleEdgeCreate}
-          onEdgeDelete={handleEdgeDelete}
-          onChildFlowCreate={handleChildFlowCreate}
-          onRoleReorder={handleRoleReorder}
-          onLaneHeightUpdate={handleLaneHeightUpdate}
+          onUpdateFlow={handleFlowUpdate}
+          onCreateNode={handleNodeCreate}
+          onConnectNodes={handleEdgeCreate}
+          onDeleteNode={handleNodeDelete}
+          onDeleteEdge={handleEdgeDelete}
+          onUpdateEdgeLabel={handleEdgeLabelUpdate}
+          onChangeNodeRole={handleNodeRoleUpdate}
+          onUpdateNode={handleNodeUpdate}
+          onCreateChildFlow={handleChildFlowCreate}
+          onOpenChildFlow={handleNodeDoubleClick}
+          onAddRole={() => router.push(`/dashboard/projects/${projectId}/roles`)}
         />
       </div>
 
@@ -533,6 +815,125 @@ export default function ProjectFlowDetailPage() {
           </div>
         </div>
       )}
+
+      {/* 再割当ダイアログ（ロールを非表示にする際、所属ノードを別ロールへ） */}
+      <Dialog
+        open={!!reassign}
+        onOpenChange={(open) => {
+          if (!open && !reassignBusy) setReassign(null);
+        }}
+      >
+        <DialogContent className="bg-white max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900">ノードの再割当</DialogTitle>
+            <DialogDescription className="text-gray-500">
+              「{roles.find((r) => r.id === reassign?.roleId)?.name ?? 'このロール'}
+              」を非表示にする前に、所属するノードの割当先ロールを選んでください。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[50vh] overflow-auto">
+            {reassign?.nodes.map((node, idx) => (
+              <div key={node.id} className="flex items-center gap-3">
+                <span className="flex-1 text-sm text-gray-800 truncate">{node.label}</span>
+                <select
+                  className="text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white text-gray-800 min-w-[140px]"
+                  value={node.targetRoleId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setReassign((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            nodes: prev.nodes.map((n, i) =>
+                              i === idx ? { ...n, targetRoleId: val } : n
+                            ),
+                          }
+                        : prev
+                    );
+                  }}
+                >
+                  {roles
+                    .filter((r) => r.id !== reassign?.roleId)
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setReassign(null)}
+              disabled={reassignBusy}
+            >
+              キャンセル
+            </Button>
+            <Button
+              onClick={handleReassignConfirm}
+              disabled={
+                reassignBusy ||
+                roles.filter((r) => r.id !== reassign?.roleId).length === 0
+              }
+            >
+              {reassignBusy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              確定
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mermaidから生成ダイアログ */}
+      <Dialog
+        open={showMermaidImport}
+        onOpenChange={(open) => {
+          if (!open && !mermaidImporting) setShowMermaidImport(false);
+        }}
+      >
+        <DialogContent className="bg-white max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5 text-gray-900">
+              mermaidから生成
+              <HelpTooltip text="Mermaid はテキストで図を書く記法です。flowchart の定義を貼り付けると、ロール・ノード・接続を解析してこのフローへ一括で追加します。" />
+            </DialogTitle>
+            <DialogDescription className="text-gray-500">
+              Mermaid記法のテキストを貼り付けると、ロール・ノード・接続をこのフローに追加します。
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={mermaidImportText}
+            onChange={(e) => setMermaidImportText(e.target.value)}
+            placeholder={'flowchart TD\n  A[受注] --> B[出荷]'}
+            rows={12}
+            className="font-mono text-xs text-gray-800 min-h-[240px]"
+            disabled={mermaidImporting}
+          />
+          {mermaidImportError && (
+            <div className="flex items-start gap-2 text-sm text-red-600">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{mermaidImportError}</span>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowMermaidImport(false)}
+              disabled={mermaidImporting}
+            >
+              キャンセル
+            </Button>
+            <Button
+              onClick={handleMermaidImport}
+              disabled={mermaidImporting || !mermaidImportText.trim()}
+            >
+              {mermaidImporting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              生成
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

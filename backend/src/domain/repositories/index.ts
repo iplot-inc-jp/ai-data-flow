@@ -7,3 +7,7 @@ export * from './column.repository';
 export * from './business-flow.repository';
 export * from './flow-node.repository';
 export * from './crud-mapping.repository';
+export * from './project-phase.repository';
+export * from './gap-item.repository';
+export * from './issue-tree.repository';
+export * from './issue-node.repository';

@@ -18,7 +18,12 @@ const config: Config = {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ['"Yu Gothic Medium"', '"Yu Gothic"', "YuGothic", '"游ゴシック体"', '"Hiragino Kaku Gothic ProN"', '"Noto Sans JP"', "system-ui", "sans-serif"],
+        serif: ['"Yu Gothic"', "YuGothic", '"游ゴシック体"', '"Hiragino Kaku Gothic ProN"', '"Noto Sans JP"', "sans-serif"],
+      },
       colors: {
+        navy: "hsl(var(--navy))",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

@@ -1,11 +1,17 @@
 import { BaseEntity } from './base.entity';
 import { ValidationError } from '../errors/domain.error';
 
+export type FlowKindValue = 'ASIS' | 'TOBE';
+export type FlowConfidenceValue = 'HYPOTHESIS' | 'CONFIRMED';
+
 export class BusinessFlow extends BaseEntity {
   private _projectId: string;
   private _name: string;
   private _description: string | null;
   private _version: number;
+  private _kind: FlowKindValue;
+  private _confidence: FlowConfidenceValue;
+  private _subProjectId: string | null;
   private _parentId: string | null;
   private _depth: number;
 
@@ -15,6 +21,9 @@ export class BusinessFlow extends BaseEntity {
     name: string;
     description?: string | null;
     version?: number;
+    kind?: FlowKindValue;
+    confidence?: FlowConfidenceValue;
+    subProjectId?: string | null;
     parentId?: string | null;
     depth?: number;
     createdAt?: Date;
@@ -26,6 +35,9 @@ export class BusinessFlow extends BaseEntity {
     this._name = props.name;
     this._description = props.description ?? null;
     this._version = props.version ?? 1;
+    this._kind = props.kind ?? 'ASIS';
+    this._confidence = props.confidence ?? 'HYPOTHESIS';
+    this._subProjectId = props.subProjectId ?? null;
     this._parentId = props.parentId ?? null;
     this._depth = props.depth ?? 0;
   }
@@ -44,6 +56,18 @@ export class BusinessFlow extends BaseEntity {
 
   get version(): number {
     return this._version;
+  }
+
+  get kind(): FlowKindValue {
+    return this._kind;
+  }
+
+  get confidence(): FlowConfidenceValue {
+    return this._confidence;
+  }
+
+  get subProjectId(): string | null {
+    return this._subProjectId;
   }
 
   get parentId(): string | null {
@@ -82,11 +106,31 @@ export class BusinessFlow extends BaseEntity {
     this._depth = depth;
   }
 
+  setKind(kind: FlowKindValue): void {
+    this._kind = kind;
+  }
+
+  setConfidence(confidence: FlowConfidenceValue): void {
+    this._confidence = confidence;
+  }
+
+  setSubProject(subProjectId: string | null): void {
+    this._subProjectId = subProjectId;
+  }
+
+  /** Ph.1 仮説 → Ph.2 確定 への昇格 */
+  promoteToConfirmed(): void {
+    this._confidence = 'CONFIRMED';
+  }
+
   static create(props: {
     id: string;
     projectId: string;
     name: string;
     description?: string | null;
+    kind?: FlowKindValue;
+    confidence?: FlowConfidenceValue;
+    subProjectId?: string | null;
     parentId?: string | null;
     depth?: number;
   }): BusinessFlow {

@@ -4,3 +4,6 @@ export * from './project.controller';
 export * from './role.controller';
 export * from './table.controller';
 export * from './business-flow.controller';
+export * from './project-phase.controller';
+export * from './gap-item.controller';
+export * from './issue-tree.controller';

@@ -8,9 +8,11 @@ import {
   Param,
   Query,
   Inject,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsIn, IsObject } from 'class-validator';
 import {
   BUSINESS_FLOW_REPOSITORY,
   IBusinessFlowRepository,
@@ -23,6 +25,8 @@ import {
   FlowEdge,
 } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { ClaudeService } from '../../infrastructure/services/claude.service';
+import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { v4 as uuid } from 'uuid';
 
 // DTOs
@@ -40,6 +44,18 @@ class CreateBusinessFlowDto {
   @IsOptional()
   @IsString()
   parentId?: string;
+
+  @IsOptional()
+  @IsIn(['ASIS', 'TOBE'])
+  kind?: 'ASIS' | 'TOBE';
+
+  @IsOptional()
+  @IsIn(['HYPOTHESIS', 'CONFIRMED'])
+  confidence?: 'HYPOTHESIS' | 'CONFIRMED';
+
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 }
 
 class UpdateBusinessFlowDto {
@@ -50,6 +66,18 @@ class UpdateBusinessFlowDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsIn(['ASIS', 'TOBE'])
+  kind?: 'ASIS' | 'TOBE';
+
+  @IsOptional()
+  @IsIn(['HYPOTHESIS', 'CONFIRMED'])
+  confidence?: 'HYPOTHESIS' | 'CONFIRMED';
+
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 }
 
 class CreateFlowNodeDto {
@@ -99,6 +127,14 @@ class UpdateFlowNodeDto {
   @IsOptional()
   @IsString()
   roleId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  order?: number;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
 }
 
 class CreateFlowEdgeDto {
@@ -137,6 +173,11 @@ class CreateChildFlowDto {
   description?: string;
 }
 
+class ImportMermaidDto {
+  @IsString()
+  mermaid: string;
+}
+
 @ApiTags('Business Flows')
 @ApiBearerAuth()
 @Controller('business-flows')
@@ -149,6 +190,7 @@ export class BusinessFlowController {
     @Inject(CRUD_MAPPING_REPOSITORY)
     private readonly crudMappingRepository: ICrudMappingRepository,
     private readonly prisma: PrismaService,
+    private readonly claudeService: ClaudeService,
   ) {}
 
   @Get('project/:projectId')
@@ -245,6 +287,9 @@ export class BusinessFlowController {
       projectId: dto.projectId,
       name: dto.name,
       description: dto.description,
+      kind: dto.kind,
+      confidence: dto.confidence,
+      subProjectId: dto.subProjectId,
       parentId: dto.parentId,
       depth,
     });
@@ -263,6 +308,9 @@ export class BusinessFlowController {
 
     if (dto.name) flow.updateName(dto.name);
     if (dto.description !== undefined) flow.updateDescription(dto.description);
+    if (dto.kind) flow.setKind(dto.kind);
+    if (dto.confidence) flow.setConfidence(dto.confidence);
+    if (dto.subProjectId !== undefined) flow.setSubProject(dto.subProjectId);
 
     const saved = await this.flowRepository.save(flow);
     return this.toResponse(saved);
@@ -316,9 +364,23 @@ export class BusinessFlowController {
     }
     if (dto.type) node.updateType(dto.type as any);
     if (dto.roleId !== undefined) node.assignRole(dto.roleId);
+    if (dto.metadata !== undefined) node.updateMetadata(dto.metadata);
 
     const saved = await this.nodeRepository.save(node);
-    return this.nodeToResponse(saved);
+
+    // `order` はドメインエンティティ/リポジトリが保持していないため直接更新する
+    if (dto.order !== undefined) {
+      await this.prisma.flowNode.update({
+        where: { id: nodeId },
+        data: { order: dto.order },
+      });
+    }
+
+    const record = await this.prisma.flowNode.findUnique({
+      where: { id: nodeId },
+    });
+
+    return { ...this.nodeToResponse(saved), order: record?.order ?? 0 };
   }
 
   @Delete(':flowId/nodes/:nodeId')
@@ -538,6 +600,127 @@ export class BusinessFlowController {
     };
   }
 
+  // ========== Mermaid Import (AI) ==========
+
+  @Post(':id/import-mermaid')
+  @ApiOperation({ summary: 'Mermaid図をAIで解析してフローに取り込み' })
+  async importMermaid(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: ImportMermaidDto,
+  ) {
+    const flow = await this.flowRepository.findById(id);
+    if (!flow) {
+      throw new HttpException('Business flow not found', HttpStatus.NOT_FOUND);
+    }
+
+    // APIキーを取得（ユーザー設定 > 環境変数）
+    const apiKey = await this.getApiKey(user.id);
+    if (!apiKey) {
+      throw new HttpException(
+        'Anthropic APIキーが未設定です',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Claude API で Mermaid を解析
+    const parsed = await this.claudeService.parseMermaidToFlow(
+      dto.mermaid,
+      apiKey,
+    );
+
+    const projectId = flow.projectId;
+    const VALID_NODE_TYPES = [
+      'START',
+      'END',
+      'PROCESS',
+      'DECISION',
+      'SYSTEM_INTEGRATION',
+      'MANUAL_OPERATION',
+      'DATA_STORE',
+    ];
+    const VALID_ROLE_TYPES = ['HUMAN', 'SYSTEM', 'OTHER'];
+    const DEFAULT_ROLE_COLOR = '#94a3b8';
+
+    // 1. ロールを [projectId, name] で upsert
+    const roleIdByName = new Map<string, string>();
+    for (const role of parsed.roles) {
+      if (!role?.name) continue;
+      const roleType = VALID_ROLE_TYPES.includes(role.type as string)
+        ? (role.type as 'HUMAN' | 'SYSTEM' | 'OTHER')
+        : 'HUMAN';
+      const upserted = await this.prisma.role.upsert({
+        where: { projectId_name: { projectId, name: role.name } },
+        update: {},
+        create: {
+          id: uuid(),
+          projectId,
+          name: role.name,
+          type: roleType,
+          color: DEFAULT_ROLE_COLOR,
+        },
+      });
+      roleIdByName.set(role.name, upserted.id);
+    }
+
+    // 2. ノードを作成（key → 生成IDのマップを保持）
+    const nodeIdByKey = new Map<string, string>();
+    let order = 0;
+    for (const node of parsed.nodes) {
+      if (!node?.key) continue;
+      const nodeType = VALID_NODE_TYPES.includes(node.type as string)
+        ? (node.type as string)
+        : 'PROCESS';
+      const roleId = node.roleName
+        ? roleIdByName.get(node.roleName) ?? null
+        : null;
+      const created = await this.prisma.flowNode.create({
+        data: {
+          id: uuid(),
+          flowId: id,
+          type: nodeType as any,
+          label: node.label || node.key,
+          positionX: 0,
+          positionY: 0,
+          order: order++,
+          roleId,
+        },
+      });
+      nodeIdByKey.set(node.key, created.id);
+    }
+
+    // 3. エッジを作成（sourceKey/targetKey → 生成ノードIDへ解決）
+    for (const edge of parsed.edges) {
+      const sourceNodeId = nodeIdByKey.get(edge?.sourceKey);
+      const targetNodeId = nodeIdByKey.get(edge?.targetKey);
+      if (!sourceNodeId || !targetNodeId) continue;
+      await this.prisma.flowEdge.create({
+        data: {
+          id: uuid(),
+          flowId: id,
+          sourceNodeId,
+          targetNodeId,
+          label: edge.label,
+        },
+      });
+    }
+
+    // 更新後のフロー（ノード・エッジ含む）を返す
+    return this.getById(id);
+  }
+
+  private async getApiKey(userId: string): Promise<string | null> {
+    const settings = await this.prisma.userSetting.findUnique({
+      where: { userId },
+    });
+
+    if (settings?.anthropicApiKey) {
+      return settings.anthropicApiKey;
+    }
+
+    return process.env.ANTHROPIC_API_KEY || null;
+  }
+
   private async getBreadcrumbs(flow: BusinessFlow): Promise<{ id: string; name: string }[]> {
     const breadcrumbs: { id: string; name: string }[] = [];
     let currentFlow: BusinessFlow | null = flow;
@@ -562,6 +745,9 @@ export class BusinessFlowController {
       name: flow.name,
       description: flow.description,
       version: flow.version,
+      kind: flow.kind,
+      confidence: flow.confidence,
+      subProjectId: flow.subProjectId,
       parentId: flow.parentId,
       depth: flow.depth,
       isRootFlow: flow.isRootFlow,

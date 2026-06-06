@@ -1,0 +1,800 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  ChevronLeft,
+  Plus,
+  Loader2,
+  GitCompareArrows,
+  Trash2,
+  Check,
+  RotateCcw,
+  Filter,
+  GitBranch,
+  ExternalLink,
+} from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+
+type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
+type GapStatus = 'OPEN' | 'RESOLVED';
+
+type GapItem = {
+  id: string;
+  projectId: string;
+  phaseId: string | null;
+  businessArea: string;
+  asisDescription: string | null;
+  tobeDescription: string | null;
+  gapDescription: string | null;
+  priority: Priority;
+  status: GapStatus;
+  ownerName: string | null;
+  order: number;
+  asisFlowId: string | null;
+  asisNodeId: string | null;
+  tobeFlowId: string | null;
+  tobeNodeId: string | null;
+  issueTreeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const priorityMeta: Record<Priority, { label: string; badge: string; row: string }> = {
+  HIGH: {
+    label: 'HIGH',
+    badge: 'text-red-700 bg-red-50 border-red-300',
+    row: 'border-l-red-500',
+  },
+  MEDIUM: {
+    label: 'MEDIUM',
+    badge: 'text-amber-700 bg-amber-50 border-amber-300',
+    row: 'border-l-amber-500',
+  },
+  LOW: {
+    label: 'LOW',
+    badge: 'text-green-700 bg-green-50 border-green-300',
+    row: 'border-l-green-500',
+  },
+};
+
+const statusMeta: Record<GapStatus, { label: string; badge: string }> = {
+  OPEN: { label: 'OPEN', badge: 'text-blue-700 bg-blue-50 border-blue-200' },
+  RESOLVED: { label: 'RESOLVED', badge: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+};
+
+type EditableField =
+  | 'businessArea'
+  | 'asisDescription'
+  | 'tobeDescription'
+  | 'gapDescription'
+  | 'ownerName';
+
+const ALL = 'ALL';
+
+export default function GapItemsPage() {
+  const params = useParams();
+  const router = useRouter();
+  const projectId = params.projectId as string;
+
+  const [items, setItems] = useState<GapItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // 課題ツリー作成中のGAP id
+  const [creatingTreeId, setCreatingTreeId] = useState<string | null>(null);
+
+  // フィルタ
+  const [priorityFilter, setPriorityFilter] = useState<string>(ALL);
+  const [statusFilter, setStatusFilter] = useState<string>(ALL);
+
+  // 作成ダイアログ
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [howToOpen, setHowToOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  // キーボードショートカット
+  // - mod+Enter / n : GAP追加ダイアログを開く
+  // - mod+s         : 既定の保存挙動を抑止（各セルは blur で自動保存されるため）
+  // - shift+/（?）   : 操作方法ダイアログを開く
+  useKeyboardShortcuts([
+    { combo: 'mod+enter', handler: () => setIsCreateOpen(true) },
+    { combo: 'n', handler: () => setIsCreateOpen(true) },
+    { combo: 'mod+s', handler: () => { /* blur で自動保存。ブラウザ保存ダイアログを抑止 */ }, whenTyping: true },
+    { combo: 'shift+/', handler: () => setHowToOpen(true) },
+  ]);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [newItem, setNewItem] = useState({
+    businessArea: '',
+    asisDescription: '',
+    tobeDescription: '',
+    gapDescription: '',
+    priority: 'MEDIUM' as Priority,
+    ownerName: '',
+  });
+
+  const getHeaders = useCallback(() => {
+    const token = localStorage.getItem('accessToken');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  }, []);
+
+  const fetchItems = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const headers = getHeaders();
+      const query = new URLSearchParams();
+      if (priorityFilter !== ALL) query.set('priority', priorityFilter);
+      if (statusFilter !== ALL) query.set('status', statusFilter);
+      const qs = query.toString();
+      const res = await fetch(
+        `${API_URL}/api/projects/${projectId}/gap-items${qs ? `?${qs}` : ''}`,
+        { headers },
+      );
+      if (res.ok) {
+        const data: GapItem[] = await res.json();
+        data.sort((a, b) => a.order - b.order);
+        setItems(data);
+      } else {
+        setError('GAP一覧の取得に失敗しました');
+      }
+    } catch (err) {
+      console.error('Failed to fetch gap items:', err);
+      setError('エラーが発生しました');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, priorityFilter, statusFilter, getHeaders]);
+
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
+
+  // 作成
+  const handleCreate = async () => {
+    if (!newItem.businessArea.trim()) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/gap-items`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          businessArea: newItem.businessArea.trim(),
+          asisDescription: newItem.asisDescription || undefined,
+          tobeDescription: newItem.tobeDescription || undefined,
+          gapDescription: newItem.gapDescription || undefined,
+          priority: newItem.priority,
+          ownerName: newItem.ownerName || undefined,
+        }),
+      });
+      if (res.ok) {
+        await fetchItems();
+        setIsCreateOpen(false);
+        setNewItem({
+          businessArea: '',
+          asisDescription: '',
+          tobeDescription: '',
+          gapDescription: '',
+          priority: 'MEDIUM',
+          ownerName: '',
+        });
+      } else {
+        const data = await res.json().catch(() => null);
+        setCreateError(
+          (data && (Array.isArray(data.message) ? data.message.join(' / ') : data.message)) ||
+            'GAPの作成に失敗しました',
+        );
+      }
+    } catch (err) {
+      setCreateError('エラーが発生しました');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // 部分更新（PUT）
+  const patchItem = async (id: string, body: Record<string, unknown>) => {
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/gap-items/${id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const updated: GapItem = await res.json();
+        setItems((prev) => prev.map((it) => (it.id === id ? updated : it)));
+      } else {
+        await fetchItems();
+      }
+    } catch (err) {
+      console.error('Failed to update gap item:', err);
+      await fetchItems();
+    }
+  };
+
+  // セル inline 編集（blur 時に値が変わっていれば PUT）
+  const handleCellBlur = (item: GapItem, field: EditableField, value: string) => {
+    const next = value.trim() === '' ? null : value;
+    const current = item[field] ?? null;
+    if (next === current) return;
+    patchItem(item.id, { [field]: next });
+  };
+
+  const handlePriorityChange = (item: GapItem, priority: Priority) => {
+    if (item.priority === priority) return;
+    patchItem(item.id, { priority });
+  };
+
+  // 解決 / 再オープン（status: OPEN ⇄ RESOLVED）
+  const setStatus = async (item: GapItem, action: 'resolve' | 'reopen') => {
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/gap-items/${item.id}/${action}`, {
+        method: 'POST',
+        headers,
+      });
+      if (res.ok) {
+        const updated: GapItem = await res.json();
+        setItems((prev) => prev.map((it) => (it.id === item.id ? updated : it)));
+        if (statusFilter !== ALL) await fetchItems();
+      }
+    } catch (err) {
+      console.error(`Failed to ${action} gap item:`, err);
+    }
+  };
+  const handleResolve = (item: GapItem) => setStatus(item, 'resolve');
+  const handleReopen = (item: GapItem) => setStatus(item, 'reopen');
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('このGAP（課題）を削除してもよろしいですか？')) return;
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/gap-items/${id}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (res.ok || res.status === 204) {
+        setItems((prev) => prev.filter((it) => it.id !== id));
+      }
+    } catch (err) {
+      console.error('Failed to delete gap item:', err);
+    }
+  };
+
+  // GAPを起点に課題ツリー（SOLUTION）を作成して開く
+  const handleCreateIssueTree = async (item: GapItem) => {
+    setCreatingTreeId(item.id);
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/issue-trees`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'SOLUTION',
+          name: `${item.businessArea} 課題ツリー`,
+          rootQuestion: item.gapDescription || undefined,
+          gapItemId: item.id,
+        }),
+      });
+      if (res.ok) {
+        const tree: { id: string } = await res.json();
+        router.push(`/dashboard/projects/${projectId}/issue-trees/${tree.id}`);
+      } else {
+        alert('課題ツリーの作成に失敗しました');
+        setCreatingTreeId(null);
+      }
+    } catch (err) {
+      console.error('Failed to create issue tree:', err);
+      alert('エラーが発生しました');
+      setCreatingTreeId(null);
+    }
+  };
+
+  const openCount = items.filter((it) => it.status === 'OPEN').length;
+  const resolvedCount = items.filter((it) => it.status === 'RESOLVED').length;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Link href={`/dashboard/projects/${projectId}`}>
+            <Button variant="ghost" size="sm" className="text-gray-600">
+              <ChevronLeft className="w-4 h-4 mr-1" />
+              戻る
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+              <GitCompareArrows className="w-7 h-7 text-blue-600" />
+              GAP（課題一覧）
+              <HelpTooltip text="GAP = TOBE（あるべき姿）− ASIS（現状）。理想と現実の差分こそが「本当に解くべき課題」です。" />
+            </h1>
+            <p className="text-gray-500 mt-1">
+              GAP = TOBE（あるべき姿）− ASIS（現状）。この差分こそが「本当の課題」です。
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <HowToPanel
+            open={howToOpen}
+            onOpenChange={setHowToOpen}
+            steps={[
+              '「GAP追加」で業務領域ごとに ASIS（現状・数値込み）と TOBE（あるべき姿）を入力します。',
+              'その差分＝本当の課題を「GAP」欄に書きます（例: 14分/件のロス）。',
+              '表の各セルはその場で編集でき、欄外をクリック（blur）すると自動保存されます。',
+              '優先度（HIGH/MEDIUM/LOW）と担当を設定し、上部のフィルタで絞り込めます。',
+              '解決したらチェックで RESOLVED に。「課題ツリーを作成」でこのGAPを起点にした打ち手の検討（なぜ型/どうやって型）へ展開できます。',
+            ]}
+            shortcuts={[
+              { keys: '⌘/Ctrl+Enter', desc: 'GAP追加を開く' },
+              { keys: 'n', desc: 'GAP追加を開く' },
+              { keys: '⌘/Ctrl+S', desc: '保存（セルは blur で自動保存）' },
+              { keys: '?', desc: 'この操作方法を開く' },
+            ]}
+          />
+          <Button onClick={() => setIsCreateOpen(true)} className="bg-blue-600 hover:bg-blue-700">
+            <Plus className="h-4 w-4 mr-2" />
+            GAP追加
+          </Button>
+        </div>
+      </div>
+
+      {/* フィルタ + 集計 */}
+      <Card className="bg-white border-gray-200">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 text-gray-500 text-sm">
+              <Filter className="h-4 w-4" />
+              フィルタ
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-gray-700 text-sm">優先度</Label>
+              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <SelectTrigger className="w-[140px] bg-white border-gray-300">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-white">
+                  <SelectItem value={ALL}>すべて</SelectItem>
+                  <SelectItem value="HIGH">HIGH</SelectItem>
+                  <SelectItem value="MEDIUM">MEDIUM</SelectItem>
+                  <SelectItem value="LOW">LOW</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-gray-700 text-sm">状態</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[140px] bg-white border-gray-300">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-white">
+                  <SelectItem value={ALL}>すべて</SelectItem>
+                  <SelectItem value="OPEN">OPEN</SelectItem>
+                  <SelectItem value="RESOLVED">RESOLVED</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="ml-auto flex items-center gap-3 text-sm">
+              <span className="text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
+                OPEN {openCount}
+              </span>
+              <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                RESOLVED {resolvedCount}
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 本体 */}
+      {loading ? (
+        <div className="flex items-center justify-center h-[300px]">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        </div>
+      ) : error ? (
+        <Card className="bg-white border-gray-200">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button variant="outline" onClick={fetchItems}>
+              再読み込み
+            </Button>
+          </CardContent>
+        </Card>
+      ) : items.length === 0 ? (
+        <Card className="bg-white border-gray-200">
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+              <GitCompareArrows className="h-8 w-8 text-gray-400" />
+            </div>
+            <p className="text-gray-700 font-medium mb-2">GAP（課題）がありません</p>
+            <p className="text-sm text-gray-500 mb-1">
+              GAP は <span className="font-semibold">TOBE（あるべき姿）</span> から{' '}
+              <span className="font-semibold">ASIS（現状）</span> を引いた差分です。
+            </p>
+            <p className="text-sm text-gray-500 mb-4">
+              この差分＝本当の課題を1行ずつ洗い出していきましょう。
+            </p>
+            <Button onClick={() => setIsCreateOpen(true)} className="bg-blue-600 hover:bg-blue-700">
+              <Plus className="h-4 w-4 mr-2" />
+              最初のGAPを追加
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="bg-white border-gray-200 overflow-hidden">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-left text-gray-600">
+                    <th className="px-3 py-2 font-medium w-[140px] border-b border-gray-200">
+                      業務領域
+                    </th>
+                    <th className="px-3 py-2 font-medium border-b border-gray-200">
+                      <span className="inline-flex items-center gap-1">
+                        ASIS（現状・数値込み）
+                        <HelpTooltip text="ASIS＝現状。今どうなっているかを、できるだけ数値（件数・時間・コスト等）込みで事実ベースに記述します。" />
+                      </span>
+                    </th>
+                    <th className="px-3 py-2 font-medium border-b border-gray-200">
+                      <span className="inline-flex items-center gap-1">
+                        TOBE（あるべき姿）
+                        <HelpTooltip text="TOBE＝あるべき姿。施策後に実現したい理想の状態を、これも数値目標込みで記述します。" />
+                      </span>
+                    </th>
+                    <th className="px-3 py-2 font-medium border-b border-gray-200 bg-amber-50/50">
+                      <span className="inline-flex items-center gap-1">
+                        GAP（差分＝本当の課題）
+                        <HelpTooltip text="GAP＝TOBE − ASIS。理想と現状の差分が、実際に解決すべき本当の課題です。この行を起点に打ち手を検討します。" />
+                      </span>
+                    </th>
+                    <th className="px-3 py-2 font-medium w-[120px] border-b border-gray-200">
+                      優先度
+                    </th>
+                    <th className="px-3 py-2 font-medium w-[120px] border-b border-gray-200">
+                      担当
+                    </th>
+                    <th className="px-3 py-2 font-medium w-[110px] border-b border-gray-200">
+                      状態
+                    </th>
+                    <th className="px-3 py-2 font-medium w-[160px] border-b border-gray-200">
+                      <span className="inline-flex items-center gap-1">
+                        課題ツリー
+                        <HelpTooltip text="このGAPを起点に、「なぜ起きるのか（なぜ型）」と「どう解決するか（打ち手/どうやって型）」をツリー状に分解して検討する画面へ展開できます。" />
+                      </span>
+                    </th>
+                    <th className="px-3 py-2 font-medium w-[90px] border-b border-gray-200 text-center">
+                      操作
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item) => {
+                    const pm = priorityMeta[item.priority] ?? priorityMeta.MEDIUM;
+                    const sm = statusMeta[item.status] ?? statusMeta.OPEN;
+                    const resolved = item.status === 'RESOLVED';
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`border-b border-gray-100 border-l-4 ${pm.row} align-top ${
+                          resolved ? 'bg-emerald-50/30' : 'hover:bg-gray-50/60'
+                        }`}
+                      >
+                        {/* 業務領域 */}
+                        <td className="px-3 py-2 align-top">
+                          <textarea
+                            defaultValue={item.businessArea}
+                            onBlur={(e) =>
+                              handleCellBlur(item, 'businessArea', e.target.value)
+                            }
+                            rows={2}
+                            className="w-full resize-none bg-transparent text-gray-900 font-medium outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5"
+                          />
+                        </td>
+                        {/* ASIS */}
+                        <td className="px-3 py-2 align-top">
+                          <textarea
+                            defaultValue={item.asisDescription ?? ''}
+                            placeholder="現状（例: 受注処理に1件15分）"
+                            onBlur={(e) =>
+                              handleCellBlur(item, 'asisDescription', e.target.value)
+                            }
+                            rows={2}
+                            className="w-full resize-none bg-transparent text-gray-700 outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 placeholder:text-gray-300"
+                          />
+                        </td>
+                        {/* TOBE */}
+                        <td className="px-3 py-2 align-top">
+                          <textarea
+                            defaultValue={item.tobeDescription ?? ''}
+                            placeholder="あるべき姿（例: 自動受注で1件1分）"
+                            onBlur={(e) =>
+                              handleCellBlur(item, 'tobeDescription', e.target.value)
+                            }
+                            rows={2}
+                            className="w-full resize-none bg-transparent text-gray-700 outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 placeholder:text-gray-300"
+                          />
+                        </td>
+                        {/* GAP */}
+                        <td className="px-3 py-2 align-top bg-amber-50/40">
+                          <textarea
+                            defaultValue={item.gapDescription ?? ''}
+                            placeholder="差分＝本当の課題（TOBE − ASIS）"
+                            onBlur={(e) =>
+                              handleCellBlur(item, 'gapDescription', e.target.value)
+                            }
+                            rows={2}
+                            className="w-full resize-none bg-transparent text-gray-900 outline-none focus:bg-white focus:ring-1 focus:ring-amber-400 rounded px-1 py-0.5 placeholder:text-gray-400"
+                          />
+                        </td>
+                        {/* 優先度 */}
+                        <td className="px-3 py-2 align-top">
+                          <Select
+                            value={item.priority}
+                            onValueChange={(v) =>
+                              handlePriorityChange(item, v as Priority)
+                            }
+                          >
+                            <SelectTrigger
+                              className={`h-8 border ${pm.badge} font-semibold text-xs`}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white">
+                              <SelectItem value="HIGH">HIGH</SelectItem>
+                              <SelectItem value="MEDIUM">MEDIUM</SelectItem>
+                              <SelectItem value="LOW">LOW</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        {/* 担当 */}
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            defaultValue={item.ownerName ?? ''}
+                            placeholder="担当者"
+                            onBlur={(e) => handleCellBlur(item, 'ownerName', e.target.value)}
+                            className="w-full bg-transparent text-gray-700 outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-1 placeholder:text-gray-300"
+                          />
+                        </td>
+                        {/* 状態 */}
+                        <td className="px-3 py-2 align-top">
+                          <span
+                            className={`inline-block text-xs px-2 py-0.5 rounded border ${sm.badge}`}
+                          >
+                            {sm.label}
+                          </span>
+                        </td>
+                        {/* 課題ツリー */}
+                        <td className="px-3 py-2 align-top">
+                          {item.issueTreeId ? (
+                            <Link
+                              href={`/dashboard/projects/${projectId}/issue-trees/${item.issueTreeId}`}
+                              className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              ツリーを開く
+                            </Link>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs border-blue-300 text-blue-700 hover:bg-blue-50"
+                              onClick={() => handleCreateIssueTree(item)}
+                              disabled={creatingTreeId === item.id}
+                            >
+                              {creatingTreeId === item.id ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                              ) : (
+                                <GitBranch className="h-3.5 w-3.5 mr-1.5" />
+                              )}
+                              課題ツリーを作成
+                            </Button>
+                          )}
+                        </td>
+                        {/* 操作 */}
+                        <td className="px-3 py-2 align-top">
+                          <div className="flex items-center justify-center gap-1">
+                            {resolved ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                onClick={() => handleReopen(item)}
+                                title="再オープン（OPENに戻す）"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                onClick={() => handleResolve(item)}
+                                title="解決済みにする"
+                              >
+                                <Check className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                              onClick={() => handleDelete(item.id)}
+                              title="削除"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 作成ダイアログ */}
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent className="bg-white border-gray-200 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900 flex items-center gap-2">
+              <GitCompareArrows className="h-5 w-5 text-blue-600" />
+              GAPを追加
+            </DialogTitle>
+            <DialogDescription className="text-gray-500">
+              業務領域ごとに ASIS（現状）と TOBE（あるべき姿）を書き、その差分＝本当の課題を整理します。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-gray-700">
+                業務領域 <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                placeholder="例: 受発注業務"
+                value={newItem.businessArea}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, businessArea: e.target.value })
+                }
+                className="bg-white border-gray-300"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-gray-700">ASIS（現状・数値込み）</Label>
+                <Textarea
+                  placeholder="例: 紙の注文書をFAX受信。1件あたり15分かかる。"
+                  value={newItem.asisDescription}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, asisDescription: e.target.value })
+                  }
+                  className="bg-white border-gray-300 min-h-[90px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-gray-700">TOBE（あるべき姿）</Label>
+                <Textarea
+                  placeholder="例: Webフォームで自動受注。1件あたり1分。"
+                  value={newItem.tobeDescription}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, tobeDescription: e.target.value })
+                  }
+                  className="bg-white border-gray-300 min-h-[90px]"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-gray-700">GAP（差分＝本当の課題）</Label>
+              <Textarea
+                placeholder="例: 手入力による転記ミスと処理遅延（14分/件のロス）が発生している。"
+                value={newItem.gapDescription}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, gapDescription: e.target.value })
+                }
+                className="bg-white border-gray-300 min-h-[80px]"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-gray-700">優先度</Label>
+                <Select
+                  value={newItem.priority}
+                  onValueChange={(v) =>
+                    setNewItem({ ...newItem, priority: v as Priority })
+                  }
+                >
+                  <SelectTrigger className="bg-white border-gray-300">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value="HIGH">HIGH</SelectItem>
+                    <SelectItem value="MEDIUM">MEDIUM</SelectItem>
+                    <SelectItem value="LOW">LOW</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-gray-700">担当</Label>
+                <Input
+                  placeholder="例: 山田太郎"
+                  value={newItem.ownerName}
+                  onChange={(e) =>
+                    setNewItem({ ...newItem, ownerName: e.target.value })
+                  }
+                  className="bg-white border-gray-300"
+                />
+              </div>
+            </div>
+
+            {createError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                {createError}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
+              キャンセル
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={!newItem.businessArea.trim() || creating}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {creating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  追加中...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  追加
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

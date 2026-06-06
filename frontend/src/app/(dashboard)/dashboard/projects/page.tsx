@@ -23,6 +23,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Folder, Plus, Building2, Loader2, ArrowRight } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -48,7 +51,17 @@ export default function ProjectsPage() {
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [howToOpen, setHowToOpen] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', slug: '', description: '' });
+
+  // キーボードショートカット
+  // - mod+Enter / n : 新規プロジェクト作成ダイアログを開く
+  // - shift+/（?）   : 操作方法ダイアログを開く
+  useKeyboardShortcuts([
+    { combo: 'mod+enter', handler: () => setIsCreateDialogOpen(true) },
+    { combo: 'n', handler: () => setIsCreateDialogOpen(true) },
+    { combo: 'shift+/', handler: () => setHowToOpen(true) },
+  ]);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
@@ -61,15 +74,28 @@ export default function ProjectsPage() {
     try {
       const headers = getHeaders();
       const res = await fetch(`${API_URL}/api/organizations`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setOrganizations(data);
-        if (data.length > 0) {
-          setSelectedOrg(data[0]);
-        }
+      let data: Organization[] = res.ok ? await res.json() : [];
+
+      // 組織が1つも無ければ既定の組織を自動作成（新規ユーザーが行き止まりにならないように）
+      if (!Array.isArray(data) || data.length === 0) {
+        const slug = `my-org-${Date.now().toString(36)}`;
+        const createRes = await fetch(`${API_URL}/api/organizations`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name: 'マイ組織', slug }),
+        });
+        data = createRes.ok ? [await createRes.json()] : [];
+      }
+
+      setOrganizations(data);
+      if (data.length > 0) {
+        setSelectedOrg(data[0]); // → projects 取得 effect が loading を解除
+      } else {
+        setLoading(false); // 取得も作成も失敗 → スピナー解除
       }
     } catch (err) {
       console.error('Failed to fetch organizations:', err);
+      setLoading(false);
     }
   }, [getHeaders]);
 
@@ -138,9 +164,28 @@ export default function ProjectsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">プロジェクト選択</h1>
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+            プロジェクト選択
+            <HelpTooltip text="プロジェクトは作業の単位です。1つの組織の中に複数のプロジェクト（例: ECサイト、基幹システム刷新）を持てます。" />
+          </h1>
           <p className="text-gray-500 mt-1">作業するプロジェクトを選択してください</p>
         </div>
+        <div className="flex items-center gap-2">
+          <HowToPanel
+            open={howToOpen}
+            onOpenChange={setHowToOpen}
+            steps={[
+              '組織が2つ以上ある場合は、上部のセレクタで対象の組織を選びます。',
+              'カードをクリックすると、そのプロジェクトの作業画面へ移動します。',
+              '「新規プロジェクト」からプロジェクト名・スラッグ（URL用の短い識別子）・説明を入力して作成します。',
+              'スラッグは英数字とハイフンの半角（例: ec-site）で入力してください。',
+            ]}
+            shortcuts={[
+              { keys: '⌘/Ctrl+Enter', desc: '新規プロジェクト作成を開く' },
+              { keys: 'n', desc: '新規プロジェクト作成を開く' },
+              { keys: '?', desc: 'この操作方法を開く' },
+            ]}
+          />
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button className="bg-blue-600 hover:bg-blue-700">
@@ -166,7 +211,10 @@ export default function ProjectsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-gray-700">スラッグ</Label>
+                <Label className="text-gray-700 flex items-center gap-1.5">
+                  スラッグ
+                  <HelpTooltip text="URLや内部識別に使う短い名前です。英数字とハイフン（例: ec-site）で、プロジェクトを一意に識別します。" />
+                </Label>
                 <Input
                   value={newProject.slug}
                   onChange={(e) => setNewProject({ ...newProject, slug: e.target.value })}
@@ -194,6 +242,7 @@ export default function ProjectsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Organization Selector */}

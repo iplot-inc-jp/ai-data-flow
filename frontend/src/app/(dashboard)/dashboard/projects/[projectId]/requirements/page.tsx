@@ -35,6 +35,9 @@ import {
   Trash2,
   Edit,
 } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -222,6 +225,26 @@ export default function RequirementsPage() {
     });
   };
 
+  // キーボードショートカット
+  const openHowTo = useCallback(() => {
+    document
+      .getElementById('howto-trigger-requirements')
+      ?.querySelector<HTMLButtonElement>('button')
+      ?.click();
+  }, []);
+
+  const openManualAdd = useCallback(() => {
+    setNewRequirement((prev) => ({ ...prev, parentId: '' }));
+    setIsAddDialogOpen(true);
+  }, []);
+
+  useKeyboardShortcuts([
+    { combo: 'n', handler: openManualAdd },
+    { combo: 'mod+enter', handler: openManualAdd },
+    { combo: 'g', handler: () => setIsAiDialogOpen(true) },
+    { combo: 'shift+/', handler: openHowTo },
+  ]);
+
   // 要求ツリーを再帰的に表示
   const renderRequirementTree = (items: Requirement[], depth: number = 0) => {
     return items.map((req) => {
@@ -341,11 +364,30 @@ export default function RequirementsPage() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">要求定義</h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-3xl font-bold text-gray-900">要求定義</h1>
+              <HelpTooltip text="要求定義は「システムが満たすべきこと」を構造化したものです。機能要求・非機能要求・制約などを親子ツリーで整理し、業務フローやCRUD（データ操作）と紐付けて、なぜ必要か（なぜ型）と何を実装するか（打ち手）を明確にします。" />
+            </div>
             <p className="text-gray-500 mt-1">システム要求を定義・管理</p>
           </div>
         </div>
         <div className="flex gap-2">
+          <span id="howto-trigger-requirements" className="contents">
+            <HowToPanel
+              steps={[
+                '「AIで生成」を押し、システムの要望を自然言語で入力すると、AIが要求ツリーに変換します。',
+                '手動で追加する場合は「要求を追加」からタイトル・説明・タイプ・優先度を入力します。',
+                '各行にカーソルを合わせると現れる「＋」で子要求を、ゴミ箱で削除ができます（子要求も一緒に削除）。',
+                'コード・優先度・ステータス・タイプのバッジで状態を確認し、フロー／CRUDの紐付け件数も把握できます。',
+              ]}
+              shortcuts={[
+                { keys: 'N', desc: '要求を手動追加するダイアログを開く' },
+                { keys: '⌘/Ctrl+Enter', desc: '要求を手動追加するダイアログを開く' },
+                { keys: 'G', desc: 'AIで生成ダイアログを開く' },
+                { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+              ]}
+            />
+          </span>
           <Button
             variant="outline"
             onClick={() => setIsAiDialogOpen(true)}
@@ -410,6 +452,7 @@ export default function RequirementsPage() {
             <DialogTitle className="text-gray-900 flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-purple-600" />
               AIで要求を生成
+              <HelpTooltip text="自然言語の要望を、構造化された要求ツリーに自動変換します。生成後は各要求を業務フローやCRUD（Create=作成 / Read=参照 / Update=更新 / Delete=削除）と紐付けて、データ操作との対応を管理できます。" />
             </DialogTitle>
             <DialogDescription className="text-gray-500">
               自然言語でシステムの要望を入力すると、要求定義に変換されます
@@ -494,7 +537,10 @@ export default function RequirementsPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-gray-700">タイプ</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-gray-700">タイプ</Label>
+                  <HelpTooltip text="要求の種類です。機能要求（ユーザーができること）／非機能要求（性能・セキュリティなど）／ビジネスルール／制約／インターフェース／データ要求を選びます。" />
+                </div>
                 <Select
                   value={newRequirement.type}
                   onValueChange={(v) => setNewRequirement({ ...newRequirement, type: v })}
@@ -513,7 +559,10 @@ export default function RequirementsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label className="text-gray-700">優先度</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-gray-700">優先度</Label>
+                  <HelpTooltip text="この要求の実装優先度です。高＝必須、中＝重要、低＝余裕があれば。限られた工数の中で「どの打ち手から着手するか」の判断材料になります。" />
+                </div>
                 <Select
                   value={newRequirement.priority}
                   onValueChange={(v) => setNewRequirement({ ...newRequirement, priority: v })}

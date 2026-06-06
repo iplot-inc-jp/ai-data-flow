@@ -17,9 +17,18 @@ import {
   Grid3X3,
   Home,
   ChevronRight,
+  ChevronDown,
   Zap,
+  Workflow,
+  Network,
+  GitCompare,
+  Folder,
+  Layers,
+  Github,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
 
 // プロジェクトIDを抽出する関数
 function extractProjectId(pathname: string): string | null {
@@ -27,24 +36,29 @@ function extractProjectId(pathname: string): string | null {
   return match ? match[1] : null
 }
 
+// 認証ヘッダーを生成
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return headers
+}
+
 // プロジェクト名を取得するhook
 function useProjectName(projectId: string | null) {
   const [projectName, setProjectName] = useState<string | null>(null)
-  
+
   useEffect(() => {
     if (!projectId) {
       setProjectName(null)
       return
     }
-    
+
     const fetchProject = async () => {
       try {
-        const token = localStorage.getItem('accessToken')
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-        if (token) headers['Authorization'] = `Bearer ${token}`
-        
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
-        const res = await fetch(`${API_URL}/api/projects/${projectId}`, { headers })
+        const res = await fetch(`${API_URL}/api/projects/${projectId}`, {
+          headers: authHeaders(),
+        })
         if (res.ok) {
           const data = await res.json()
           setProjectName(data.name)
@@ -53,11 +67,254 @@ function useProjectName(projectId: string | null) {
         console.error('Failed to fetch project:', err)
       }
     }
-    
+
     fetchProject()
   }, [projectId])
-  
+
   return projectName
+}
+
+// 業務フローツリー用の型
+type SubProject = {
+  id: string
+  name: string
+  order?: number
+}
+
+type BusinessFlow = {
+  id: string
+  name: string
+  kind: 'ASIS' | 'TOBE'
+  subProjectId?: string | null
+}
+
+// サブプロジェクトとフローを取得するhook（projectId変更時のみ）
+function useFlowTree(projectId: string | null) {
+  const [subProjects, setSubProjects] = useState<SubProject[]>([])
+  const [flows, setFlows] = useState<BusinessFlow[]>([])
+
+  useEffect(() => {
+    if (!projectId) {
+      setSubProjects([])
+      setFlows([])
+      return
+    }
+
+    let cancelled = false
+
+    const fetchTree = async () => {
+      try {
+        const [subRes, flowRes] = await Promise.all([
+          fetch(`${API_URL}/api/projects/${projectId}/sub-projects`, {
+            headers: authHeaders(),
+          }),
+          fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, {
+            headers: authHeaders(),
+          }),
+        ])
+
+        if (!cancelled && subRes.ok) {
+          const subData = await subRes.json()
+          setSubProjects(Array.isArray(subData) ? subData : [])
+        }
+        if (!cancelled && flowRes.ok) {
+          const flowData = await flowRes.json()
+          setFlows(Array.isArray(flowData) ? flowData : [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch flow tree:', err)
+      }
+    }
+
+    fetchTree()
+
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
+  return { subProjects, flows }
+}
+
+// ASIS/TOBE サブグループ
+function FlowKindGroup({
+  label,
+  flows,
+  projectId,
+  pathname,
+  onNavigate,
+}: {
+  label: 'ASIS' | 'TOBE'
+  flows: BusinessFlow[]
+  projectId: string
+  pathname: string
+  onNavigate: () => void
+}) {
+  const [open, setOpen] = useState(true)
+  if (flows.length === 0) return null
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 w-full px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 flex-shrink-0" />
+        )}
+        <span
+          className={cn(
+            'tracking-wide',
+            label === 'ASIS' ? 'text-amber-600' : 'text-emerald-600'
+          )}
+        >
+          {label}
+        </span>
+        <span className="ml-1 text-[10px] text-muted-foreground/70">({flows.length})</span>
+      </button>
+      {open && (
+        <div className="space-y-0.5 pl-3">
+          {flows.map((flow) => {
+            const href = `/dashboard/projects/${projectId}/flows/${flow.id}`
+            const isActive = pathname === href
+            return (
+              <Link
+                key={flow.id}
+                href={href}
+                onClick={onNavigate}
+                title={flow.name}
+                className={cn(
+                  'flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors',
+                  'text-muted-foreground hover:text-foreground hover:bg-secondary',
+                  isActive && 'text-primary font-medium bg-primary/10'
+                )}
+              >
+                <GitBranch className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+                <span className="truncate">{flow.name}</span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// サブプロジェクトノード（展開可能）
+function SubProjectNode({
+  label,
+  icon: Icon,
+  flows,
+  projectId,
+  pathname,
+  onNavigate,
+  defaultOpen,
+}: {
+  label: string
+  icon: typeof Folder
+  flows: BusinessFlow[]
+  projectId: string
+  pathname: string
+  onNavigate: () => void
+  defaultOpen?: boolean
+}) {
+  // このサブプロジェクト内に現在開いているフローがあれば初期展開
+  const containsActive = flows.some(
+    (f) => pathname === `/dashboard/projects/${projectId}/flows/${f.id}`
+  )
+  const [open, setOpen] = useState(defaultOpen ?? containsActive)
+
+  if (flows.length === 0) return null
+
+  const asisFlows = flows.filter((f) => f.kind === 'ASIS')
+  const tobeFlows = flows.filter((f) => f.kind === 'TOBE')
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={label}
+        className={cn(
+          'flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
+          'text-foreground/80 hover:text-foreground hover:bg-secondary'
+        )}
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
+        )}
+        <Icon className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
+        <span className="truncate">{label}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground/70">{flows.length}</span>
+      </button>
+      {open && (
+        <div className="pl-3 mt-0.5 space-y-0.5">
+          <FlowKindGroup
+            label="ASIS"
+            flows={asisFlows}
+            projectId={projectId}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+          <FlowKindGroup
+            label="TOBE"
+            flows={tobeFlows}
+            projectId={projectId}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 業務フローツリー全体
+function FlowTree({
+  projectId,
+  subProjects,
+  flows,
+  pathname,
+  onNavigate,
+}: {
+  projectId: string
+  subProjects: SubProject[]
+  flows: BusinessFlow[]
+  pathname: string
+  onNavigate: () => void
+}) {
+  if (flows.length === 0 && subProjects.length === 0) return null
+
+  const unassignedFlows = flows.filter((f) => !f.subProjectId)
+
+  return (
+    <div className="mt-1 ml-2 pl-2 border-l border-border space-y-1 max-h-[40vh] overflow-y-auto">
+      {subProjects.map((sp) => (
+        <SubProjectNode
+          key={sp.id}
+          label={sp.name}
+          icon={Folder}
+          flows={flows.filter((f) => f.subProjectId === sp.id)}
+          projectId={projectId}
+          pathname={pathname}
+          onNavigate={onNavigate}
+        />
+      ))}
+      {unassignedFlows.length > 0 && (
+        <SubProjectNode
+          label="(未分類)"
+          icon={Layers}
+          flows={unassignedFlows}
+          projectId={projectId}
+          pathname={pathname}
+          onNavigate={onNavigate}
+        />
+      )}
+    </div>
+  )
 }
 
 export default function DashboardLayout({
@@ -68,32 +325,40 @@ export default function DashboardLayout({
   const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  
+
   const projectId = useMemo(() => extractProjectId(pathname), [pathname])
   const projectName = useProjectName(projectId)
-  
+  const { subProjects, flows } = useFlowTree(projectId)
+
   const navigation = useMemo(() => {
     const baseNav = [
       { name: 'ダッシュボード', href: '/dashboard', icon: Home },
       { name: 'プロジェクト', href: '/dashboard/projects', icon: FolderOpen },
     ]
-    
+
     if (projectId) {
       const projectNav = [
+        { name: 'フェーズ', href: `/dashboard/projects/${projectId}/phases`, icon: Workflow },
         { name: 'データカタログ', href: `/dashboard/projects/${projectId}/catalog`, icon: Database },
-        { name: 'CRUD表', href: `/dashboard/projects/${projectId}/crud-matrix`, icon: Grid3X3 },
         { name: '業務フロー', href: `/dashboard/projects/${projectId}/flows`, icon: GitBranch },
+        { name: '課題ツリー', href: `/dashboard/projects/${projectId}/issue-trees`, icon: Network },
+        { name: 'GAP', href: `/dashboard/projects/${projectId}/gap-items`, icon: GitCompare },
+        { name: 'CRUD表', href: `/dashboard/projects/${projectId}/crud-matrix`, icon: Grid3X3 },
+        { name: 'コード連携', href: `/dashboard/projects/${projectId}/integrations`, icon: Github },
         { name: '要求定義', href: `/dashboard/projects/${projectId}/requirements`, icon: FileText },
         { name: 'ロール', href: `/dashboard/projects/${projectId}/roles`, icon: Users },
         { name: '設定', href: `/dashboard/projects/${projectId}/settings`, icon: Settings },
       ]
       baseNav.push(...projectNav)
     }
-    
+
     baseNav.push({ name: 'アカウント', href: '/dashboard/settings', icon: Settings })
-    
+
     return baseNav
   }, [projectId])
+
+  // 業務フローツリーを差し込む対象の href
+  const flowsHref = projectId ? `/dashboard/projects/${projectId}/flows` : null
 
   return (
     <div className="min-h-screen bg-background">
@@ -128,8 +393,8 @@ export default function DashboardLayout({
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="flex items-center justify-between px-4 py-4 border-b border-border">
-            <Link 
-              href="/dashboard" 
+            <Link
+              href="/dashboard"
               className={cn("flex items-center gap-3", sidebarCollapsed && "lg:hidden")}
             >
               <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
@@ -158,10 +423,11 @@ export default function DashboardLayout({
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
             {navigation.map((item, index) => {
-              const isActive = pathname === item.href || 
+              const isActive = pathname === item.href ||
                 (item.href !== '/dashboard' && pathname.startsWith(item.href + '/'))
-              const isProjectMenu = projectId && index >= 2 && index <= 7
-              
+              const isProjectMenu = !!projectId && item.href.includes(`/dashboard/projects/${projectId}/`)
+              const isFlowsItem = !!flowsHref && item.href === flowsHref
+
               return (
                 <div key={item.name}>
                   {/* Project section divider */}
@@ -195,10 +461,21 @@ export default function DashboardLayout({
                       <ChevronRight className="h-4 w-4 ml-auto text-primary" />
                     )}
                   </Link>
+
+                  {/* 業務フロー展開ツリー（サブプロジェクト → ASIS/TOBE → フロー） */}
+                  {isFlowsItem && !sidebarCollapsed && projectId && (
+                    <FlowTree
+                      projectId={projectId}
+                      subProjects={subProjects}
+                      flows={flows}
+                      pathname={pathname}
+                      onNavigate={() => setSidebarOpen(false)}
+                    />
+                  )}
                 </div>
               )
             })}
-            
+
             {/* Hint when no project selected */}
             {!projectId && !sidebarCollapsed && (
               <div className="pt-6 px-1">

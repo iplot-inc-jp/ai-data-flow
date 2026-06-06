@@ -16,6 +16,9 @@ import {
   Table as TableIcon,
   Clock,
 } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -99,6 +102,21 @@ export default function ProjectDetailPage() {
     fetchProjectData();
   }, [fetchProjectData]);
 
+  // キーボードショートカット
+  const openHowTo = useCallback(() => {
+    document
+      .getElementById('howto-trigger-overview')
+      ?.querySelector<HTMLButtonElement>('button')
+      ?.click();
+  }, []);
+
+  useKeyboardShortcuts([
+    { combo: 't', handler: () => router.push(`/dashboard/projects/${projectId}/catalog`) },
+    { combo: 'f', handler: () => router.push(`/dashboard/projects/${projectId}/flows`) },
+    { combo: 'r', handler: () => router.push(`/dashboard/projects/${projectId}/roles`) },
+    { combo: 'shift+/', handler: openHowTo },
+  ]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[400px]">
@@ -119,17 +137,39 @@ export default function ProjectDetailPage() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">{project?.name || 'プロジェクト'}</h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-3xl font-bold text-gray-900">{project?.name || 'プロジェクト'}</h1>
+              <HelpTooltip text="プロジェクトの概要ページです。データカタログ（テーブル）・業務フロー・ロールの3要素を横断的に把握できます。ASIS（現状）の業務フローを整理し、TOBE（あるべき姿）へ向けたGAP（差分）と打ち手を検討する起点になります。" />
+            </div>
             <p className="text-gray-500 mt-1">プロジェクトの概要</p>
           </div>
         </div>
+        <span id="howto-trigger-overview" className="contents">
+          <HowToPanel
+            steps={[
+              '上部の3つのカードでテーブル・業務フロー・ロールの登録数をひと目で確認できます。',
+              '各セクションの「すべて表示」から、データカタログ・業務フロー・ロールの管理ページへ移動できます。',
+              '一覧の項目をクリックすると、そのテーブルやフローの詳細ページを開けます。',
+              'データが無いセクションでは、その場の追加ボタンから登録を始められます。',
+            ]}
+            shortcuts={[
+              { keys: 'T', desc: 'データカタログへ移動' },
+              { keys: 'F', desc: '業務フローへ移動' },
+              { keys: 'R', desc: 'ロールへ移動' },
+              { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+            ]}
+          />
+        </span>
       </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="bg-white border-gray-200">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">テーブル数</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-1.5">
+              テーブル数
+              <HelpTooltip text="データカタログに登録されたテーブル（データの入れ物）の数です。各テーブルはカラム定義やタグを持ち、業務フローのCRUD（作成・参照・更新・削除）と紐付きます。" />
+            </CardTitle>
             <Database className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
@@ -138,7 +178,10 @@ export default function ProjectDetailPage() {
         </Card>
         <Card className="bg-white border-gray-200">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">業務フロー</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-1.5">
+              業務フロー
+              <HelpTooltip text="ロールごとのスイムレーンで処理の流れを表した図の数です。ASIS（現状）とTOBE（あるべき姿）を描き分け、その差（GAP）からシステム化の打ち手を導きます。" />
+            </CardTitle>
             <GitBranch className="h-4 w-4 text-cyan-600" />
           </CardHeader>
           <CardContent>
@@ -147,7 +190,10 @@ export default function ProjectDetailPage() {
         </Card>
         <Card className="bg-white border-gray-200">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">ロール</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-1.5">
+              ロール
+              <HelpTooltip text="業務を担当する主体（人・システム・その他）の数です。業務フロー図ではロールごとに横レーン（スイムレーン）が割り当てられ、誰が・何がその処理を担うかを表します。" />
+            </CardTitle>
             <Users className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>

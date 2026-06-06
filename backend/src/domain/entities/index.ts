@@ -9,3 +9,7 @@ export * from './business-flow.entity';
 export * from './flow-node.entity';
 export * from './flow-edge.entity';
 export * from './crud-mapping.entity';
+export * from './project-phase.entity';
+export * from './gap-item.entity';
+export * from './issue-tree.entity';
+export * from './issue-node.entity';

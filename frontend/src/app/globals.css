@@ -4,42 +4,42 @@
 
 @layer base {
   :root {
-    /* Technical Blueprint Theme - Dark */
-    --background: 220 30% 6%;
-    --foreground: 210 40% 96%;
-    
-    --card: 220 25% 10%;
-    --card-foreground: 210 40% 96%;
-    
-    --popover: 220 25% 12%;
-    --popover-foreground: 210 40% 96%;
-    
-    --primary: 187 85% 43%;
-    --primary-foreground: 220 30% 6%;
-    
-    --secondary: 220 20% 18%;
-    --secondary-foreground: 210 40% 96%;
-    
-    --muted: 220 20% 15%;
-    --muted-foreground: 215 20% 55%;
-    
-    --accent: 187 85% 43%;
-    --accent-foreground: 220 30% 6%;
-    
+    /* iplot-hp TOP風 — 白背景・ネイビー#050f3e・ブルーアクセント */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* ネイビー #050f3e */
+    --primary: 229 85% 13%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 40% 20%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    /* ブルー #2563eb */
+    --accent: 221 83% 53%;
+    --accent-foreground: 0 0% 100%;
+
     --destructive: 0 72% 51%;
-    --destructive-foreground: 210 40% 98%;
-    
-    --border: 220 20% 18%;
-    --input: 220 20% 15%;
-    --ring: 187 85% 43%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 88%;
+    --input: 220 13% 88%;
+    --ring: 221 83% 53%;
     --radius: 0.5rem;
-    
-    /* Custom Design Tokens */
-    --cyan-glow: rgba(6, 182, 212, 0.15);
-    --cyan-border: rgba(6, 182, 212, 0.3);
-    --grid-line: rgba(6, 182, 212, 0.08);
-    --grid-dot: rgba(6, 182, 212, 0.15);
-    
+
+    /* iplot ブランドトークン */
+    --navy: 229 85% 13%;       /* #050f3e */
+    --brand-blue: 221 83% 53%; /* #2563eb */
+
     /* Semantic Colors */
     --success: 160 84% 39%;
     --warning: 38 92% 50%;
@@ -52,251 +52,185 @@
   * {
     @apply border-border;
   }
-  
+
   html {
-    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    font-family: "Yu Gothic Medium", "Yu Gothic", YuGothic, "游ゴシック体", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  
+
   body {
     @apply bg-background text-foreground;
-    background-image: 
-      radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 0);
-    background-size: 24px 24px;
   }
-  
-  /* Headings use monospace for technical feel */
+
+  /* 見出しもゴシック（Yu Gothic） */
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'IBM Plex Mono', monospace;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-  
-  /* Code and technical text */
-  code, pre, .mono {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: "Yu Gothic", YuGothic, "游ゴシック体", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.01em;
   }
 }
 
 @layer components {
-  /* Blueprint Card */
+  /* Card（白・繊細な境界＋やわらかい影） */
   .blueprint-card {
     @apply relative bg-card rounded-lg border border-border;
-    background-image: 
-      linear-gradient(135deg, transparent 0%, rgba(6, 182, 212, 0.02) 100%);
-    box-shadow: 
-      0 0 0 1px var(--cyan-border),
-      0 4px 24px -4px rgba(0, 0, 0, 0.4),
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.03);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
   }
-  
+
   .blueprint-card:hover {
-    box-shadow: 
-      0 0 0 1px rgba(6, 182, 212, 0.5),
-      0 8px 32px -4px rgba(6, 182, 212, 0.15),
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+    box-shadow: 0 4px 14px -4px rgba(15, 23, 42, 0.12);
   }
-  
-  /* Glowing Button */
+
+  /* Primary Button（ネイビー無地） */
   .btn-glow {
-    @apply relative px-6 py-3 font-medium rounded-lg transition-all duration-300;
+    @apply relative px-6 py-3 font-medium rounded-full transition-all duration-200;
     @apply bg-primary text-primary-foreground;
-    box-shadow: 
-      0 0 20px -5px rgba(6, 182, 212, 0.5),
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+    box-shadow: 0 1px 2px rgba(5, 15, 62, 0.2);
   }
-  
+
   .btn-glow:hover {
-    box-shadow: 
-      0 0 30px -5px rgba(6, 182, 212, 0.7),
-      0 0 60px -10px rgba(6, 182, 212, 0.3),
-      inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+    @apply bg-primary/90;
     transform: translateY(-1px);
   }
-  
+
   .btn-glow:active {
     transform: translateY(0);
   }
-  
+
   /* Ghost Button */
   .btn-ghost {
     @apply relative px-4 py-2 font-medium rounded-lg transition-all duration-200;
     @apply text-muted-foreground hover:text-foreground;
-    @apply border border-transparent;
+    @apply border border-transparent hover:border-border hover:bg-secondary;
   }
-  
-  .btn-ghost:hover {
-    border-color: rgba(6, 182, 212, 0.3);
-    background-color: rgba(6, 182, 212, 0.15);
-  }
-  
-  /* Input with glow focus */
+
+  /* Input */
   .input-glow {
     @apply w-full px-4 py-3 rounded-lg transition-all duration-200;
-    @apply bg-input border border-border text-foreground;
+    @apply bg-white border border-border text-foreground;
     @apply placeholder:text-muted-foreground;
-    @apply focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary;
+    @apply focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring;
   }
-  
+
   /* Section Title with Line */
   .section-title {
     @apply flex items-center gap-4 text-sm font-medium tracking-wider uppercase;
     @apply text-muted-foreground;
   }
-  
+
   .section-title::after {
     content: '';
     @apply flex-1 h-px;
-    background: linear-gradient(to right, rgba(6, 182, 212, 0.3), transparent);
+    background: linear-gradient(to right, hsl(var(--border)), transparent);
   }
-  
-  /* Technical Label */
+
+  /* Label */
   .tech-label {
     @apply inline-flex items-center px-2 py-0.5 rounded text-xs;
-    @apply font-mono font-medium tracking-wide text-primary;
-    background-color: rgba(6, 182, 212, 0.15);
-    border: 1px solid rgba(6, 182, 212, 0.3);
+    @apply font-medium tracking-wide;
+    color: hsl(var(--navy));
+    background-color: hsl(var(--brand-blue) / 0.08);
+    border: 1px solid hsl(var(--brand-blue) / 0.2);
   }
-  
+
   /* Status Indicator */
   .status-dot {
     @apply w-2 h-2 rounded-full;
-    animation: pulse-glow 2s ease-in-out infinite;
   }
-  
-  .status-dot.online { @apply bg-emerald-400; }
-  .status-dot.offline { @apply bg-red-400; }
-  .status-dot.pending { @apply bg-amber-400; }
-  
-  /* Grid Overlay */
-  .grid-overlay {
-    position: relative;
-  }
-  
-  .grid-overlay::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background-image: 
-      linear-gradient(var(--grid-line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-    background-size: 40px 40px;
-    mask-image: radial-gradient(ellipse at center, black 0%, transparent 70%);
-  }
-  
+
+  .status-dot.online { @apply bg-emerald-500; }
+  .status-dot.offline { @apply bg-red-500; }
+  .status-dot.pending { @apply bg-amber-500; }
+
   /* Sidebar Link */
   .sidebar-link {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200;
     @apply text-muted-foreground hover:text-foreground;
-    @apply hover:bg-secondary/50;
+    @apply hover:bg-secondary;
   }
-  
+
   .sidebar-link.active {
-    @apply text-primary;
-    background-color: rgba(6, 182, 212, 0.15);
-    border: 1px solid rgba(6, 182, 212, 0.3);
+    @apply text-primary font-medium;
+    background-color: hsl(var(--brand-blue) / 0.08);
   }
-  
+
   /* Data Table */
   .data-table {
     @apply w-full text-sm;
   }
-  
+
   .data-table th {
-    @apply px-4 py-3 text-left font-mono text-xs uppercase tracking-wider;
-    @apply text-muted-foreground bg-secondary/30 border-b border-border;
+    @apply px-4 py-3 text-left text-xs uppercase tracking-wider font-semibold;
+    @apply text-muted-foreground bg-secondary border-b border-border;
   }
-  
+
   .data-table td {
     @apply px-4 py-3 border-b border-border;
   }
-  
+
   .data-table tr:hover td {
-    background-color: rgba(6, 182, 212, 0.05);
+    background-color: hsl(var(--brand-blue) / 0.04);
   }
-  
+
   /* Progress Bar */
   .progress-bar {
     @apply h-1.5 bg-secondary rounded-full overflow-hidden;
   }
-  
+
   .progress-bar .fill {
-    @apply h-full bg-primary rounded-full transition-all duration-500;
-    box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+    @apply h-full bg-accent rounded-full transition-all duration-500;
   }
-  
+
   /* Tooltip */
   .tooltip {
     @apply absolute z-50 px-2 py-1 text-xs rounded;
-    @apply bg-popover text-popover-foreground border border-border;
-    @apply shadow-lg;
+    @apply bg-popover text-popover-foreground border border-border shadow-lg;
   }
-  
-  /* Badge Variants */
+
+  /* Badge Variants（白背景で読めるトーン） */
   .badge {
     @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
   }
-  
-  .badge-cyan { @apply bg-cyan-500/10 text-cyan-400 border border-cyan-500/20; }
-  .badge-emerald { @apply bg-emerald-500/10 text-emerald-400 border border-emerald-500/20; }
-  .badge-amber { @apply bg-amber-500/10 text-amber-400 border border-amber-500/20; }
-  .badge-red { @apply bg-red-500/10 text-red-400 border border-red-500/20; }
-  .badge-blue { @apply bg-blue-500/10 text-blue-400 border border-blue-500/20; }
-  .badge-purple { @apply bg-purple-500/10 text-purple-400 border border-purple-500/20; }
+
+  .badge-cyan { @apply bg-cyan-50 text-cyan-700 border border-cyan-200; }
+  .badge-emerald { @apply bg-emerald-50 text-emerald-700 border border-emerald-200; }
+  .badge-amber { @apply bg-amber-50 text-amber-700 border border-amber-200; }
+  .badge-red { @apply bg-red-50 text-red-700 border border-red-200; }
+  .badge-blue { @apply bg-blue-50 text-blue-700 border border-blue-200; }
+  .badge-purple { @apply bg-purple-50 text-purple-700 border border-purple-200; }
 }
 
 @layer utilities {
-  /* Cyan glow utilities */
+  /* 旧グロー → 控えめな影に無害化（既存マークアップ互換） */
   .glow-cyan {
-    box-shadow: 0 0 20px -5px rgba(6, 182, 212, 0.5);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
   }
-  
+
   .glow-cyan-lg {
-    box-shadow: 0 0 40px -10px rgba(6, 182, 212, 0.6);
+    box-shadow: 0 4px 14px -4px rgba(15, 23, 42, 0.12);
   }
-  
-  /* Text gradient */
+
+  /* Text gradient（ネイビー→ブルー） */
   .text-gradient-cyan {
     @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, #06b6d4 0%, #22d3ee 50%, #67e8f9 100%);
+    background-image: linear-gradient(135deg, #050f3e 0%, #2563eb 100%);
   }
-  
-  /* Border gradient */
+
   .border-gradient-cyan {
-    border-image: linear-gradient(135deg, rgba(6, 182, 212, 0.5), rgba(6, 182, 212, 0.1)) 1;
+    border-image: linear-gradient(135deg, hsl(var(--border)), transparent) 1;
   }
-  
-  /* Glassmorphism */
+
+  /* Glassmorphism（白） */
   .glass {
-    @apply backdrop-blur-md bg-background/80;
+    @apply backdrop-blur-md bg-white/80;
   }
-  
-  /* Noise texture overlay */
-  .noise-overlay::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.03;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-  }
-  
+
   /* Animate utilities */
-  .animate-fade-in {
-    animation: fadeIn 0.5s ease-out forwards;
-  }
-  
-  .animate-slide-up {
-    animation: slideUp 0.5s ease-out forwards;
-  }
-  
-  .animate-scale-in {
-    animation: scaleIn 0.3s ease-out forwards;
-  }
-  
-  /* Stagger delays for lists */
+  .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
+  .animate-slide-up { animation: slideUp 0.5s ease-out forwards; }
+  .animate-scale-in { animation: scaleIn 0.3s ease-out forwards; }
+
   .stagger-1 { animation-delay: 0.05s; }
   .stagger-2 { animation-delay: 0.1s; }
   .stagger-3 { animation-delay: 0.15s; }
@@ -312,51 +246,18 @@
 }
 
 @keyframes slideUp {
-  from { 
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to { 
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes scaleIn {
-  from { 
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to { 
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
 
-@keyframes pulse-glow {
-  0%, 100% { 
-    opacity: 1;
-    box-shadow: 0 0 0 0 currentColor;
-  }
-  50% { 
-    opacity: 0.7;
-    box-shadow: 0 0 8px 2px currentColor;
-  }
-}
-
-/* React Flow Custom Styles */
+/* React Flow Custom Styles（白テーマ） */
 .react-flow__node {
-  @apply shadow-lg rounded-lg;
-  box-shadow: 
-    0 0 0 1px var(--cyan-border),
-    0 4px 12px -2px rgba(0, 0, 0, 0.3);
-}
-
-.react-flow__node.selected {
-  box-shadow: 
-    0 0 0 2px rgba(6, 182, 212, 0.6),
-    0 0 20px -5px rgba(6, 182, 212, 0.5),
-    0 4px 12px -2px rgba(0, 0, 0, 0.3);
+  @apply rounded-lg;
 }
 
 .react-flow__edge-path {
@@ -365,16 +266,16 @@
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #06b6d4;
+  stroke: #2563eb;
 }
 
 .react-flow__controls {
   @apply border border-border rounded-lg overflow-hidden;
-  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
 }
 
 .react-flow__controls button {
-  @apply bg-card text-foreground border-border;
+  @apply bg-white text-foreground border-border;
 }
 
 .react-flow__controls button:hover {
@@ -386,13 +287,7 @@
   background: hsl(var(--card));
 }
 
-/* Swimlane styles */
-.swimlane {
-  @apply border-2 border-dashed rounded-lg p-4;
-  border-color: var(--cyan-border);
-}
-
-/* Scrollbar Styling */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -412,8 +307,7 @@
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
-/* Selection */
 ::selection {
-  background: rgba(6, 182, 212, 0.3);
-  color: white;
+  background: hsl(var(--brand-blue) / 0.2);
+  color: hsl(var(--navy));
 }

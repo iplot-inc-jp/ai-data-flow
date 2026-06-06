@@ -1,0 +1,321 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { IsString, IsOptional } from 'class-validator';
+import { ColumnDataType } from '@prisma/client';
+import { Client } from 'pg';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { CryptoService } from '../../infrastructure/services/crypto.service';
+
+// ========== DTOs ==========
+class CreateDatabaseConnectionDto {
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  dialect?: string; // postgres / mysql / ...（既定: postgres）
+
+  @IsString()
+  connString: string; // 接続文字列（平文で受け取り暗号化して保存）
+}
+
+class UpdateDatabaseConnectionDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  dialect?: string;
+
+  @IsOptional()
+  @IsString()
+  connString?: string;
+}
+
+// information_schema.columns の1行（必要な列のみ）
+interface InformationSchemaColumn {
+  table_name: string;
+  column_name: string;
+  data_type: string;
+  is_nullable: string; // 'YES' | 'NO'
+  column_default: string | null;
+  ordinal_position: number;
+}
+
+@ApiTags('DB接続')
+@ApiBearerAuth()
+@Controller()
+export class DatabaseConnectionController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cryptoService: CryptoService,
+  ) {}
+
+  @Get('projects/:projectId/database-connections')
+  @ApiOperation({ summary: 'プロジェクトのDB接続一覧（接続文字列は返さない）' })
+  async list(@Param('projectId') projectId: string) {
+    const connections = await this.prisma.databaseConnection.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return connections.map((c) => this.toResponse(c));
+  }
+
+  @Post('projects/:projectId/database-connections')
+  @ApiOperation({ summary: 'DB接続を作成（接続文字列を暗号化して保存）' })
+  async create(
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateDatabaseConnectionDto,
+  ) {
+    const connStringEnc = this.cryptoService.encrypt(dto.connString);
+
+    const connection = await this.prisma.databaseConnection.create({
+      data: {
+        projectId,
+        name: dto.name,
+        dialect: dto.dialect ?? 'postgres',
+        connStringEnc,
+      },
+    });
+
+    return this.toResponse(connection);
+  }
+
+  @Put('database-connections/:id')
+  @ApiOperation({
+    summary: 'DB接続を更新（connStringが渡された場合のみ再暗号化）',
+  })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDatabaseConnectionDto,
+  ) {
+    const existing = await this.prisma.databaseConnection.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      throw new HttpException('DB接続が見つかりません', HttpStatus.NOT_FOUND);
+    }
+
+    const data: Record<string, unknown> = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.dialect !== undefined) data.dialect = dto.dialect;
+    if (dto.connString !== undefined && dto.connString !== '') {
+      data.connStringEnc = this.cryptoService.encrypt(dto.connString);
+    }
+
+    const connection = await this.prisma.databaseConnection.update({
+      where: { id },
+      data,
+    });
+
+    return this.toResponse(connection);
+  }
+
+  @Delete('database-connections/:id')
+  @ApiOperation({ summary: 'DB接続を削除' })
+  async delete(@Param('id') id: string) {
+    await this.prisma.databaseConnection.delete({ where: { id } });
+    return { success: true };
+  }
+
+  @Post('database-connections/:id/introspect')
+  @ApiOperation({
+    summary:
+      'DBに接続してスキーマを取得し、テーブル/カラムをカタログにupsert（postgresのみ）',
+  })
+  async introspect(@Param('id') id: string) {
+    const connection = await this.prisma.databaseConnection.findUnique({
+      where: { id },
+    });
+    if (!connection) {
+      throw new HttpException('DB接続が見つかりません', HttpStatus.NOT_FOUND);
+    }
+
+    if (connection.dialect !== 'postgres') {
+      throw new HttpException(
+        '未対応のDB種別です（postgresのみ対応）',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const connString = this.cryptoService.decrypt(connection.connStringEnc);
+
+    // public スキーマの BASE TABLE とそのカラムを取得
+    const tableNames: string[] = [];
+    const columnRows: InformationSchemaColumn[] = [];
+
+    const client = new Client({ connectionString: connString });
+    try {
+      await client.connect();
+
+      const tablesResult = await client.query<{ table_name: string }>(
+        `SELECT table_name
+           FROM information_schema.tables
+          WHERE table_schema = 'public'
+            AND table_type = 'BASE TABLE'
+          ORDER BY table_name`,
+      );
+      for (const row of tablesResult.rows) {
+        tableNames.push(row.table_name);
+      }
+
+      const columnsResult = await client.query<InformationSchemaColumn>(
+        `SELECT table_name,
+                column_name,
+                data_type,
+                is_nullable,
+                column_default,
+                ordinal_position
+           FROM information_schema.columns
+          WHERE table_schema = 'public'
+          ORDER BY table_name, ordinal_position`,
+      );
+      columnRows.push(...columnsResult.rows);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new HttpException(
+        `DBへの接続またはスキーマ取得に失敗しました: ${message}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    } finally {
+      // 接続は必ずクローズ（接続失敗時の end() エラーは握りつぶす）
+      await client.end().catch(() => undefined);
+    }
+
+    // テーブルを upsert（[projectId, name]）し、name → tableId を作る
+    const tableIdByName = new Map<string, string>();
+    for (const tableName of tableNames) {
+      const table = await this.prisma.table.upsert({
+        where: {
+          projectId_name: { projectId: connection.projectId, name: tableName },
+        },
+        create: {
+          projectId: connection.projectId,
+          name: tableName,
+        },
+        update: {},
+      });
+      tableIdByName.set(tableName, table.id);
+    }
+
+    // カラムを upsert（[tableId, name]）
+    let columnCount = 0;
+    for (const col of columnRows) {
+      const tableId = tableIdByName.get(col.table_name);
+      // BASE TABLE 以外（ビュー等）のカラムは対象テーブルが無いのでスキップ
+      if (!tableId) continue;
+
+      const dataType = this.mapSqlType(col.data_type);
+      const isNullable = col.is_nullable === 'YES';
+
+      await this.prisma.column.upsert({
+        where: { tableId_name: { tableId, name: col.column_name } },
+        create: {
+          tableId,
+          name: col.column_name,
+          dataType,
+          isNullable,
+          defaultValue: col.column_default ?? undefined,
+          order: col.ordinal_position ?? 0,
+        },
+        update: {
+          dataType,
+          isNullable,
+          defaultValue: col.column_default ?? undefined,
+          order: col.ordinal_position ?? 0,
+        },
+      });
+      columnCount += 1;
+    }
+
+    await this.prisma.databaseConnection.update({
+      where: { id },
+      data: { lastIntrospectedAt: new Date() },
+    });
+
+    return { tables: tableNames.length, columns: columnCount };
+  }
+
+  // ========== Private Methods ==========
+
+  // connStringEnc は決して返さない
+  private toResponse(c: {
+    id: string;
+    name: string;
+    dialect: string;
+    lastIntrospectedAt: Date | null;
+    createdAt: Date;
+  }) {
+    return {
+      id: c.id,
+      name: c.name,
+      dialect: c.dialect,
+      lastIntrospectedAt: c.lastIntrospectedAt,
+      createdAt: c.createdAt,
+    };
+  }
+
+  /**
+   * Postgres の information_schema.columns.data_type を ColumnDataType enum に
+   * ベストエフォートでマッピングする。
+   */
+  private mapSqlType(sqlType: string): ColumnDataType {
+    const t = sqlType.toLowerCase();
+
+    // uuid
+    if (t === 'uuid') return ColumnDataType.UUID;
+
+    // json / jsonb
+    if (t.includes('json')) return ColumnDataType.JSON;
+
+    // boolean
+    if (t.includes('bool')) return ColumnDataType.BOOLEAN;
+
+    // 整数系（integer, smallint, bigint, int, serial 等）
+    if (t.includes('int') || t.includes('serial')) {
+      return ColumnDataType.INTEGER;
+    }
+
+    // 浮動小数・数値系（numeric, decimal, real, double precision, float, money）
+    if (
+      t.includes('numeric') ||
+      t.includes('decimal') ||
+      t.includes('real') ||
+      t.includes('double') ||
+      t.includes('float') ||
+      t.includes('money')
+    ) {
+      return ColumnDataType.FLOAT;
+    }
+
+    // 日時系（timestamp は DATETIME、date は DATE）
+    if (t.includes('timestamp') || t === 'time' || t.startsWith('time ')) {
+      return ColumnDataType.DATETIME;
+    }
+    if (t === 'date') return ColumnDataType.DATE;
+
+    // テキスト系: text は TEXT、varchar/char 等は STRING
+    if (t === 'text') return ColumnDataType.TEXT;
+    if (
+      t.includes('char') ||
+      t.includes('varchar') ||
+      t.includes('character')
+    ) {
+      return ColumnDataType.STRING;
+    }
+
+    // それ以外は STRING
+    return ColumnDataType.STRING;
+  }
+}
