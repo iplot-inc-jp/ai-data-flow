@@ -84,7 +84,9 @@ type LayoutResult = Map<string, { x: number; y: number }>;
  * @param rootIds   parentId が null（または親不在）のフロー ID 群
  * @param childrenOf  flowId → 子フロー ID[] の隣接マップ（描画順にソート済み想定）
  */
-export function computeHierarchyLayout(
+// Next.js の page.tsx は default 以外の named export を許さない（build エラーになる）。
+// この関数はこのファイル内専用なので export しない（外部からの import は無し）。
+function computeHierarchyLayout(
   rootIds: string[],
   childrenOf: Map<string, string[]>,
 ): LayoutResult {
