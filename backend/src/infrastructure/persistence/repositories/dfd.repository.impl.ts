@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { IDfdRepository, DfdGraph, SourceFlowGraph } from '../../../domain/repositories/dfd.repository';
+import { IDfdRepository, DfdGraph, SourceFlowGraph, SourceFlowLink } from '../../../domain/repositories/dfd.repository';
 import { DfdDiagram } from '../../../domain/entities/dfd-diagram.entity';
 import { DfdNode, DfdNodeKindValue } from '../../../domain/entities/dfd-node.entity';
 import { DfdFlow } from '../../../domain/entities/dfd-flow.entity';
@@ -245,6 +245,21 @@ export class DfdRepositoryImpl implements IDfdRepository {
         label: e.label,
       })),
     };
+  }
+
+  async findProjectLinkSource(projectId: string): Promise<SourceFlowLink[]> {
+    // プロジェクト配下のフロー間クロスリンク。source側ノードの所属フローを解決して
+    // 「sourceFlowId → targetFlowId」へ畳む。
+    const links = await this.prisma.flowNodeLink.findMany({
+      where: { node: { flow: { projectId } } },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+      include: { node: { select: { flowId: true } } },
+    });
+    return links.map((l) => ({
+      sourceFlowId: l.node.flowId,
+      targetFlowId: l.targetFlowId,
+      label: l.label,
+    }));
   }
 
   generateId(): string {

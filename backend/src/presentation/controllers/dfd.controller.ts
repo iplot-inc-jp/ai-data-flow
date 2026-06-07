@@ -10,6 +10,7 @@ import {
   GetFlowDfdUseCase,
   GenerateFlowDfdUseCase,
   GetProjectDfdUseCase,
+  GenerateProjectDfdUseCase,
   AddDfdNodeUseCase,
   UpdateDfdNodeUseCase,
   DeleteDfdNodeUseCase,
@@ -76,6 +77,7 @@ export class DfdController {
     private readonly getFlowDfd: GetFlowDfdUseCase,
     private readonly generateFlowDfd: GenerateFlowDfdUseCase,
     private readonly getProjectDfd: GetProjectDfdUseCase,
+    private readonly generateProjectDfd: GenerateProjectDfdUseCase,
     private readonly addNode: AddDfdNodeUseCase,
     private readonly updateNode: UpdateDfdNodeUseCase,
     private readonly deleteNode: DeleteDfdNodeUseCase,
@@ -108,9 +110,9 @@ export class DfdController {
   }
 
   @Post('projects/:projectId/dfd')
-  @ApiOperation({ summary: '第1レベルDFD生成（Phase1は空 get-or-create）' })
+  @ApiOperation({ summary: '第1レベルDFD生成（フロー＋FlowNodeLink, 冪等同期）' })
   async generateByProject(@CurrentUser() user: CurrentUserPayload, @Param('projectId') projectId: string) {
-    return this.getProjectDfd.execute({ userId: user.id, projectId });
+    return this.generateProjectDfd.execute({ userId: user.id, projectId });
   }
 
   // ========== ノード ==========

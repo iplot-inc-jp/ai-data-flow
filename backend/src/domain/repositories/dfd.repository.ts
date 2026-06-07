@@ -30,6 +30,13 @@ export interface SourceFlowGraph {
   edges: SourceFlowEdge[];
 }
 
+/** 第1レベル生成のソース：FlowNodeLink を「source側ノードの所属フロー → targetFlowId」に畳んだもの */
+export interface SourceFlowLink {
+  sourceFlowId: string;
+  targetFlowId: string;
+  label: string | null;
+}
+
 export interface IDfdRepository {
   /** project + flow（null=第1レベル）で図グラフを取得 */
   findGraphByProjectFlow(projectId: string, flowId: string | null): Promise<DfdGraph | null>;
@@ -49,5 +56,7 @@ export interface IDfdRepository {
   ): Promise<void>;
   /** 第2レベル生成のための業務フロー素材（FlowNode/FlowEdge） */
   findSourceFlowGraph(flowId: string): Promise<SourceFlowGraph>;
+  /** 第1レベル生成のための FlowNodeLink 素材（flow→flow に畳む） */
+  findProjectLinkSource(projectId: string): Promise<SourceFlowLink[]>;
   generateId(): string;
 }
