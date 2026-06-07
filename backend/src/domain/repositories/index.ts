@@ -7,6 +7,7 @@ export * from './column.repository';
 export * from './business-flow.repository';
 export * from './flow-node.repository';
 export * from './flow-folder.repository';
+export * from './flow-definition.repository';
 export * from './flow-node-link.repository';
 export * from './crud-mapping.repository';
 export * from './project-phase.repository';
