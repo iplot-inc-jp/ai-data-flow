@@ -26,6 +26,8 @@ import {
   Github,
   Building2,
   UserCog,
+  ClipboardList,
+  Target,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -576,7 +578,7 @@ export default function DashboardLayout({
       {
         label: '現状把握',
         items: [
-          { name: '業務フロー(ASIS)', href: `${base}/flows?kind=asis`, icon: GitBranch },
+          { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
           { name: 'データカタログ', href: `${base}/catalog`, icon: Database },
         ],
       },
@@ -590,7 +592,7 @@ export default function DashboardLayout({
       {
         label: '設計',
         items: [
-          { name: '業務フロー(TOBE)', href: `${base}/flows?kind=tobe`, icon: GitBranch },
+          { name: 'TOBE管理', href: `${base}/tobe`, icon: Target },
           { name: '要求定義', href: `${base}/requirements`, icon: FileText },
           { name: 'CRUD表', href: `${base}/crud-matrix`, icon: Grid3X3 },
         ],
@@ -618,16 +620,13 @@ export default function DashboardLayout({
     [],
   )
 
-  // 業務フローツリーを差し込む対象の href（ASIS エントリの下に展開）
-  const asisFlowsHref = projectId ? `/dashboard/projects/${projectId}/flows?kind=asis` : null
-
-  // アクティブ判定。/flows を共有する ASIS/TOBE は kind クエリで区別する。
+  // アクティブ判定。
   const isLinkActive = (href: string) => {
     const [base, query] = href.split('?')
     const pathMatches =
       pathname === base || (base !== '/dashboard' && pathname.startsWith(base + '/'))
     if (!query) return pathMatches
-    // kind クエリ付き（ASIS/TOBE フロー）はパス一致 + kind 一致で判定
+    // kind クエリ付きはパス一致 + kind 一致で判定
     if (pathname !== base) return false
     const kind = new URLSearchParams(query).get('kind')
     return searchParams.get('kind') === kind
@@ -734,6 +733,24 @@ export default function DashboardLayout({
               </div>
             )}
 
+            {/* 業務フローブラウザ（プロジェクト → サブプロジェクト → ASIS/TOBE → フロー） */}
+            {projectId && !sidebarCollapsed && (
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 px-3 pt-1 text-[11px] font-semibold tracking-wide text-gray-400">
+                  <GitBranch className="h-3.5 w-3.5 text-primary/70" />
+                  業務フロー
+                </div>
+                <FlowTree
+                  projectId={projectId}
+                  subProjects={subProjects}
+                  flows={flows}
+                  folders={folders}
+                  pathname={pathname}
+                  onNavigate={() => setSidebarOpen(false)}
+                />
+              </div>
+            )}
+
             {/* ステージごとにグループ化したプロジェクトナビ */}
             {projectId &&
               projectGroups.map((group) => (
@@ -746,7 +763,6 @@ export default function DashboardLayout({
                   )}
                   {group.items.map((item) => {
                     const isActive = isLinkActive(item.href)
-                    const isAsisFlows = !!asisFlowsHref && item.href === asisFlowsHref
                     return (
                       <div key={item.name}>
                         <Link
@@ -768,18 +784,6 @@ export default function DashboardLayout({
                             <ChevronRight className="h-4 w-4 ml-auto text-primary" />
                           )}
                         </Link>
-
-                        {/* 業務フロー展開ツリー（サブプロジェクト → ASIS/TOBE → フロー） */}
-                        {isAsisFlows && !sidebarCollapsed && projectId && (
-                          <FlowTree
-                            projectId={projectId}
-                            subProjects={subProjects}
-                            flows={flows}
-                            folders={folders}
-                            pathname={pathname}
-                            onNavigate={() => setSidebarOpen(false)}
-                          />
-                        )}
                       </div>
                     )
                   })}
