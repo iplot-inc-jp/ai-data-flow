@@ -30,9 +30,15 @@ export interface SourceFlowGraph {
   edges: SourceFlowEdge[];
 }
 
-/** 第1レベル生成のソース：FlowNodeLink を「source側ノードの所属フロー → targetFlowId」に畳んだもの */
+/**
+ * 第1レベル生成のソース：FlowNodeLink を flow→flow に畳んだもの。
+ * direction を保持し、INPUT/OUTPUT で source/target の向きを正しく決める。
+ * - OUTPUT: nodeFlowId（このノードの所属フロー） → targetFlowId
+ * - INPUT : targetFlowId → nodeFlowId
+ */
 export interface SourceFlowLink {
-  sourceFlowId: string;
+  direction: 'INPUT' | 'OUTPUT';
+  nodeFlowId: string;
   targetFlowId: string;
   label: string | null;
 }
@@ -44,6 +50,12 @@ export interface IDfdRepository {
   findGraphByDiagramId(diagramId: string): Promise<DfdGraph | null>;
   findDiagramById(id: string): Promise<DfdDiagram | null>;
   createDiagram(d: DfdDiagram): Promise<void>;
+  /**
+   * 第1レベル(flowId=null)図の find-or-create を並行安全に行う。
+   * Postgres は NULL を distinct 扱いするため @@unique([projectId, flowId]) は
+   * flowId=null を守れない。partial unique index で担保し、競合時は既存を返す。
+   */
+  findOrCreateL1Diagram(d: DfdDiagram): Promise<DfdGraph>;
   saveNode(n: DfdNode): Promise<void>;
   findNodeById(id: string): Promise<DfdNode | null>;
   deleteNode(id: string): Promise<void>;

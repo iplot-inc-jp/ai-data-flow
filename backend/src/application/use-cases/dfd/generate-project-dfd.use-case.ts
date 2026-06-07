@@ -14,9 +14,10 @@ export interface GenerateProjectDfdInput { userId: string; projectId: string; }
 /**
  * 第1レベルDFD（flowId=null）の冪等生成。
  * - FUNCTION ノード = プロジェクトの BusinessFlow 群（refFlowId, label=flow.name, number 自動 1-1…）。
- * - データフロー = FlowNodeLink を「source側ノードの所属フロー → targetFlowId」へ畳む（flow→flow）。
- *   dataItem = link.label || 既定。同 source/target/dataItem は集約。
- * - 外部実体/データストア・位置・手動編集は保持し、FUNCTION の過不足のみ同期。
+ * - データフロー = FlowNodeLink を flow→flow に畳む。direction で向きを確定する
+ *   （OUTPUT: nodeFlow→targetFlow / INPUT: targetFlow→nodeFlow）。集約キーは source→target のみ。
+ *   新規時の dataItem は link.label || 既定。既存フローは order だけ更新し dataItem は上書きしない。
+ * - 外部実体/データストア・位置・手動編集（dataItem 変更を含む）は保持し、FUNCTION の過不足のみ同期。
  */
 @Injectable()
 export class GenerateProjectDfdUseCase {
@@ -34,16 +35,14 @@ export class GenerateProjectDfdUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
-    // 第1 diagram（flowId=null）get-or-create（NULL一意性は findFirst で担保）
-    let graph: DfdGraph | null = await this.repo.findGraphByProjectFlow(project.id, null);
-    if (!graph) {
-      const created = DfdDiagram.create(
-        { projectId: project.id, flowId: null, title: project.name },
-        this.repo.generateId(),
-      );
-      await this.repo.createDiagram(created);
-      graph = { diagram: created, nodes: [], flows: [] };
-    }
+    // 第1 diagram（flowId=null）get-or-create。NULL は Postgres で distinct 扱いの
+    // ため @@unique では守れない → repo 側で partial unique index + 競合再読込により
+    // 並行 POST でも単一 diagram を担保する。
+    const created = DfdDiagram.create(
+      { projectId: project.id, flowId: null, title: project.name },
+      this.repo.generateId(),
+    );
+    const graph: DfdGraph = await this.repo.findOrCreateL1Diagram(created);
     const diagramId = graph.diagram.id;
 
     // プロジェクトの BusinessFlow 群（FUNCTION 化対象）
@@ -97,28 +96,36 @@ export class GenerateProjectDfdUseCase {
       dfdNodeByFlow.set(f.id, node);
     }
 
-    // FlowNodeLink を flow→flow に畳む。dataItem=link.label||既定。同 source/target/dataItem は集約。
+    // FlowNodeLink を flow→flow に畳む。direction で向きを確定する：
+    //   OUTPUT: nodeFlowId → targetFlowId / INPUT: targetFlowId → nodeFlowId
+    // 集約キーは source→target のみ（dataItem は含めない）。L2 と同様、既存フローが
+    // ある場合は order のみ更新し dataItem は上書きしない＝手動編集を保持する。
     const links = await this.repo.findProjectLinkSource(project.id);
     interface Desired { sourceNodeId: string; targetNodeId: string; dataItem: string; }
     const desiredByKey = new Map<string, Desired>();
     for (const l of links) {
-      if (l.sourceFlowId === l.targetFlowId) continue; // 自己ループは除外
-      const s = dfdNodeByFlow.get(l.sourceFlowId);
-      const t = dfdNodeByFlow.get(l.targetFlowId);
+      const sourceFlowId = l.direction === 'INPUT' ? l.targetFlowId : l.nodeFlowId;
+      const targetFlowId = l.direction === 'INPUT' ? l.nodeFlowId : l.targetFlowId;
+      if (sourceFlowId === targetFlowId) continue; // 自己ループは除外
+      const s = dfdNodeByFlow.get(sourceFlowId);
+      const t = dfdNodeByFlow.get(targetFlowId);
       if (!s || !t) continue; // 端のフローが FUNCTION 化されていない
-      const dataItem = l.label || '情報';
-      const key = `${s.id}->${t.id}::${dataItem}`;
+      const key = `${s.id}->${t.id}`;
       if (!desiredByKey.has(key)) {
+        const dataItem = l.label || '情報';
         desiredByKey.set(key, { sourceNodeId: s.id, targetNodeId: t.id, dataItem });
       }
     }
 
-    // 自動管理対象は「両端が refFlow を持つ FUNCTION ノード」間のフローのみ
+    // 自動管理対象は「両端が refFlow を持つ FUNCTION ノード」間のフローのみ。
+    // 既知の制約: ユーザーがキャンバス上で FUNCTION→FUNCTION のフローを手描きすると、
+    // 両端が自動 FUNCTION ノードであるため自動管理対象とみなされ、対応するリンクが
+    // 無ければ再生成時に削除される（L2 と同じ構造的制約）。
     const autoFnNodeIds = new Set(Array.from(dfdNodeByFlow.values()).map((n) => n.id));
     const existingAutoFlowKey = new Map<string, DfdFlow>();
     for (const f of graph.flows) {
       if (autoFnNodeIds.has(f.sourceNodeId) && autoFnNodeIds.has(f.targetNodeId)) {
-        existingAutoFlowKey.set(`${f.sourceNodeId}->${f.targetNodeId}::${f.dataItem}`, f);
+        existingAutoFlowKey.set(`${f.sourceNodeId}->${f.targetNodeId}`, f);
       }
     }
 
@@ -126,6 +133,7 @@ export class GenerateProjectDfdUseCase {
     for (const [key, d] of desiredByKey) {
       const existing = existingAutoFlowKey.get(key);
       if (existing) {
+        // 既存フローは order のみ更新し dataItem は保持（手動編集を維持）
         existing.updateOrder(order);
         await this.repo.saveFlow(existing);
       } else {

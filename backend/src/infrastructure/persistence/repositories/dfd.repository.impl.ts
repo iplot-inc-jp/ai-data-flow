@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { IDfdRepository, DfdGraph, SourceFlowGraph, SourceFlowLink } from '../../../domain/repositories/dfd.repository';
@@ -152,6 +153,45 @@ export class DfdRepositoryImpl implements IDfdRepository {
     });
   }
 
+  async findOrCreateL1Diagram(d: DfdDiagram): Promise<DfdGraph> {
+    const existing = await this.findGraphByProjectFlow(d.projectId, null);
+    if (existing) return existing;
+
+    // Postgres は NULL を distinct 扱いするため @@unique([projectId, flowId]) は
+    // flowId IS NULL を守れない。partial unique index を冪等に張って並行 create を
+    // 単一に絞る（db push 運用でも schema を汚さず担保できる）。
+    await this.prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "dfd_diagrams_project_l1_unique" ` +
+        `ON "dfd_diagrams" ("project_id") WHERE "flow_id" IS NULL`,
+    );
+
+    const f = d.fields;
+    try {
+      await this.prisma.dfdDiagram.create({
+        data: {
+          id: d.id,
+          projectId: d.projectId,
+          flowId: null,
+          title: f.title,
+          docId: f.docId,
+          authorName: f.authorName,
+          approverName: f.approverName,
+        },
+      });
+    } catch (e) {
+      // 競合で別リクエストが先に作成 → 既存を読み直す
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        const winner = await this.findGraphByProjectFlow(d.projectId, null);
+        if (winner) return winner;
+      }
+      throw e;
+    }
+    return { diagram: d, nodes: [], flows: [] };
+  }
+
   async saveNode(n: DfdNode): Promise<void> {
     const data = {
       diagramId: n.diagramId,
@@ -248,15 +288,16 @@ export class DfdRepositoryImpl implements IDfdRepository {
   }
 
   async findProjectLinkSource(projectId: string): Promise<SourceFlowLink[]> {
-    // プロジェクト配下のフロー間クロスリンク。source側ノードの所属フローを解決して
-    // 「sourceFlowId → targetFlowId」へ畳む。
+    // プロジェクト配下のフロー間クロスリンク。ノードの所属フロー(nodeFlowId)・targetFlowId・
+    // direction をそのまま返し、向きの確定（INPUT/OUTPUT のスワップ）は use-case 側で行う。
     const links = await this.prisma.flowNodeLink.findMany({
       where: { node: { flow: { projectId } } },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
       include: { node: { select: { flowId: true } } },
     });
     return links.map((l) => ({
-      sourceFlowId: l.node.flowId,
+      direction: l.direction,
+      nodeFlowId: l.node.flowId,
       targetFlowId: l.targetFlowId,
       label: l.label,
     }));
