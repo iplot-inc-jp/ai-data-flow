@@ -442,3 +442,193 @@ export function computeFlowLayout(
     orientation,
   };
 }
+
+// ===========================================
+// 自由配置レーン帯の算出（computeLaneBands）
+// ===========================================
+//
+// computeFlowLayout が「構造（order）→ 決定的な座標」を吐くのに対し、
+// computeLaneBands は「自由に置かれた（保存済み）ノード座標 → そのノード群を
+// 包む背景レーン帯」を吐く純粋関数。
+//
+// レーン = ロール（roles の並び順）。roleId 不明/未指定のノードは末尾の
+// 「未割当」レーンへ集約する（computeFlowLayout と同じ規約）。
+//
+// horizontal: 各レーンは「全幅の横帯」。帯の高さ = そのロールのノード群の
+//   縦方向（Y）の広がり + パディング（minLaneHeight 未満なら minLaneHeight）。
+//   帯は上→下に積層する（前レーンの下端から次レーンが始まる）。
+// vertical:   軸を入れ替える。各レーンは「全高の縦列」。列の幅 = そのロールの
+//   ノード群の横方向（X）の広がり + パディング。列は左→右に並置する。
+//
+// React / @xyflow に一切依存しない（単体テスト可能）。
+
+/** computeLaneBands に渡す、自由配置された 1 ノードの幾何（中心座標 + サイズ）。 */
+export interface BandInputNode {
+  id: string;
+  /** 所属ロール。未指定/不明なら「未割当」レーンへ。 */
+  roleId?: string | null;
+  /** ノード中心X。 */
+  x: number;
+  /** ノード中心Y。 */
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface LaneBandsOptions {
+  /** レーン帯の最小厚（horizontal: 高さ / vertical: 幅）。 */
+  minLaneHeight: number;
+  /** ノード群の外周に足すクロス軸パディング（両側）。 */
+  lanePadding: number;
+  /** 時間軸方向の余白（horizontal: 右側の幅余白 / vertical: 下側の高さ余白）。 */
+  contentMargin: number;
+  /** roleId が roles に無い／null のノードを集約する未割当レーンのID。 */
+  unassignedLaneId: string;
+  /** 未割当レーンの表示名。 */
+  unassignedLaneName: string;
+}
+
+export const DEFAULT_LANE_BANDS_OPTIONS: LaneBandsOptions = {
+  minLaneHeight: 110,
+  lanePadding: 24,
+  contentMargin: 120,
+  unassignedLaneId: '__unassigned__',
+  unassignedLaneName: '未割当',
+};
+
+/** computeLaneBands の戻り値（背景レーン帯 + 全体キャンバスサイズ）。 */
+export interface LaneBandsResult {
+  lanes: Lane[];
+  /** 全ノードを包むキャンバス幅。 */
+  width: number;
+  /** 全ノードを包むキャンバス高さ。 */
+  height: number;
+  orientation: FlowOrientation;
+}
+
+/**
+ * 自由配置されたノード座標から、ロールごとの背景レーン帯を算出する純粋関数。
+ *
+ * - レーンの並びは roles の順。未割当ノードがあれば末尾に未割当レーンを足す。
+ * - horizontal: レーン帯は全幅・高さ自動（その行のノードの縦広がりに追従）、上→下に積層。
+ * - vertical:   レーン列は全高・幅自動（その列のノードの横広がりに追従）、左→右に並置。
+ * - ノードを持たないレーンは minLaneHeight ぶんの厚みで描く。
+ */
+export function computeLaneBands(
+  inputNodes: BandInputNode[],
+  inputRoles: LayoutRole[],
+  orientation: FlowOrientation,
+  options: Partial<LaneBandsOptions> = {},
+): LaneBandsResult {
+  const opt: LaneBandsOptions = { ...DEFAULT_LANE_BANDS_OPTIONS, ...options };
+  const isHorizontal = orientation === 'horizontal';
+
+  // --- レーン（ロール）の順序を確定（computeFlowLayout と同じ規約） ---
+  const roleOrder: LayoutRole[] = [...inputRoles];
+  const knownRoleIds = new Set(roleOrder.map((r) => r.id));
+  const hasUnassigned = inputNodes.some(
+    (n) => !n.roleId || !knownRoleIds.has(n.roleId),
+  );
+  if (hasUnassigned) {
+    roleOrder.push({
+      id: opt.unassignedLaneId,
+      name: opt.unassignedLaneName,
+      color: '#94a3b8',
+    });
+    knownRoleIds.add(opt.unassignedLaneId);
+  }
+
+  const resolveRoleId = (roleId?: string | null): string =>
+    roleId && knownRoleIds.has(roleId) ? roleId : opt.unassignedLaneId;
+
+  // --- ロール → 所属ノードへグルーピング ---
+  const byRole = new Map<string, BandInputNode[]>();
+  for (const r of roleOrder) byRole.set(r.id, []);
+  for (const n of inputNodes) {
+    byRole.get(resolveRoleId(n.roleId))!.push(n);
+  }
+
+  // --- コンテンツ全体の時間軸方向の広がり（全レーン共通の帯の長さに使う） ---
+  // horizontal: 帯は全幅 → 全ノードの右端の最大値で決める。
+  // vertical:   列は全高 → 全ノードの下端の最大値で決める。
+  let contentExtent = 0; // 時間軸方向の最大到達点
+  for (const n of inputNodes) {
+    const along = isHorizontal ? n.x + n.width / 2 : n.y + n.height / 2;
+    contentExtent = Math.max(contentExtent, along);
+  }
+  // 時間軸方向の全長（ノードが無くても最低限の帯長を確保）
+  const bandLength = Math.max(
+    contentExtent + opt.contentMargin,
+    opt.minLaneHeight * 3,
+  );
+
+  // --- 各レーンを「所属ノードの実クロス座標範囲」を包むよう配置 ---
+  // 自由配置されたノードを帯が確実に内包するため、帯はノードの実 min/max
+  // クロス座標 ± パディングで決める。レーンはロール順に並べ、前レーンの下端
+  // （vertical では右端）以降から始めることで重なりを防ぐ（contiguous & ordered）。
+  // ノードを持たないレーンは現在のカーソルから minLaneHeight ぶんの帯を置く。
+  const lanes: Lane[] = [];
+  let cursor = 0;
+  roleOrder.forEach((r, i) => {
+    const members = byRole.get(r.id)!;
+    let laneStart: number;
+    let laneEnd: number;
+    if (members.length > 0) {
+      let minCross = Infinity;
+      let maxCross = -Infinity;
+      for (const n of members) {
+        const half = (isHorizontal ? n.height : n.width) / 2;
+        const center = isHorizontal ? n.y : n.x;
+        minCross = Math.min(minCross, center - half);
+        maxCross = Math.max(maxCross, center + half);
+      }
+      const naturalStart = minCross - opt.lanePadding;
+      const naturalEnd = maxCross + opt.lanePadding;
+      // 前レーンと重ならないようカーソル以降から開始
+      laneStart = Math.max(cursor, naturalStart);
+      // 最小厚と自然範囲の両方を満たす下端
+      laneEnd = Math.max(laneStart + opt.minLaneHeight, naturalEnd);
+    } else {
+      laneStart = cursor;
+      laneEnd = cursor + opt.minLaneHeight;
+    }
+    const thickness = laneEnd - laneStart;
+    const center = laneStart + thickness / 2;
+    lanes.push(
+      isHorizontal
+        ? {
+            roleId: r.id,
+            name: r.name,
+            color: r.color,
+            index: i,
+            top: laneStart,
+            height: thickness,
+            centerY: center,
+            left: 0,
+            width: 0,
+            centerX: 0,
+          }
+        : {
+            roleId: r.id,
+            name: r.name,
+            color: r.color,
+            index: i,
+            top: 0,
+            height: 0,
+            centerY: 0,
+            left: laneStart,
+            width: thickness,
+            centerX: center,
+          },
+    );
+    cursor = laneEnd;
+  });
+  const crossTotal = cursor;
+
+  return {
+    lanes,
+    width: isHorizontal ? bandLength : crossTotal,
+    height: isHorizontal ? crossTotal : bandLength,
+    orientation,
+  };
+}

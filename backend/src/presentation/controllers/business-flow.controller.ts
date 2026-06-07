@@ -12,7 +12,16 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber, IsIn, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsIn,
+  IsObject,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   CreateNodeLinkUseCase,
   GetNodeLinksUseCase,
@@ -28,9 +37,15 @@ import {
   IFlowNodeRepository,
   CRUD_MAPPING_REPOSITORY,
   ICrudMappingRepository,
+  PROJECT_REPOSITORY,
+  ProjectRepository,
+  ORGANIZATION_REPOSITORY,
+  OrganizationRepository,
   BusinessFlow,
   FlowNode,
   FlowEdge,
+  EntityNotFoundError,
+  ForbiddenError,
 } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService } from '../../infrastructure/services/claude.service';
@@ -155,6 +170,34 @@ class UpdateFlowNodeDto {
   metadata?: Record<string, unknown>;
 }
 
+class NodePositionItemDto {
+  @IsString()
+  id: string;
+
+  @IsNumber()
+  positionX: number;
+
+  @IsNumber()
+  positionY: number;
+
+  @ApiProperty({ required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  roleId?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  order?: number;
+}
+
+class UpdateNodePositionsDto {
+  @ApiProperty({ type: [NodePositionItemDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => NodePositionItemDto)
+  positions: NodePositionItemDto[];
+}
+
 class CreateFlowEdgeDto {
   @IsString()
   sourceNodeId: string;
@@ -234,6 +277,10 @@ export class BusinessFlowController {
     private readonly nodeRepository: IFlowNodeRepository,
     @Inject(CRUD_MAPPING_REPOSITORY)
     private readonly crudMappingRepository: ICrudMappingRepository,
+    @Inject(PROJECT_REPOSITORY)
+    private readonly projectRepository: ProjectRepository,
+    @Inject(ORGANIZATION_REPOSITORY)
+    private readonly organizationRepository: OrganizationRepository,
     private readonly prisma: PrismaService,
     private readonly claudeService: ClaudeService,
     private readonly companyKeyService: CompanyKeyService,
@@ -430,6 +477,82 @@ export class BusinessFlowController {
 
     const saved = await this.nodeRepository.save(node);
     return this.nodeToResponse(saved);
+  }
+
+  @Put(':flowId/nodes/positions')
+  @ApiOperation({
+    summary: 'ノード位置を一括更新（自由ドラッグ保存 / 整形）',
+  })
+  async updateNodePositions(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Body() dto: UpdateNodePositionsDto,
+  ) {
+    // 認可: flow -> project -> organization メンバーシップ
+    const flow = await this.flowRepository.findById(flowId);
+    if (!flow) {
+      throw new EntityNotFoundError('BusinessFlow', flowId);
+    }
+
+    const project = await this.projectRepository.findById(flow.projectId);
+    if (!project) {
+      throw new EntityNotFoundError('Project', flow.projectId);
+    }
+
+    const isMember = await this.organizationRepository.isMember(
+      project.organizationId,
+      user.id,
+    );
+    if (!isMember) {
+      throw new ForbiddenError('You are not a member of this organization');
+    }
+
+    const positions = dto.positions ?? [];
+
+    for (const pos of positions) {
+      const node = await this.nodeRepository.findById(pos.id);
+      // このフローに属さない / 存在しないノードはスキップ
+      if (!node || node.flowId !== flowId) {
+        continue;
+      }
+
+      node.updatePosition(pos.positionX, pos.positionY);
+      if (pos.roleId !== undefined) {
+        node.assignRole(pos.roleId);
+      }
+      await this.nodeRepository.save(node);
+
+      // `order` はドメインエンティティ/リポジトリが保持していないため直接更新する
+      if (pos.order !== undefined) {
+        await this.prisma.flowNode.update({
+          where: { id: pos.id },
+          data: { order: pos.order },
+        });
+      }
+    }
+
+    // 更新後のフローのノード一覧を返す
+    const nodes = await this.prisma.flowNode.findMany({
+      where: { flowId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return {
+      success: true,
+      count: positions.length,
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        flowId: n.flowId,
+        type: n.type,
+        label: n.label,
+        description: n.description,
+        positionX: n.positionX,
+        positionY: n.positionY,
+        roleId: n.roleId,
+        order: n.order,
+        metadata: n.metadata,
+      })),
+    };
   }
 
   @Put(':flowId/nodes/:nodeId')

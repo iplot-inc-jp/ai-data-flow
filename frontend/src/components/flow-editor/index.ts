@@ -10,7 +10,9 @@ export type {
 export {
   computeFlowLayout,
   computeLayers,
+  computeLaneBands,
   DEFAULT_LAYOUT_OPTIONS,
+  DEFAULT_LANE_BANDS_OPTIONS,
 } from './flow-layout';
 export type {
   FlowLayout,
@@ -20,4 +22,7 @@ export type {
   LayoutInputEdge,
   LayoutRole,
   LayoutOptions,
+  BandInputNode,
+  LaneBandsOptions,
+  LaneBandsResult,
 } from './flow-layout';

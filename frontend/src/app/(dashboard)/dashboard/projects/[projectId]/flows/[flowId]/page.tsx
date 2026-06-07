@@ -270,8 +270,8 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
-  // ノード更新（ラベル/種別/ロール/並び順/メタデータ）
-  // SwimlaneCanvas が右サイドバー保存・ドラッグ完了（order/roleId 変更）で呼ぶ
+  // ノード更新（ラベル/種別/ロール/自由配置位置/並び順/メタデータ）
+  // SwimlaneCanvas が右サイドバー保存・ドラッグ完了（positionX/positionY/roleId 変更）で呼ぶ
   const handleNodeUpdate = useCallback(
     async (
       nodeId: string,
@@ -280,6 +280,8 @@ export default function ProjectFlowDetailPage() {
         type?: string;
         roleId?: string;
         order?: number;
+        positionX?: number;
+        positionY?: number;
         metadata?: Record<string, unknown>;
       }
     ) => {
@@ -296,6 +298,38 @@ export default function ProjectFlowDetailPage() {
         fetchFlowData(flowData.id);
       } catch (err) {
         console.error('Failed to update node:', err);
+      }
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
+  // 「整形」: 全ノードの位置/ロール/順序を一括保存（PUT /:flowId/nodes/positions）→ 再取得。
+  // SwimlaneCanvas が computeFlowLayout の綺麗な座標を渡してくる（ぐちゃぐちゃ修正の安全網）。
+  const handleTidyNodes = useCallback(
+    async (
+      positions: Array<{
+        id: string;
+        positionX: number;
+        positionY: number;
+        roleId?: string | null;
+        order?: number;
+      }>
+    ) => {
+      if (!flowData) return;
+      try {
+        const headers = getHeaders();
+        const res = await fetch(
+          `${API_URL}/api/business-flows/${flowData.id}/nodes/positions`,
+          {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ positions }),
+          }
+        );
+        if (!res.ok) throw new Error('Failed to tidy node positions');
+        fetchFlowData(flowData.id);
+      } catch (err) {
+        console.error('Failed to tidy node positions:', err);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -952,6 +986,7 @@ export default function ProjectFlowDetailPage() {
           onUpdateEdgeLabel={handleEdgeLabelUpdate}
           onChangeNodeRole={handleNodeRoleUpdate}
           onUpdateNode={handleNodeUpdate}
+          onTidyNodes={handleTidyNodes}
           onCreateChildFlow={handleChildFlowCreate}
           onOpenChildFlow={handleNodeDoubleClick}
           onNodeDoubleClick={handleNodeDrillDown}

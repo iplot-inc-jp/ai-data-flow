@@ -2,10 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   computeLayers,
   computeFlowLayout,
+  computeLaneBands,
   DEFAULT_LAYOUT_OPTIONS,
+  DEFAULT_LANE_BANDS_OPTIONS,
   type LayoutInputNode,
   type LayoutInputEdge,
   type LayoutRole,
+  type BandInputNode,
 } from './flow-layout';
 
 const roles: LayoutRole[] = [
@@ -378,5 +381,143 @@ describe('computeFlowLayout (orientation swap)', () => {
     expect(h.height).toBeGreaterThan(0);
     expect(v.width).toBeGreaterThan(0);
     expect(v.height).toBeGreaterThan(0);
+  });
+});
+
+// ===========================================
+// computeLaneBands — 自由配置ノードに追従する背景レーン帯
+// ===========================================
+describe('computeLaneBands', () => {
+  // 各ロールに 1 ノードずつ自由配置（中心座標 + サイズ）
+  const freeNodes: BandInputNode[] = [
+    { id: 'a', roleId: 'r-customer', x: 100, y: 60, width: 156, height: 52 },
+    { id: 'b', roleId: 'r-approver', x: 320, y: 220, width: 156, height: 52 },
+    { id: 'c', roleId: 'r-system', x: 540, y: 380, width: 156, height: 52 },
+  ];
+
+  it('ロールごとに 1 レーンを roles の並び順で返す', () => {
+    const res = computeLaneBands(freeNodes, roles, 'horizontal');
+    expect(res.lanes).toHaveLength(roles.length);
+    expect(res.lanes.map((l) => l.roleId)).toEqual([
+      'r-customer',
+      'r-approver',
+      'r-system',
+    ]);
+    expect(res.orientation).toBe('horizontal');
+  });
+
+  it('roleId 不明/未指定のノードは末尾の未割当レーンに集約される', () => {
+    const withUnassigned: BandInputNode[] = [
+      ...freeNodes,
+      { id: 'x', x: 700, y: 500, width: 156, height: 52 }, // 未指定
+      { id: 'y', roleId: 'ghost', x: 720, y: 520, width: 156, height: 52 }, // 不明
+    ];
+    const res = computeLaneBands(withUnassigned, roles, 'horizontal');
+    expect(res.lanes).toHaveLength(roles.length + 1);
+    const last = res.lanes[res.lanes.length - 1];
+    expect(last.roleId).toBe(DEFAULT_LANE_BANDS_OPTIONS.unassignedLaneId);
+  });
+
+  it('horizontal: レーン帯は上→下に並び、重ならず、各帯はそのノードを内包する', () => {
+    const res = computeLaneBands(freeNodes, roles, 'horizontal');
+    expect(res.lanes[0].top).toBeLessThan(res.lanes[1].top);
+    expect(res.lanes[1].top).toBeLessThan(res.lanes[2].top);
+    for (const lane of res.lanes) {
+      expect(lane.height).toBeGreaterThan(0);
+      expect(lane.centerY).toBe(lane.top + lane.height / 2);
+    }
+    // 前レーンの下端 <= 次レーンの上端（重ならない・順序を保つ）
+    expect(res.lanes[0].top + res.lanes[0].height).toBeLessThanOrEqual(
+      res.lanes[1].top,
+    );
+    expect(res.lanes[1].top + res.lanes[1].height).toBeLessThanOrEqual(
+      res.lanes[2].top,
+    );
+    // 各帯はそのロールのノード中心を内包する（自由配置に追従）
+    for (const n of freeNodes) {
+      const lane = res.lanes.find((l) => l.roleId === n.roleId)!;
+      expect(n.y).toBeGreaterThanOrEqual(lane.top);
+      expect(n.y).toBeLessThanOrEqual(lane.top + lane.height);
+    }
+  });
+
+  it('horizontal: 縦に広がったノード群を持つレーンは厚く、1点だけのレーンは minLaneHeight', () => {
+    // r-approver に縦に大きく広がったノードを 2 つ、r-system は無し
+    const nodes: BandInputNode[] = [
+      { id: 'a', roleId: 'r-customer', x: 100, y: 60, width: 156, height: 52 },
+      { id: 'b1', roleId: 'r-approver', x: 300, y: 60, width: 156, height: 52 },
+      { id: 'b2', roleId: 'r-approver', x: 500, y: 460, width: 156, height: 52 },
+    ];
+    const res = computeLaneBands(nodes, roles, 'horizontal');
+    const customer = res.lanes.find((l) => l.roleId === 'r-customer')!;
+    const approver = res.lanes.find((l) => l.roleId === 'r-approver')!;
+    const system = res.lanes.find((l) => l.roleId === 'r-system')!;
+    // 縦に広がったレーンは 1 点だけのレーンより厚い（minLaneHeight を超える）
+    expect(approver.height).toBeGreaterThan(customer.height);
+    expect(approver.height).toBeGreaterThan(
+      DEFAULT_LANE_BANDS_OPTIONS.minLaneHeight,
+    );
+    // ノードを持たないレーンは最小厚
+    expect(system.height).toBe(DEFAULT_LANE_BANDS_OPTIONS.minLaneHeight);
+    // approver 帯は最も下のノード（y=460）まで伸びる（自由配置の下方向に追従）
+    expect(approver.top + approver.height).toBeGreaterThanOrEqual(460);
+  });
+
+  it('horizontal: 横に並んだノード（side by side）は 1 つの行（最小厚）に収まる', () => {
+    // 同じレーンに横並び（Y は同じ、X だけ違う）
+    const nodes: BandInputNode[] = [
+      { id: 'a', roleId: 'r-customer', x: 100, y: 80, width: 156, height: 52 },
+      { id: 'b', roleId: 'r-customer', x: 320, y: 80, width: 156, height: 52 },
+      { id: 'c', roleId: 'r-customer', x: 540, y: 80, width: 156, height: 52 },
+    ];
+    const res = computeLaneBands(nodes, roles, 'horizontal');
+    const customer = res.lanes.find((l) => l.roleId === 'r-customer')!;
+    // 縦の広がりが無い → 最小厚のまま
+    expect(customer.height).toBe(DEFAULT_LANE_BANDS_OPTIONS.minLaneHeight);
+    // 帯の幅（時間軸）は一番右のノードを含む
+    expect(res.width).toBeGreaterThanOrEqual(540 + 156 / 2);
+  });
+
+  it('vertical: 軸が入れ替わり、レーン列は左→右に並び、重ならず、各列はそのノードを内包する', () => {
+    const res = computeLaneBands(freeNodes, roles, 'vertical');
+    expect(res.orientation).toBe('vertical');
+    expect(res.lanes[0].left).toBeLessThan(res.lanes[1].left);
+    expect(res.lanes[1].left).toBeLessThan(res.lanes[2].left);
+    for (const lane of res.lanes) {
+      expect(lane.width).toBeGreaterThan(0);
+      expect(lane.centerX).toBe(lane.left + lane.width / 2);
+    }
+    // 重ならない（前列の右端 <= 次列の左端）
+    expect(res.lanes[0].left + res.lanes[0].width).toBeLessThanOrEqual(
+      res.lanes[1].left,
+    );
+    // 各列はそのロールのノード中心を内包する
+    for (const n of freeNodes) {
+      const lane = res.lanes.find((l) => l.roleId === n.roleId)!;
+      expect(n.x).toBeGreaterThanOrEqual(lane.left);
+      expect(n.x).toBeLessThanOrEqual(lane.left + lane.width);
+    }
+  });
+
+  it('vertical: 横に広がったノード群を持つレーンは幅が広がる', () => {
+    const nodes: BandInputNode[] = [
+      { id: 'a', roleId: 'r-customer', x: 60, y: 100, width: 156, height: 52 },
+      { id: 'b1', roleId: 'r-approver', x: 60, y: 300, width: 156, height: 52 },
+      { id: 'b2', roleId: 'r-approver', x: 460, y: 500, width: 156, height: 52 },
+    ];
+    const res = computeLaneBands(nodes, roles, 'vertical');
+    const customer = res.lanes.find((l) => l.roleId === 'r-customer')!;
+    const approver = res.lanes.find((l) => l.roleId === 'r-approver')!;
+    expect(approver.width).toBeGreaterThan(customer.width);
+  });
+
+  it('ノードが空でも壊れず、minLaneHeight 厚のレーンを返す', () => {
+    const res = computeLaneBands([], roles, 'horizontal');
+    expect(res.lanes).toHaveLength(roles.length);
+    for (const lane of res.lanes) {
+      expect(lane.height).toBe(DEFAULT_LANE_BANDS_OPTIONS.minLaneHeight);
+    }
+    expect(res.width).toBeGreaterThan(0);
+    expect(res.height).toBeGreaterThan(0);
   });
 });

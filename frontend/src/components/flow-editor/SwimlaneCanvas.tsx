@@ -54,9 +54,17 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Loader2,
+  LayoutGrid,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { computeFlowLayout, type LayoutInputNode, type LayoutInputEdge } from './flow-layout';
+import {
+  computeFlowLayout,
+  computeLaneBands,
+  type LayoutInputNode,
+  type LayoutInputEdge,
+  type BandInputNode,
+  type LayoutRole,
+} from './flow-layout';
 import type {
   FlowData,
   FlowDataNode,
@@ -70,13 +78,25 @@ const LANE_LABEL_W = 132;
 
 export type FlowOrientation = 'horizontal' | 'vertical';
 
-/** ノード更新の差分パッチ。プロパティ保存・ドラッグ並べ替えの双方で使う。 */
+/** ノード更新の差分パッチ。プロパティ保存・ドラッグでの自由配置保存の双方で使う。 */
 export interface NodeUpdatePatch {
   label?: string;
   type?: string;
   roleId?: string;
   order?: number;
+  /** 自由配置の保存座標（ノード左上ではなく中心ではなく、サーバ保存値=左上基準）。 */
+  positionX?: number;
+  positionY?: number;
   metadata?: Record<string, unknown>;
+}
+
+/** 整形（一括位置保存）の 1 ノード分。`PUT /:flowId/nodes/positions` の positions[] に対応。 */
+export interface NodePositionPatch {
+  id: string;
+  positionX: number;
+  positionY: number;
+  roleId?: string | null;
+  order?: number;
 }
 
 /** ノードの入出力リンク取得結果（双方向）。 */
@@ -122,11 +142,16 @@ export interface SwimlaneCanvasProps {
   /** 連携先フローのノード一覧を取得（連携先ノード選択用、任意）。 */
   onFetchFlowNodes?: (flowId: string) => Promise<Array<{ id: string; label: string }>>;
   /**
-   * ノードのプロパティ保存 / ドラッグでの並べ替え・レーン移動で呼ばれる。
+   * ノードのプロパティ保存 / ドラッグでの自由配置保存・レーン移動で呼ばれる。
    * - 右サイドバー保存: { label?, type?, roleId?, metadata? }
-   * - ドラッグ停止: { order, roleId? }（別レーンに落ちた場合のみ roleId を含む）
+   * - ドラッグ停止: { positionX, positionY, roleId? }（別レーンに落ちた場合のみ roleId を含む）
    */
   onUpdateNode?: (nodeId: string, patch: NodeUpdatePatch) => void;
+  /**
+   * 「整形」: 全ノードの位置/ロール/順序を一括保存する（`PUT /:flowId/nodes/positions`）。
+   * computeFlowLayout で算出した綺麗な座標を渡し、呼び出し側が永続化→再取得する。
+   */
+  onTidyNodes?: (positions: NodePositionPatch[]) => Promise<void> | void;
 }
 
 // ===========================================
@@ -369,7 +394,15 @@ type ContextMenuState =
   | { kind: 'pane'; x: number; y: number }
   | null;
 
-const ORDER_STEP = 10;
+// コンテンツノードの描画サイズ（自由配置のシード/整形と一致させる。
+// flow-layout の DEFAULT_LAYOUT_OPTIONS.nodeWidth/nodeHeight と揃える）。
+const NODE_W = 156;
+const NODE_H = 52;
+
+/** ノードが「未配置（座標が保存されていない）」か判定。 */
+function isUnpositioned(n: FlowDataNode): boolean {
+  return (n.positionX ?? 0) === 0 && (n.positionY ?? 0) === 0;
+}
 
 function readStoredOrientation(flowId: string): FlowOrientation {
   if (typeof window === 'undefined') return 'horizontal';
@@ -400,8 +433,26 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     });
   }, [flowData.id]);
 
-  // --- 構造から座標を算出（単一座標源） ---
-  const layout = useMemo<FlowLayoutView>(() => {
+  const isVertical = orientation === 'vertical';
+
+  // ロール → computeFlowLayout / computeLaneBands 共通のロール入力。
+  const laneRoles = useMemo<LayoutRole[]>(
+    () =>
+      roles.map((r) => ({
+        id: r.id,
+        name: r.name,
+        color: r.color,
+        laneHeight: r.laneHeight,
+      })),
+    [roles],
+  );
+
+  // --- 整形エンジン（computeFlowLayout）: 綺麗な決定的座標 ---
+  // 用途は 2 つ:
+  //  1) 未配置ノード（positionX/Y が 0,0）のシード位置（原点スタックを防ぐ）
+  //  2) 「整形」ボタンが永続化する綺麗なレイアウト
+  // ノードの roleId が変わったり向きが変わると再計算される。
+  const tidyLayout = useMemo<FlowLayoutView>(() => {
     const inputNodes: LayoutInputNode[] = flowData.nodes.map((n) => ({
       id: n.id,
       type: n.type,
@@ -413,18 +464,56 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       source: e.sourceNodeId,
       target: e.targetNodeId,
     }));
-    const laneRoles = roles.map((r) => ({ id: r.id, name: r.name, color: r.color, laneHeight: r.laneHeight }));
-    // 契約: computeFlowLayout(nodes, edges, roles, { orientation })
     return computeFlowLayout(inputNodes, inputEdges, laneRoles, {
       orientation,
     } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
-  }, [flowData.nodes, flowData.edges, roles, orientation]);
+  }, [flowData.nodes, flowData.edges, laneRoles, orientation]);
 
-  const isVertical = orientation === 'vertical';
+  // --- 各ノードの実効位置（左上座標） ---
+  // 保存済み positionX/Y があればそれを使い、未配置なら tidyLayout のシード座標を使う。
+  // 「実位置を持つノードは決して上書きしない」のがルール（自由配置の尊重）。
+  const effectivePositions = useMemo(() => {
+    const seedById = new Map(tidyLayout.nodes.map((n) => [n.id, n] as const));
+    const map = new Map<string, { x: number; y: number }>();
+    for (const n of flowData.nodes) {
+      if (isUnpositioned(n)) {
+        const seed = seedById.get(n.id);
+        if (seed) {
+          // computeFlowLayout は中心座標 → 左上に補正
+          map.set(n.id, {
+            x: seed.x - seed.width / 2,
+            y: seed.y - seed.height / 2,
+          });
+        } else {
+          map.set(n.id, { x: 0, y: 0 });
+        }
+      } else {
+        map.set(n.id, { x: n.positionX, y: n.positionY });
+      }
+    }
+    return map;
+  }, [flowData.nodes, tidyLayout]);
+
+  // --- 背景レーン帯（ノードに追従して自動サイズ） ---
+  const bands = useMemo(() => {
+    const bandNodes: BandInputNode[] = flowData.nodes.map((n) => {
+      const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
+      return {
+        id: n.id,
+        roleId: n.roleId ?? n.role?.id ?? null,
+        // computeLaneBands は中心座標を取る → 左上 + 半サイズ
+        x: pos.x + NODE_W / 2,
+        y: pos.y + NODE_H / 2,
+        width: NODE_W,
+        height: NODE_H,
+      };
+    });
+    return computeLaneBands(bandNodes, laneRoles, orientation);
+  }, [flowData.nodes, effectivePositions, laneRoles, orientation]);
 
   // --- React Flow ノード（背景レーン + コンテンツ） ---
   const rfNodes: Node[] = useMemo(() => {
-    const laneNodes: Node[] = layout.lanes.map((lane) => {
+    const laneNodes: Node[] = bands.lanes.map((lane) => {
       if (isVertical) {
         const left = lane.left ?? 0;
         const width = lane.width ?? 0;
@@ -438,8 +527,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           selectable: false,
           zIndex: 0,
           width,
-          height: LANE_LABEL_W + layout.height + 80,
-          style: { width, height: LANE_LABEL_W + layout.height + 80 },
+          height: LANE_LABEL_W + bands.height + 80,
+          style: { width, height: LANE_LABEL_W + bands.height + 80 },
         } as Node;
       }
       return {
@@ -450,37 +539,37 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         draggable: false,
         selectable: false,
         zIndex: 0,
-        width: LANE_LABEL_W + layout.width + 80,
+        width: LANE_LABEL_W + bands.width + 80,
         height: lane.height,
-        style: { width: LANE_LABEL_W + layout.width + 80, height: lane.height },
+        style: { width: LANE_LABEL_W + bands.width + 80, height: lane.height },
       } as Node;
     });
 
-    const srcById = new Map(flowData.nodes.map((n) => [n.id, n] as const));
-    const contentNodes: Node[] = layout.nodes.map((pn) => {
-      const src = srcById.get(pn.id)!;
+    const contentNodes: Node[] = flowData.nodes.map((src) => {
+      const pos = effectivePositions.get(src.id) ?? { x: 0, y: 0 };
       return {
-        id: pn.id,
+        id: src.id,
         type: 'content',
-        position: { x: pn.x - pn.width / 2, y: pn.y - pn.height / 2 },
+        // 自由配置: 保存済み（またはシード）左上座標にそのまま置く
+        position: { x: pos.x, y: pos.y },
         data: {
           label: src.label,
-          ntype: pn.type,
+          ntype: src.type,
           hasChildFlow: src.hasChildFlow || !!src.childFlowId,
           hasLinks: (src.links?.length ?? 0) > 0,
           roleColor: src.role?.color,
           orientation,
         } as ContentNodeData,
-        width: pn.width,
-        height: pn.height,
-        style: { width: pn.width, height: pn.height },
+        width: NODE_W,
+        height: NODE_H,
+        style: { width: NODE_W, height: NODE_H },
         draggable: true,
         zIndex: 1,
       } as Node;
     });
 
     return [...laneNodes, ...contentNodes];
-  }, [layout, flowData.nodes, orientation, isVertical]);
+  }, [bands, flowData.nodes, effectivePositions, orientation, isVertical]);
 
   // React Flow は制御モードでは onNodesChange が無いとドラッグで位置が動かない。
   // 決定的レイアウト(rfNodes)を初期値にした内部 state を持ち、ドラッグ中の位置変更を
@@ -508,7 +597,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 60);
     return () => clearTimeout(t);
-  }, [fitView, flowData.id, layout.width, layout.height, orientation]);
+  }, [fitView, flowData.id, orientation]);
 
   const onConnect = useCallback(
     (c: Connection) => {
@@ -551,76 +640,85 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       });
   }, [flowData.name]);
 
-  // --- ドラッグ停止: ドロップ位置から order（と必要なら roleId）を再計算 ---
+  // --- ドラッグ停止: 自由配置座標を保存 + ドロップ先レーンへロール再割当 ---
+  // 旧実装は order/roleId だけ保存していたため位置がスナップバックしていた。
+  // 新実装はドロップした左上座標を positionX/positionY としてそのまま保存する。
   const handleNodeDragStop = useCallback(
     (_evt: unknown, node: Node) => {
       if (node.type !== 'content') return;
-      const dragged = layout.nodes.find((n) => n.id === node.id);
-      if (!dragged) return;
-      const w = node.width ?? dragged.width;
-      const h = node.height ?? dragged.height;
-      // React Flow の position は左上。中心へ補正。
-      const centerX = node.position.x + w / 2;
-      const centerY = node.position.y + h / 2;
-      const timeCoord = isVertical ? centerY : centerX;
 
-      const patch: NodeUpdatePatch = {};
+      const w = node.width ?? NODE_W;
+      const h = node.height ?? NODE_H;
+      // ドロップした左上座標（= サーバ保存値）と中心座標
+      const left = node.position.x;
+      const top = node.position.y;
+      const centerX = left + w / 2;
+      const centerY = top + h / 2;
 
-      // クロス軸（レーン）判定 — 別レーンに落ちたら roleId を含める。
-      // horizontal はレーン中心Yで、vertical はレーン中心Xで最近傍レーンを選ぶ。
-      if (layout.lanes.length > 0) {
-        let best = layout.lanes[0];
-        let bestDist = Infinity;
-        for (const lane of layout.lanes) {
-          const laneCenter = isVertical
-            ? lane.centerX ?? (lane.left ?? 0) + (lane.width ?? 0) / 2
-            : lane.centerY;
-          const cross = isVertical ? centerX : centerY;
-          const d = Math.abs(cross - laneCenter);
-          if (d < bestDist) { bestDist = d; best = lane; }
+      const patch: NodeUpdatePatch = {
+        positionX: left,
+        positionY: top,
+      };
+
+      // レーン（ロール）判定 — ドロップ位置が含まれる帯を探す。
+      // horizontal は Y で帯[top, top+height]、vertical は X で列[left, left+width]。
+      // 帯の外（上端より上 / 下端より下）に落ちた場合は最近傍の帯にスナップする。
+      const src = flowData.nodes.find((n) => n.id === node.id);
+      const currentRoleId = src?.roleId ?? src?.role?.id ?? null;
+
+      if (bands.lanes.length > 0) {
+        const cross = isVertical ? centerX : centerY;
+        let hit = bands.lanes.find((lane) => {
+          const start = isVertical ? lane.left ?? 0 : lane.top;
+          const size = isVertical ? lane.width ?? 0 : lane.height;
+          return cross >= start && cross <= start + size;
+        });
+        if (!hit) {
+          // どの帯にも入っていなければ最近傍の帯中心へ
+          let best = bands.lanes[0];
+          let bestDist = Infinity;
+          for (const lane of bands.lanes) {
+            const center = isVertical
+              ? lane.centerX ?? (lane.left ?? 0) + (lane.width ?? 0) / 2
+              : lane.centerY;
+            const d = Math.abs(cross - center);
+            if (d < bestDist) {
+              bestDist = d;
+              best = lane;
+            }
+          }
+          hit = best;
         }
-        if (best.roleId !== dragged.roleId) patch.roleId = best.roleId;
-      }
-
-      // 時間軸（order）再計算: 他のコンテンツノードの時間軸中心と比較し
-      // 落ちた位置の前後ノードの order の中点を割り当てる。
-      const others = layout.nodes
-        .filter((n) => n.id !== node.id)
-        .map((n) => ({
-          id: n.id,
-          time: isVertical ? n.y : n.x,
-          order: typeof n.order === 'number' ? n.order : 0,
-        }))
-        .sort((a, b) => a.time - b.time);
-
-      let newOrder: number;
-      if (others.length === 0) {
-        newOrder = 0;
-      } else {
-        // 落下位置の直前 / 直後を探す
-        let prev: { order: number } | null = null;
-        let next: { order: number } | null = null;
-        for (const o of others) {
-          if (o.time <= timeCoord) prev = o;
-          else { next = o; break; }
-        }
-        if (prev && next) {
-          newOrder = (prev.order + next.order) / 2;
-        } else if (prev && !next) {
-          newOrder = prev.order + ORDER_STEP;
-        } else if (!prev && next) {
-          newOrder = next.order - ORDER_STEP;
-        } else {
-          newOrder = 0;
+        // 未割当レーンは roleId を持たない（割当解除はここではしない）ので、
+        // 実ロールの帯に落ちた場合のみロール変更を保存する。
+        const isRealRole = roles.some((r) => r.id === hit!.roleId);
+        if (isRealRole && hit!.roleId !== currentRoleId) {
+          patch.roleId = hit!.roleId;
         }
       }
-      patch.order = newOrder;
 
       props.onUpdateNode?.(node.id, patch);
-      // 次レンダリングでエンジンが再レイアウトするため、ローカル位置は触らない。
+      // ローカル位置はドラッグ済みの座標のまま。保存後の再取得で同座標に戻るため
+      // スナップバックは起きない。
     },
-    [layout, isVertical, props],
+    [bands, isVertical, roles, flowData.nodes, props],
   );
+
+  // --- 「整形」: computeFlowLayout で綺麗な座標を作り、一括保存して再取得 ---
+  // ぐちゃぐちゃになった自由配置を、ロール×order の決定的レイアウトへ戻す安全網。
+  const handleTidy = useCallback(() => {
+    setMenu(null);
+    const positions: NodePositionPatch[] = tidyLayout.nodes.map((pn) => ({
+      id: pn.id,
+      // computeFlowLayout は中心座標 → サーバ保存は左上基準
+      positionX: pn.x - pn.width / 2,
+      positionY: pn.y - pn.height / 2,
+      // 未割当レーンの roleId はノードへ書き戻さない（null のまま）
+      roleId: roles.some((r) => r.id === pn.roleId) ? pn.roleId : null,
+      order: typeof pn.order === 'number' ? pn.order : undefined,
+    }));
+    void props.onTidyNodes?.(positions);
+  }, [tidyLayout, roles, props]);
 
   return (
     <div ref={wrapperRef} className="relative w-full h-full bg-white">
@@ -713,9 +811,20 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           </div>
         </Panel>
 
-        {/* ツールバー（右上）: 縦横トグル + PNG出力 */}
+        {/* ツールバー（右上）: 整形 + 縦横トグル + PNG出力 */}
         <Panel position="top-right" className="bg-white border border-gray-200 rounded-lg shadow-sm p-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTidy}
+              disabled={!props.onTidyNodes || flowData.nodes.length === 0}
+              className="text-gray-700"
+              title="ぐちゃぐちゃな配置を、ロール×順序の綺麗なレイアウトに自動整列して保存します"
+            >
+              <LayoutGrid className="w-4 h-4 mr-1" />
+              整形
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -846,7 +955,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       )}
 
       <div className="absolute bottom-4 right-4 bg-white/90 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 z-10">
-        💡 ノードをドラッグで並べ替え/レーン移動 ｜ クリックで編集 ｜ ハンドルで接続 ｜ 右クリックで追加/削除 ｜ 矢印ラベルはWクリックで編集
+        💡 ノードは自由にドラッグして配置（位置は保存されます）｜ 別レーンへ落とすとロール変更 ｜ 乱れたら「整形」で自動整列 ｜ クリックで編集 ｜ ハンドルで接続 ｜ 右クリックで追加/削除
       </div>
     </div>
   );
