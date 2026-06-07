@@ -12,14 +12,15 @@ import {
   CalendarClock,
   BookOpen,
   Megaphone,
-  Map as MapIcon,
-  ListChecks,
   ShieldAlert,
   AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
 import { RECORD_TEMPLATES, type RecordTemplate } from '@/lib/record-templates';
 import { RecordSheetTable } from '@/components/records/record-sheet-table';
+import { StakeholderMapBoard } from './_components/stakeholder-map-board';
+import { InterestMatrixGrid } from './_components/interest-matrix-grid';
+import { MeetingListEditor } from './_components/meeting-list-editor';
 
 /**
  * ステークホルダーマネジメント ワークスペース。
@@ -34,8 +35,6 @@ const SM_TAB_DEFS: { key: string; tabLabel: string; icon: LucideIcon }[] = [
   { key: 'meeting-list', tabLabel: '会議体一覧', icon: CalendarClock },
   { key: 'meeting-catalog', tabLabel: 'ミーティング体カタログ', icon: BookOpen },
   { key: 'report-calendar', tabLabel: '報告・連絡カレンダー', icon: Megaphone },
-  { key: 'field-effort-roadmap', tabLabel: '現場工数ロードマップ', icon: MapIcon },
-  { key: 'phase-quick-list', tabLabel: 'クイック一覧', icon: ListChecks },
   { key: 'risk-register', tabLabel: 'リスク登録簿', icon: ShieldAlert },
 ];
 
@@ -122,7 +121,15 @@ export default function StakeholderManagementPage() {
       {SM_TABS.map((t) => (
         <div key={t.key} className={active === t.key ? 'space-y-2' : 'hidden'}>
           <p className="text-sm text-gray-500">{t.template.description}</p>
-          <RecordSheetTable projectId={projectId} template={t.template} />
+          {t.key === 'stakeholder-map' ? (
+            <StakeholderMapBoard projectId={projectId} template={t.template} />
+          ) : t.key === 'interest-matrix' ? (
+            <InterestMatrixGrid projectId={projectId} template={t.template} />
+          ) : t.key === 'meeting-list' ? (
+            <MeetingListEditor projectId={projectId} template={t.template} />
+          ) : (
+            <RecordSheetTable projectId={projectId} template={t.template} />
+          )}
         </div>
       ))}
     </div>
