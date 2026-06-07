@@ -117,6 +117,68 @@ export class AttachmentController {
     });
   }
 
+  @Post('tasks/:taskId/attachments')
+  @ApiOperation({ summary: 'タスクに添付ファイルをアップロード' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadToTask(
+    @Param('taskId') taskId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new NotFoundException('No file uploaded');
+    }
+
+    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const id = uuid();
+    const sanitized = sanitizeFilename(file.originalname);
+
+    // 保存先ディレクトリを保証
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    const diskPath = path.join(UPLOAD_DIR, `${id}-${sanitized}`);
+    fs.writeFileSync(diskPath, file.buffer);
+
+    const kind = file.mimetype.startsWith('image/')
+      ? 'IMAGE'
+      : file.mimetype === 'application/pdf'
+        ? 'PDF'
+        : 'FILE';
+
+    // 既存添付数を order の初期値に
+    const order = await this.prisma.attachment.count({
+      where: { taskId },
+    });
+
+    const row = await this.prisma.attachment.create({
+      data: {
+        id,
+        projectId: task.projectId,
+        taskId,
+        kind: kind as 'IMAGE' | 'PDF' | 'FILE',
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        url: `/api/attachments/${id}/file`,
+        size: file.size,
+        order,
+      },
+    });
+
+    return row;
+  }
+
+  @Get('tasks/:taskId/attachments')
+  @ApiOperation({ summary: 'タスクの添付ファイル一覧を取得' })
+  async listForTask(@Param('taskId') taskId: string) {
+    return this.prisma.attachment.findMany({
+      where: { taskId },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
   @Public()
   @Get('attachments/:id/file')
   @ApiOperation({ summary: '添付ファイルの実体を配信（認証不要）' })

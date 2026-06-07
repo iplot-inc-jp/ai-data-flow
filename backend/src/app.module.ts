@@ -22,6 +22,7 @@ import {
   ISSUE_TREE_REPOSITORY,
   ISSUE_NODE_REPOSITORY,
   TASK_REPOSITORY,
+  TASK_COMMENT_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -85,6 +86,11 @@ import {
   DeleteTaskUseCase,
   AddTaskDependencyUseCase,
   RemoveTaskDependencyUseCase,
+  // Task Comment
+  CreateTaskCommentUseCase,
+  GetTaskCommentsUseCase,
+  UpdateTaskCommentUseCase,
+  DeleteTaskCommentUseCase,
 } from './application';
 
 // Infrastructure
@@ -106,6 +112,7 @@ import {
   IssueTreeRepositoryImpl,
   IssueNodeRepositoryImpl,
   TaskRepositoryImpl,
+  TaskCommentRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -128,6 +135,8 @@ import {
   IssueTreeController,
   TaskController,
   TaskByIdController,
+  TaskCommentController,
+  TaskCommentByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -186,6 +195,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     IssueTreeController,
     TaskController,
     TaskByIdController,
+    TaskCommentController,
+    TaskCommentByIdController,
     RequirementController,
     UserSettingsController,
     ApiKeyController,
@@ -272,6 +283,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       provide: TASK_REPOSITORY,
       useClass: TaskRepositoryImpl,
     },
+    {
+      provide: TASK_COMMENT_REPOSITORY,
+      useClass: TaskCommentRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -331,6 +346,11 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     DeleteTaskUseCase,
     AddTaskDependencyUseCase,
     RemoveTaskDependencyUseCase,
+    // Task Comment
+    CreateTaskCommentUseCase,
+    GetTaskCommentsUseCase,
+    UpdateTaskCommentUseCase,
+    DeleteTaskCommentUseCase,
 
     // ========== Services ==========
     ClaudeService,

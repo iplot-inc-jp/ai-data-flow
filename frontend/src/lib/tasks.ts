@@ -4,7 +4,8 @@
 // エクスポートしています。fetch ヘルパー群は API_URL と localStorage の accessToken を
 // 用いた raw fetch で実装しています。
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
 // ---------------------------------------------------------------------------
 // 型
@@ -56,6 +57,26 @@ export interface TaskRole {
   name: string;
   type?: string;
   color?: string | null;
+}
+
+/** タスクへのコメント（Backlog 風スレッド） */
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  authorName: string | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** タスクへの添付ファイル */
+export interface TaskAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  url: string;
+  size: number;
+  createdAt: string;
 }
 
 /** buildTaskTree が返す入れ子ノード */
@@ -198,6 +219,83 @@ export const tasksApi = {
     fetch(`${API_URL}/api/projects/${projectId}/roles`, {
       headers: authHeaders(),
     }).then((r) => handle<TaskRole[]>(r)),
+};
+
+/** Authorization のみ（multipart は Content-Type をブラウザに任せる） */
+function authOnlyHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token =
+    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+// ---------------------------------------------------------------------------
+// コメント（タスク詳細スレッド）
+// ---------------------------------------------------------------------------
+
+export const commentsApi = {
+  /** GET /api/tasks/:taskId/comments */
+  list: (taskId: string) =>
+    fetch(`${API_URL}/api/tasks/${taskId}/comments`, {
+      headers: authHeaders(),
+    }).then((r) => handle<TaskComment[]>(r)),
+
+  /** POST /api/tasks/:taskId/comments { body } */
+  create: (taskId: string, body: string) =>
+    fetch(`${API_URL}/api/tasks/${taskId}/comments`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ body }),
+    }).then((r) => handle<TaskComment>(r)),
+
+  /** PUT /api/task-comments/:id { body } */
+  update: (id: string, body: string) =>
+    fetch(`${API_URL}/api/task-comments/${id}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ body }),
+    }).then((r) => handle<TaskComment>(r)),
+
+  /** DELETE /api/task-comments/:id */
+  delete: (id: string) =>
+    fetch(`${API_URL}/api/task-comments/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    }).then((r) => handle<void>(r)),
+};
+
+// ---------------------------------------------------------------------------
+// 添付ファイル
+// ---------------------------------------------------------------------------
+
+export const attachmentsApi = {
+  /** GET /api/tasks/:taskId/attachments */
+  list: (taskId: string) =>
+    fetch(`${API_URL}/api/tasks/${taskId}/attachments`, {
+      headers: authHeaders(),
+    }).then((r) => handle<TaskAttachment[]>(r)),
+
+  /** POST /api/tasks/:taskId/attachments （multipart, field 名 'file'） */
+  upload: (taskId: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return fetch(`${API_URL}/api/tasks/${taskId}/attachments`, {
+      method: 'POST',
+      headers: authOnlyHeaders(),
+      body: fd,
+    }).then((r) => handle<TaskAttachment>(r));
+  },
+
+  /** DELETE /api/attachments/:id */
+  delete: (id: string) =>
+    fetch(`${API_URL}/api/attachments/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    }).then((r) => handle<void>(r)),
+
+  /** 実体配信 URL（認証不要・公開） */
+  fileUrl: (id: string) => `${API_URL}/api/attachments/${id}/file`,
 };
 
 // ---------------------------------------------------------------------------

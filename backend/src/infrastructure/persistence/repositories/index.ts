@@ -14,3 +14,4 @@ export * from './gap-item.repository.impl';
 export * from './issue-tree.repository.impl';
 export * from './issue-node.repository.impl';
 export * from './task.repository.impl';
+export * from './task-comment.repository.impl';

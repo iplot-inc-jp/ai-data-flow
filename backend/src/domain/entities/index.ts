@@ -16,3 +16,4 @@ export * from './gap-item.entity';
 export * from './issue-tree.entity';
 export * from './issue-node.entity';
 export * from './task.entity';
+export * from './task-comment.entity';

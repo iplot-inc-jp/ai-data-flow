@@ -9,3 +9,4 @@ export * from './project-phase.controller';
 export * from './gap-item.controller';
 export * from './issue-tree.controller';
 export * from './task.controller';
+export * from './task-comment.controller';

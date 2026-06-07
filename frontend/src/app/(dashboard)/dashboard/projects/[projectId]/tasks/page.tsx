@@ -661,9 +661,12 @@ export default function TasksPage() {
                                 {node.milestone && (
                                   <Flag className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                                 )}
-                                <span className="font-medium text-gray-900">
+                                <Link
+                                  href={`./tasks/${node.id}`}
+                                  className="font-medium text-gray-900 hover:text-blue-600 hover:underline"
+                                >
                                   {node.title}
-                                </span>
+                                </Link>
                                 {node.category && (
                                   <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
                                     {node.category}

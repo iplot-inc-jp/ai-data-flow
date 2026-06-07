@@ -874,6 +874,7 @@ model Attachment {
   id        String         @id @default(uuid())
   projectId String         @map("project_id")
   phaseId   String?        @map("phase_id")
+  taskId    String?        @map("task_id")
   kind      AttachmentKind @default(FILE)
   filename  String
   mimeType  String         @map("mime_type")
@@ -886,6 +887,7 @@ model Attachment {
 
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   phase   ProjectPhase? @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  task    Task?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@map("attachments")
 }
@@ -987,8 +989,24 @@ model Task {
   predecessors TaskDependency[] @relation("DepSuccessor")
   // この依存関係でこのタスクが先行側（後続タスクから参照される）
   successors   TaskDependency[] @relation("DepPredecessor")
+  comments     TaskComment[]
+  attachments  Attachment[]
 
   @@map("tasks")
+}
+
+model TaskComment {
+  id           String   @id @default(uuid())
+  taskId       String   @map("task_id")
+  authorUserId String?  @map("author_user_id")
+  authorName   String?  @map("author_name")
+  body         String   @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_comments")
 }
 
 model TaskDependency {
