@@ -5,11 +5,12 @@ import {
   ORGANIZATION_REPOSITORY, OrganizationRepository,
   EntityNotFoundError, ForbiddenError,
 } from '../../../domain';
+import { FlowKindValue } from '../../../domain/entities/business-flow.entity';
 import { toFlowDefinitionOutput } from './flow-definition.output';
 
 export interface ListFlowDefinitionsInput { userId: string; projectId: string; }
 export interface FlowDefinitionRow {
-  flowId: string; flowName: string; kind: string;
+  flowId: string; flowName: string; kind: FlowKindValue;
   definition: ReturnType<typeof toFlowDefinitionOutput>;
 }
 

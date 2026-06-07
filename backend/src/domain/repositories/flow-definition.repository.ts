@@ -1,4 +1,5 @@
 import { FlowDefinition } from '../entities/flow-definition.entity';
+import { FlowKindValue } from '../entities/business-flow.entity';
 
 export const FLOW_DEFINITION_REPOSITORY = Symbol('FLOW_DEFINITION_REPOSITORY');
 
@@ -6,7 +7,7 @@ export const FLOW_DEFINITION_REPOSITORY = Symbol('FLOW_DEFINITION_REPOSITORY');
 export interface FlowWithDefinition {
   flowId: string;
   flowName: string;
-  kind: string;
+  kind: FlowKindValue;
   definition: FlowDefinition | null;
 }
 

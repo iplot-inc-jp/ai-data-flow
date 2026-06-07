@@ -6,8 +6,7 @@ import {
   ORGANIZATION_REPOSITORY, OrganizationRepository,
   EntityNotFoundError, ForbiddenError,
 } from '../../../domain';
-import { FlowDefinition } from '../../../domain/entities/flow-definition.entity';
-import { FlowDefinitionFields } from '../../../domain/entities/flow-definition.entity';
+import { FlowDefinition, FlowDefinitionFields } from '../../../domain/entities/flow-definition.entity';
 import { FlowDefinitionOutput, toFlowDefinitionOutput } from './flow-definition.output';
 
 export interface UpsertFlowDefinitionInput {
