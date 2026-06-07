@@ -14,7 +14,15 @@
  *   - 縦/横の向きはキャンバス内部状態でトグルし、flow ごとに localStorage に永続化。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -120,6 +128,12 @@ export interface SwimlaneCanvasProps {
   onDeleteNode?: (nodeId: string) => void;
   onDeleteEdge?: (edgeId: string) => void;
   onUpdateEdgeLabel?: (edgeId: string, label: string) => void;
+  /**
+   * 接続線（エッジ）の途中にノードを挿入する。
+   * エッジ上の「＋」アフォーダンスをクリックすると呼ばれる。
+   * source→新ノード→target に繋ぎ替える処理は呼び出し側（ページ）に委譲する。
+   */
+  onInsertNodeOnEdge?: (edgeId: string) => void;
   onChangeNodeRole?: (nodeId: string, roleId: string) => void;
   onCreateChildFlow?: (nodeId: string) => void;
   onOpenChildFlow?: (nodeId: string, childFlowId: string) => void;
@@ -152,6 +166,12 @@ export interface SwimlaneCanvasProps {
    * computeFlowLayout で算出した綺麗な座標を渡し、呼び出し側が永続化→再取得する。
    */
   onTidyNodes?: (positions: NodePositionPatch[]) => Promise<void> | void;
+  /**
+   * スイムレーン（ロール）の手動リサイズ後の高さを永続化する。
+   * レーン背景の下端ハンドルをドラッグすると呼ばれる（roleId, 新しい厚み）。
+   * ページ側は PUT /api/business-flows/:flowId { laneHeights } で保存する。
+   */
+  onUpdateLaneHeight?: (roleId: string, height: number) => void;
 }
 
 // ===========================================
@@ -259,13 +279,49 @@ function ContentNode({ data, selected }: { data: ContentNodeData; selected?: boo
   );
 }
 
-function LaneNode({
-  data,
-}: {
-  data: { name: string; color?: string; orientation: FlowOrientation };
-}) {
+type LaneNodeData = {
+  name: string;
+  color?: string;
+  orientation: FlowOrientation;
+  roleId: string;
+  /** リサイズ可能か（実ロールのみ。未割当レーンは不可）。 */
+  resizable?: boolean;
+  /** リサイズハンドルの pointerDown。canvas 側がドラッグを引き受ける。 */
+  onResizeStart?: (roleId: string, e: ReactPointerEvent) => void;
+};
+
+function LaneNode({ data }: { data: LaneNodeData }) {
   const color = data.color ?? '#94a3b8';
-  if (data.orientation === 'vertical') {
+  const isVertical = data.orientation === 'vertical';
+
+  // レーン境界のリサイズハンドル。横帯=下端、縦列=右端。
+  // 親（lane 背景）は pointer-events-none なので、ハンドルだけ pointer-events-auto。
+  const handle = data.resizable && data.onResizeStart && (
+    <div
+      role="separator"
+      aria-orientation={isVertical ? 'vertical' : 'horizontal'}
+      title="ドラッグでレーンの幅を調整"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        data.onResizeStart?.(data.roleId, e);
+      }}
+      className={`nodrag nopan pointer-events-auto absolute z-10 group ${
+        isVertical
+          ? 'top-0 right-0 h-full w-2 cursor-col-resize'
+          : 'left-0 bottom-0 w-full h-2 cursor-row-resize'
+      }`}
+    >
+      <div
+        className={`opacity-0 group-hover:opacity-100 transition-opacity ${
+          isVertical ? 'absolute right-0 top-0 h-full w-1' : 'absolute bottom-0 left-0 w-full h-1'
+        }`}
+        style={{ backgroundColor: color }}
+      />
+    </div>
+  );
+
+  if (isVertical) {
     // 縦列: ラベルは列の上端、帯は右境界に縦線
     return (
       <div
@@ -283,6 +339,7 @@ function LaneNode({
         >
           <span className="line-clamp-3">{data.name}</span>
         </div>
+        {handle}
       </div>
     );
   }
@@ -298,13 +355,19 @@ function LaneNode({
       >
         <span className="line-clamp-3">{data.name}</span>
       </div>
+      {handle}
     </div>
   );
 }
 
 function EditableEdge({
   id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, label, markerEnd, selected, data,
-}: EdgeProps & { data?: { onLabelUpdate?: (id: string, label: string) => void } }) {
+}: EdgeProps & {
+  data?: {
+    onLabelUpdate?: (id: string, label: string) => void;
+    onInsertNode?: (id: string) => void;
+  };
+}) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState((label as string) || '');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -315,6 +378,9 @@ function EditableEdge({
     setEditing(false);
     if (data?.onLabelUpdate && value !== label) data.onLabelUpdate(id, value);
   };
+  // 「＋」挿入アフォーダンスはエッジの中点に置く。ラベルと重ならないよう少し下げる。
+  const insertX = (sourceX + targetX) / 2;
+  const insertY = (sourceY + targetY) / 2;
   return (
     <>
       <BaseEdge
@@ -324,6 +390,27 @@ function EditableEdge({
         style={{ strokeWidth: selected ? 3 : 2, stroke: selected ? '#3b82f6' : '#64748b' }}
       />
       <EdgeLabelRenderer>
+        {/* エッジ中点の「＋」: クリックでこの接続線の途中にノードを挿入 */}
+        {data?.onInsertNode && (
+          <button
+            type="button"
+            title="この接続線の途中にノードを挿入"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onInsertNode?.(id);
+            }}
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${insertX}px,${insertY}px)`,
+              pointerEvents: 'all',
+            }}
+            className={`nodrag nopan flex h-5 w-5 items-center justify-center rounded-full border bg-white text-sky-600 shadow-sm transition-all hover:bg-sky-50 hover:scale-110 hover:opacity-100 ${
+              selected ? 'border-sky-500 opacity-100' : 'border-gray-300 opacity-40'
+            }`}
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+        )}
         <div
           style={{ position: 'absolute', transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }}
           className="nodrag nopan"
@@ -412,7 +499,7 @@ function readStoredOrientation(flowId: string): FlowOrientation {
 
 function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const { flowData, roles } = props;
-  const { fitView } = useReactFlow();
+  const { fitView, getViewport } = useReactFlow();
   const [menu, setMenu] = useState<ContextMenuState>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
@@ -494,7 +581,20 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return map;
   }, [flowData.nodes, tidyLayout]);
 
-  // --- 背景レーン帯（ノードに追従して自動サイズ） ---
+  // --- レーン高さの手動オーバーライド（サーバ永続化 + ドラッグ中のローカル先取り） ---
+  // サーバから来た flowData.laneHeights を基底に、ドラッグ中はローカル state を重ねて
+  // 即時にプレビューする。ドラッグ完了時に onUpdateLaneHeight で永続化する。
+  const [localLaneHeights, setLocalLaneHeights] = useState<Record<string, number>>({});
+  useEffect(() => {
+    // フロー切替時はローカルのドラッグ先取りを破棄してサーバ値に従う
+    setLocalLaneHeights({});
+  }, [flowData.id]);
+  const laneHeightOverrides = useMemo(
+    () => ({ ...(flowData.laneHeights ?? {}), ...localLaneHeights }),
+    [flowData.laneHeights, localLaneHeights],
+  );
+
+  // --- 背景レーン帯（ノードに追従して自動サイズ + 手動オーバーライド） ---
   const bands = useMemo(() => {
     const bandNodes: BandInputNode[] = flowData.nodes.map((n) => {
       const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
@@ -508,12 +608,62 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         height: NODE_H,
       };
     });
-    return computeLaneBands(bandNodes, laneRoles, orientation);
-  }, [flowData.nodes, effectivePositions, laneRoles, orientation]);
+    return computeLaneBands(bandNodes, laneRoles, orientation, {
+      laneHeightOverrides,
+    });
+  }, [flowData.nodes, effectivePositions, laneRoles, orientation, laneHeightOverrides]);
+
+  // --- レーン境界ハンドルのドラッグ: レーン厚を手動リサイズ ---
+  // 横帯=下端を下げると高さ↑ / 縦列=右端を右へ動かすと幅↑。
+  // 画面ピクセル差をズームで割って flow 座標の差に変換し、ローカル先取り表示。
+  // pointerup でサーバ永続化（onUpdateLaneHeight）。
+  const handleLaneResizeStart = useCallback(
+    (roleId: string, e: ReactPointerEvent) => {
+      const lane = bands.lanes.find((l) => l.roleId === roleId);
+      if (!lane) return;
+      const MIN_LANE_THICKNESS = 60;
+      const startThickness = isVertical ? lane.width ?? 0 : lane.height;
+      const startClient = isVertical ? e.clientX : e.clientY;
+      const zoom = getViewport().zoom || 1;
+
+      const computeNext = (client: number) =>
+        Math.max(
+          MIN_LANE_THICKNESS,
+          Math.round(startThickness + (client - startClient) / zoom),
+        );
+
+      const onMove = (ev: PointerEvent) => {
+        const next = computeNext(isVertical ? ev.clientX : ev.clientY);
+        setLocalLaneHeights((prev) => ({ ...prev, [roleId]: next }));
+      };
+      const onUp = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        const next = computeNext(isVertical ? ev.clientX : ev.clientY);
+        // ローカル先取りはサーバ再取得（flowData.laneHeights）が反映されるまで残す。
+        setLocalLaneHeights((prev) => ({ ...prev, [roleId]: next }));
+        props.onUpdateLaneHeight?.(roleId, next);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [bands, isVertical, getViewport, props],
+  );
 
   // --- React Flow ノード（背景レーン + コンテンツ） ---
   const rfNodes: Node[] = useMemo(() => {
     const laneNodes: Node[] = bands.lanes.map((lane) => {
+      // 実ロールのみリサイズ可（未割当レーンは不可）。永続化ハンドラが無ければ無効。
+      const resizable =
+        !!props.onUpdateLaneHeight && roles.some((r) => r.id === lane.roleId);
+      const laneData: LaneNodeData = {
+        name: lane.name,
+        color: lane.color,
+        orientation,
+        roleId: lane.roleId,
+        resizable,
+        onResizeStart: handleLaneResizeStart,
+      };
       if (isVertical) {
         const left = lane.left ?? 0;
         const width = lane.width ?? 0;
@@ -522,7 +672,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           id: `lane-${lane.roleId}`,
           type: 'lane',
           position: { x: left, y: -LANE_LABEL_W },
-          data: { name: lane.name, color: lane.color, orientation },
+          data: laneData,
           draggable: false,
           selectable: false,
           zIndex: 0,
@@ -535,7 +685,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         id: `lane-${lane.roleId}`,
         type: 'lane',
         position: { x: -LANE_LABEL_W, y: lane.top },
-        data: { name: lane.name, color: lane.color, orientation },
+        data: laneData,
         draggable: false,
         selectable: false,
         zIndex: 0,
@@ -569,7 +719,16 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     });
 
     return [...laneNodes, ...contentNodes];
-  }, [bands, flowData.nodes, effectivePositions, orientation, isVertical]);
+  }, [
+    bands,
+    flowData.nodes,
+    effectivePositions,
+    orientation,
+    isVertical,
+    roles,
+    handleLaneResizeStart,
+    props.onUpdateLaneHeight,
+  ]);
 
   // React Flow は制御モードでは onNodesChange が無いとドラッグで位置が動かない。
   // 決定的レイアウト(rfNodes)を初期値にした内部 state を持ち、ドラッグ中の位置変更を
@@ -589,9 +748,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         type: 'editable',
         selected: e.id === selectedEdgeId,
         markerEnd: { type: MarkerType.ArrowClosed, color: '#64748b', width: 18, height: 18 },
-        data: { onLabelUpdate: props.onUpdateEdgeLabel },
+        data: { onLabelUpdate: props.onUpdateEdgeLabel, onInsertNode: props.onInsertNodeOnEdge },
       })),
-    [flowData.edges, selectedEdgeId, props.onUpdateEdgeLabel],
+    [flowData.edges, selectedEdgeId, props.onUpdateEdgeLabel, props.onInsertNodeOnEdge],
   );
 
   useEffect(() => {
@@ -955,7 +1114,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       )}
 
       <div className="absolute bottom-4 right-4 bg-white/90 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 z-10">
-        💡 ノードは自由にドラッグして配置（位置は保存されます）｜ 別レーンへ落とすとロール変更 ｜ 乱れたら「整形」で自動整列 ｜ クリックで編集 ｜ ハンドルで接続 ｜ 右クリックで追加/削除
+        💡 ノードは自由にドラッグして配置（位置は保存されます）｜ 別レーンへ落とすとロール変更 ｜ 乱れたら「整形」で自動整列 ｜ クリックで編集 ｜ ハンドルで接続 ｜ 接続線の「＋」で途中にノード挿入 ｜ レーン境界をドラッグで高さ調整 ｜ 右クリックで追加/削除
       </div>
     </div>
   );

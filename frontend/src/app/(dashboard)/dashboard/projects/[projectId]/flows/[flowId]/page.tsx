@@ -941,6 +941,119 @@ export default function ProjectFlowDetailPage() {
     [flowData, getHeaders]
   );
 
+  // 接続線（エッジ）の途中に PROCESS ノードを挿入する。
+  // source→target の既存エッジを、source→新ノード→target に繋ぎ替える。
+  // - 新ノードの roleId は source ノードのロールを引き継ぐ
+  // - order は source.order と target.order の中点（既存の order スキームに従う）
+  // - 位置は source/target の中点（自由配置）
+  // 既存の node-create(POST /nodes) / connect(POST /edges) / delete-edge(DELETE /edges/:id)
+  // をそのまま再利用し、新ノードの order/position は updateNode(PUT /nodes/:id) で保存する。
+  const handleInsertNodeOnEdge = useCallback(
+    async (edgeId: string) => {
+      if (!flowData) return;
+      const edge = flowData.edges.find((e) => e.id === edgeId);
+      if (!edge) return;
+      const source = flowData.nodes.find((n) => n.id === edge.sourceNodeId);
+      const target = flowData.nodes.find((n) => n.id === edge.targetNodeId);
+      if (!source || !target) return;
+
+      try {
+        const headers = getHeaders();
+
+        // order の中点（既存スキーム: order 昇順がタイムライン軸）
+        const sourceOrder = source.order ?? 0;
+        const targetOrder = target.order ?? sourceOrder + 2;
+        const midOrder = (sourceOrder + targetOrder) / 2;
+
+        // 位置の中点（自由配置の左上座標基準）
+        const midX = ((source.positionX ?? 0) + (target.positionX ?? 0)) / 2;
+        const midY = ((source.positionY ?? 0) + (target.positionY ?? 0)) / 2;
+
+        // 1) 新しい PROCESS ノードを作成（roleId は source を引き継ぐ）
+        const roleId = source.roleId ?? source.role?.id;
+        const createRes = await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            type: 'PROCESS',
+            label: '新規処理',
+            positionX: midX,
+            positionY: midY,
+            ...(roleId ? { roleId } : {}),
+          }),
+        });
+        if (!createRes.ok) throw new Error('Failed to create node');
+        const created = await createRes.json();
+        const newNodeId: string | undefined = created?.id;
+        if (!newNodeId) throw new Error('Created node has no id');
+
+        // 2) 新ノードの order を中点に設定（位置は作成時に保存済み）
+        const orderRes = await fetch(
+          `${API_URL}/api/business-flows/${flowData.id}/nodes/${newNodeId}`,
+          {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ order: midOrder }),
+          },
+        );
+        if (!orderRes.ok) throw new Error('Failed to set new node order');
+
+        // 3) source → 新ノード を接続
+        const e1 = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ sourceNodeId: source.id, targetNodeId: newNodeId }),
+        });
+        if (!e1.ok) throw new Error('Failed to connect source to new node');
+
+        // 4) 新ノード → target を接続
+        const e2 = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ sourceNodeId: newNodeId, targetNodeId: target.id }),
+        });
+        if (!e2.ok) throw new Error('Failed to connect new node to target');
+
+        // 5) 元の source → target エッジを削除
+        const del = await fetch(
+          `${API_URL}/api/business-flows/${flowData.id}/edges/${edgeId}`,
+          { method: 'DELETE', headers },
+        );
+        if (!del.ok) throw new Error('Failed to delete original edge');
+
+        // 再取得（新ノード・繋ぎ替え後のエッジを反映）
+        fetchFlowData(flowData.id);
+      } catch (err) {
+        console.error('Failed to insert node on edge:', err);
+      }
+    },
+    [flowData, fetchFlowData, getHeaders],
+  );
+
+  // スイムレーン（ロール）の手動リサイズ後の高さを永続化する。
+  // PUT /api/business-flows/:flowId { laneHeights } に既存の laneHeights をマージして送る。
+  // ノード位置を保ったまま反映するため、ローカル state も楽観更新する。
+  const handleUpdateLaneHeight = useCallback(
+    async (roleId: string, height: number) => {
+      if (!flowData) return;
+      const nextLaneHeights = { ...(flowData.laneHeights ?? {}), [roleId]: height };
+      // 楽観更新（再取得で fitView がリセットされ位置が飛ぶのを防ぐ）
+      setFlowData((prev) => (prev ? { ...prev, laneHeights: nextLaneHeights } : prev));
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ laneHeights: nextLaneHeights }),
+        });
+        if (!res.ok) throw new Error('Failed to update lane height');
+      } catch (err) {
+        console.error('Failed to update lane height:', err);
+      }
+    },
+    [flowData, getHeaders],
+  );
+
   // 子フロー作成
   const handleChildFlowCreate = useCallback(
     async (nodeId: string, name?: string) => {
@@ -1480,8 +1593,10 @@ export default function ProjectFlowDetailPage() {
           onDeleteNode={handleNodeDelete}
           onDeleteEdge={handleEdgeDelete}
           onUpdateEdgeLabel={handleEdgeLabelUpdate}
+          onInsertNodeOnEdge={handleInsertNodeOnEdge}
           onChangeNodeRole={handleNodeRoleUpdate}
           onUpdateNode={handleNodeUpdate}
+          onUpdateLaneHeight={handleUpdateLaneHeight}
           onTidyNodes={handleTidyNodes}
           onCreateChildFlow={handleChildFlowCreate}
           onOpenChildFlow={handleNodeDoubleClick}

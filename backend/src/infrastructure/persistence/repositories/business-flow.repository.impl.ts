@@ -70,6 +70,7 @@ export class PrismaBusinessFlowRepository implements IBusinessFlowRepository {
       folderId: flow.folderId,
       parentId: flow.parentId,
       depth: flow.depth,
+      laneHeights: flow.laneHeights,
     };
 
     const saved = await this.prisma.businessFlow.upsert({
@@ -97,6 +98,7 @@ export class PrismaBusinessFlowRepository implements IBusinessFlowRepository {
     folderId?: string | null;
     parentId: string | null;
     depth: number;
+    laneHeights?: unknown;
     createdAt: Date;
     updatedAt: Date;
   }): BusinessFlow {
@@ -112,6 +114,10 @@ export class PrismaBusinessFlowRepository implements IBusinessFlowRepository {
       folderId: record.folderId ?? null,
       parentId: record.parentId,
       depth: record.depth,
+      laneHeights:
+        record.laneHeights && typeof record.laneHeights === 'object'
+          ? (record.laneHeights as Record<string, number>)
+          : {},
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });

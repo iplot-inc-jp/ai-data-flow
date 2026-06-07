@@ -486,6 +486,14 @@ export interface LaneBandsOptions {
   unassignedLaneId: string;
   /** 未割当レーンの表示名。 */
   unassignedLaneName: string;
+  /**
+   * ロール別レーン厚の手動オーバーライド（{ [roleId]: thickness }）。
+   * 指定があるレーンは「自動算出した内容に追従する厚み」と「このオーバーライド値」の
+   * 大きい方を採用する（max(autoContentHeight, override)）。これにより手動で広げた
+   * レーンが内容に応じて勝手に縮まず、内容がオーバーライド値を超えたら自動拡張される。
+   * 指定が無いレーンは従来どおり完全自動サイズ。
+   */
+  laneHeightOverrides: Record<string, number>;
 }
 
 export const DEFAULT_LANE_BANDS_OPTIONS: LaneBandsOptions = {
@@ -494,6 +502,7 @@ export const DEFAULT_LANE_BANDS_OPTIONS: LaneBandsOptions = {
   contentMargin: 120,
   unassignedLaneId: '__unassigned__',
   unassignedLaneName: '未割当',
+  laneHeightOverrides: {},
 };
 
 /** computeLaneBands の戻り値（背景レーン帯 + 全体キャンバスサイズ）。 */
@@ -571,6 +580,8 @@ export function computeLaneBands(
   let cursor = 0;
   roleOrder.forEach((r, i) => {
     const members = byRole.get(r.id)!;
+    const override = opt.laneHeightOverrides[r.id];
+    const hasOverride = typeof override === 'number' && override > 0;
     let laneStart: number;
     let laneEnd: number;
     if (members.length > 0) {
@@ -591,6 +602,12 @@ export function computeLaneBands(
     } else {
       laneStart = cursor;
       laneEnd = cursor + opt.minLaneHeight;
+    }
+    // 手動オーバーライドがあれば、内容に追従した自動厚と override の大きい方を採用。
+    // （手動で広げたレーンが内容で勝手に縮まず、内容超過時のみ自動拡張する）
+    if (hasOverride) {
+      const autoThickness = laneEnd - laneStart;
+      laneEnd = laneStart + Math.max(autoThickness, override);
     }
     const thickness = laneEnd - laneStart;
     const center = laneStart + thickness / 2;

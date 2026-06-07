@@ -137,6 +137,11 @@ export class BusinessFlow extends BaseEntity {
     this._folderId = folderId;
   }
 
+  /** ロール別レーン高さのオーバーライドを丸ごと差し替える。 */
+  setLaneHeights(laneHeights: Record<string, number>): void {
+    this._laneHeights = laneHeights ?? {};
+  }
+
   /** Ph.1 仮説 → Ph.2 確定 への昇格 */
   promoteToConfirmed(): void {
     this._confidence = 'CONFIRMED';

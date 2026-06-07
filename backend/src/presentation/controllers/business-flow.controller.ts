@@ -111,6 +111,14 @@ class UpdateBusinessFlowDto {
   @IsOptional()
   @IsString()
   folderId?: string | null;
+
+  @ApiProperty({
+    description: 'ロール別スイムレーン高さの手動オーバーライド（{ [roleId]: height }）',
+    required: false,
+  })
+  @IsOptional()
+  @IsObject()
+  laneHeights?: Record<string, number>;
 }
 
 class CreateFlowNodeDto {
@@ -366,6 +374,7 @@ export class BusinessFlowController {
         description: n.description,
         positionX: n.positionX,
         positionY: n.positionY,
+        order: n.order,
         roleId: n.roleId,
         role: n.role
           ? { id: n.role.id, name: n.role.name, color: n.role.color, type: n.role.type }
@@ -444,6 +453,7 @@ export class BusinessFlowController {
     if (dto.confidence) flow.setConfidence(dto.confidence);
     if (dto.subProjectId !== undefined) flow.setSubProject(dto.subProjectId);
     if (dto.folderId !== undefined) flow.setFolder(dto.folderId);
+    if (dto.laneHeights !== undefined) flow.setLaneHeights(dto.laneHeights);
 
     const saved = await this.flowRepository.save(flow);
     return this.toResponse(saved);
@@ -1013,6 +1023,7 @@ export class BusinessFlowController {
       folderId: flow.folderId,
       parentId: flow.parentId,
       depth: flow.depth,
+      laneHeights: flow.laneHeights,
       isRootFlow: flow.isRootFlow,
       isChildFlow: flow.isChildFlow,
       createdAt: flow.createdAt,

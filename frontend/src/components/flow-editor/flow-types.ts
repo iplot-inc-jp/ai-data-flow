@@ -74,6 +74,8 @@ export type FlowData = {
   kind?: 'ASIS' | 'TOBE';
   /** HYPOTHESIS | CONFIRMED（Ph.1仮説→Ph.2確定） */
   confidence?: 'HYPOTHESIS' | 'CONFIRMED';
+  /** ロール別スイムレーン高さの手動オーバーライド（{ [roleId]: height }）。 */
+  laneHeights?: Record<string, number>;
   nodes: FlowDataNode[];
   edges: FlowDataEdge[];
   breadcrumbs: Array<{ id: string; name: string }>;

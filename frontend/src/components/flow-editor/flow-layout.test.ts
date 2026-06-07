@@ -520,4 +520,60 @@ describe('computeLaneBands', () => {
     expect(res.width).toBeGreaterThan(0);
     expect(res.height).toBeGreaterThan(0);
   });
+
+  // -----------------------------------------------------------------
+  // laneHeightOverrides — 手動リサイズの永続化（per-role 厚オーバーライド）
+  // -----------------------------------------------------------------
+  describe('laneHeightOverrides', () => {
+    it('horizontal: オーバーライドのあるレーンはその厚みになり、無いレーンは自動のまま', () => {
+      // r-customer に手動で厚み 300 を指定（自動なら minLaneHeight）
+      const res = computeLaneBands(freeNodes, roles, 'horizontal', {
+        laneHeightOverrides: { 'r-customer': 300 },
+      });
+      const customer = res.lanes.find((l) => l.roleId === 'r-customer')!;
+      const approver = res.lanes.find((l) => l.roleId === 'r-approver')!;
+      // オーバーライド適用
+      expect(customer.height).toBe(300);
+      // 指定の無いレーンは従来どおり最小厚（自動）
+      expect(approver.height).toBe(DEFAULT_LANE_BANDS_OPTIONS.minLaneHeight);
+      // レーンは重ならず順序を保つ（オーバーライドで広げても後続が押し下がる）
+      expect(customer.top + customer.height).toBeLessThanOrEqual(approver.top);
+    });
+
+    it('vertical: オーバーライドはレーン幅に適用される', () => {
+      const res = computeLaneBands(freeNodes, roles, 'vertical', {
+        laneHeightOverrides: { 'r-approver': 280 },
+      });
+      const approver = res.lanes.find((l) => l.roleId === 'r-approver')!;
+      expect(approver.width).toBe(280);
+    });
+
+    it('内容の自動厚がオーバーライドより大きい場合は内容を優先（max を採用）', () => {
+      // r-approver は縦に大きく広がる（y=60 と y=460）→ 自動厚は大きい
+      const nodes: BandInputNode[] = [
+        { id: 'b1', roleId: 'r-approver', x: 300, y: 60, width: 156, height: 52 },
+        { id: 'b2', roleId: 'r-approver', x: 500, y: 460, width: 156, height: 52 },
+      ];
+      // 自動厚（≈ 460-60 + パディング + ノード高）より小さい override=120 を渡す
+      const auto = computeLaneBands(nodes, roles, 'horizontal');
+      const overridden = computeLaneBands(nodes, roles, 'horizontal', {
+        laneHeightOverrides: { 'r-approver': 120 },
+      });
+      const autoApprover = auto.lanes.find((l) => l.roleId === 'r-approver')!;
+      const ovApprover = overridden.lanes.find((l) => l.roleId === 'r-approver')!;
+      // override が自動厚より小さいので、内容に追従する自動厚が勝つ（縮まない）
+      expect(ovApprover.height).toBe(autoApprover.height);
+      expect(ovApprover.height).toBeGreaterThan(120);
+    });
+
+    it('オーバーライド未指定（デフォルト空）は従来挙動と完全一致する', () => {
+      const withDefault = computeLaneBands(freeNodes, roles, 'horizontal');
+      const withEmpty = computeLaneBands(freeNodes, roles, 'horizontal', {
+        laneHeightOverrides: {},
+      });
+      expect(withEmpty.lanes.map((l) => l.height)).toEqual(
+        withDefault.lanes.map((l) => l.height),
+      );
+    });
+  });
 });
