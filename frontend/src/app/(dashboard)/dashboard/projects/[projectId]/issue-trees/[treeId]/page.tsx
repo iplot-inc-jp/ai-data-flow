@@ -41,6 +41,9 @@ import {
   Target,
   RefreshCw,
   Sparkles,
+  ListChecks,
+  Search,
+  ExternalLink,
 } from 'lucide-react';
 import {
   parseIssueMarkdown,
@@ -52,6 +55,13 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { IdeationAssistDialog } from '@/components/issue-trees/ideation-assist-dialog';
+import {
+  tasksApi,
+  taskStatusLabels,
+  type Task,
+  type TasksResponse,
+  API_URL as TASKS_API_URL,
+} from '@/lib/tasks';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -92,6 +102,7 @@ type MindNodeData = {
   rootQuestion: string;
   treeType: 'WHY' | 'SOLUTION';
   selected: boolean;
+  taskCount: number;
   onSelect: (id: string | null) => void;
   onAddCause: (parentId: string | null) => void;
   onAddCountermeasure: (parentId: string | null) => void;
@@ -109,6 +120,32 @@ const KIND_LABEL: Record<IssueNodeKind, string> = {
   ISSUE: '問い',
   CAUSE: '原因',
   COUNTERMEASURE: '打ち手',
+};
+
+// 「なぜ → 打ち手 → 調査/実行」の流れを 分けながら 見せるためのタスク観点メタ。
+// CAUSE（なぜ）は深掘り → 確かめる「調査タスク」、COUNTERMEASURE（打ち手）は「実行タスク」に落とす。
+const KIND_FLOW_LABEL: Record<IssueNodeKind, string> = {
+  ISSUE: '問い（出発点）',
+  CAUSE: 'なぜ（原因の深掘り）',
+  COUNTERMEASURE: '打ち手（対策）',
+};
+
+type TaskFlavor = { verb: string; titlePrefix: string; chip: string; icon: typeof Search };
+
+// CAUSE → 調査タスク（amber）、COUNTERMEASURE → 実行タスク（blue）。lib/tasks の issueNodeKindLabels と整合。
+const KIND_TASK_FLAVOR: Partial<Record<IssueNodeKind, TaskFlavor>> = {
+  CAUSE: {
+    verb: '調査タスクを作成',
+    titlePrefix: '調査',
+    chip: 'bg-amber-50 text-amber-700 border-amber-200',
+    icon: Search,
+  },
+  COUNTERMEASURE: {
+    verb: '実行タスクを作成',
+    titlePrefix: '実行',
+    chip: 'bg-blue-50 text-blue-700 border-blue-200',
+    icon: ListChecks,
+  },
 };
 
 // 種別ごとのカード配色（白基調 iplot テーマ）
@@ -264,6 +301,8 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
   const Icon = KIND_ICON[kind];
   const showVerify = kind === 'CAUSE';
   const showReco = kind === 'COUNTERMEASURE';
+  const flavor = KIND_TASK_FLAVOR[kind];
+  const TaskIcon = flavor?.icon ?? ListChecks;
 
   return (
     <div
@@ -306,6 +345,15 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
         </div>
         {node.evidence && (
           <p className="mt-1 line-clamp-2 text-[11px] text-gray-400">根拠: {node.evidence}</p>
+        )}
+        {d.taskCount > 0 && flavor && (
+          <div
+            className={`mt-1.5 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${flavor.chip}`}
+            title={`${flavor.titlePrefix}タスク ${d.taskCount}件`}
+          >
+            <TaskIcon className="h-3 w-3" />
+            {flavor.titlePrefix}タスク {d.taskCount}
+          </div>
         )}
         <div className="mt-2 flex flex-wrap gap-1">
           <button
@@ -390,6 +438,10 @@ function IssueTreeMindMap() {
   const [ideateOpen, setIdeateOpen] = useState(false);
   const [ideateParentId, setIdeateParentId] = useState<string | null>(null);
 
+  // ノードに紐づくタスク（nodeId -> Task[]）。カードのカウントバッジと右パネルの一覧で使う。
+  const [tasksByNode, setTasksByNode] = useState<Record<string, Task[]>>({});
+  const [creatingTaskNodeId, setCreatingTaskNodeId] = useState<string | null>(null);
+
   const howToRef = useRef<HTMLDivElement>(null);
 
   const getHeaders = useCallback(() => {
@@ -417,6 +469,75 @@ function IssueTreeMindMap() {
   useEffect(() => {
     if (treeId) fetchTree();
   }, [treeId, fetchTree]);
+
+  // ===========================================
+  // ノードに紐づくタスク（調査 / 実行）
+  // ===========================================
+
+  // プロジェクト全タスクを 1 回取得し issueNodeId でグルーピング（カードのカウントバッジ用）。
+  const fetchTasks = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const data: TasksResponse = await tasksApi.list(projectId);
+      const grouped: Record<string, Task[]> = {};
+      for (const t of data.tasks) {
+        if (!t.issueNodeId) continue;
+        (grouped[t.issueNodeId] ??= []).push(t);
+      }
+      setTasksByNode(grouped);
+    } catch {
+      // タスク取得失敗はツリー編集を妨げない（バッジが出ないだけ）
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (projectId) fetchTasks();
+  }, [projectId, fetchTasks]);
+
+  // 指定ノードの紐づくタスクのみを再取得（GET tasks?issueNodeId=<nodeId>）。
+  const refreshNodeTasks = useCallback(
+    async (nodeId: string) => {
+      if (!projectId) return;
+      try {
+        const token = localStorage.getItem('accessToken');
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch(
+          `${TASKS_API_URL}/api/projects/${projectId}/tasks?issueNodeId=${encodeURIComponent(nodeId)}`,
+          { headers },
+        );
+        if (!res.ok) return;
+        const data: TasksResponse = await res.json();
+        setTasksByNode((prev) => ({ ...prev, [nodeId]: data.tasks }));
+      } catch {
+        // noop
+      }
+    },
+    [projectId],
+  );
+
+  // 選択ノードに対する調査/実行タスクを作成（issueNodeId で紐付け、タイトルをラベルから補完）。
+  const createTaskForNode = useCallback(
+    async (node: BackendNode) => {
+      const flavor = KIND_TASK_FLAVOR[node.kind];
+      if (!flavor) return;
+      setCreatingTaskNodeId(node.id);
+      setActionError(null);
+      try {
+        const label = node.label?.trim() || '（無題）';
+        await tasksApi.create(projectId, {
+          title: `${flavor.titlePrefix}: ${label}`,
+          issueNodeId: node.id,
+        });
+        await refreshNodeTasks(node.id);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'タスクの作成に失敗しました');
+      } finally {
+        setCreatingTaskNodeId(null);
+      }
+    },
+    [projectId, refreshNodeTasks],
+  );
 
   // ===========================================
   // ミューテーション（安定ID・ノード単位 API）
@@ -702,6 +823,7 @@ function IssueTreeMindMap() {
         node: null,
         isRoot: true,
         selected: selectedId === null && false, // ルートは明示選択しないと反転させない
+        taskCount: 0,
       } as unknown as Record<string, unknown>,
       draggable: false,
     });
@@ -716,6 +838,7 @@ function IssueTreeMindMap() {
           node: n,
           isRoot: false,
           selected: selectedId === n.id,
+          taskCount: tasksByNode[n.id]?.length ?? 0,
         } as unknown as Record<string, unknown>,
         draggable: false,
       });
@@ -730,7 +853,7 @@ function IssueTreeMindMap() {
     }));
 
     return { rfNodes: nodes, rfEdges: edges };
-  }, [tree, selectedId, addCause, addCountermeasure, openIdeate, deleteNode]);
+  }, [tree, selectedId, tasksByNode, addCause, addCountermeasure, openIdeate, deleteNode]);
 
   const selectedNode = useMemo(
     () => (selectedId ? (tree?.nodes ?? []).find((n) => n.id === selectedId) ?? null : null),
@@ -864,6 +987,7 @@ function IssueTreeMindMap() {
                 'ノードの「発想法で分解」から IPLoT 発想法（SDF/RTOCS/横展開ほか）のレンズを選び、子ノード候補を一括で生成できます。',
                 '原因ノードは検証マーク（○確定／×否定／△未確認／?要ヒアリング）で確からしさを記録します。',
                 '打ち手ノードは推奨（採用／保留／不採用）を設定して取捨選択します。',
+                '原因（なぜ）ノードからは「調査タスク」、打ち手ノードからは「実行タスク」を作成し、ノードに紐づけてタスク管理できます。紐づくタスクは右パネルに一覧表示されます。',
                 '「テキストから取り込み」でインデント箇条書きを一括投入できます（作成時向け）。',
               ]}
               shortcuts={[
@@ -934,6 +1058,10 @@ function IssueTreeMindMap() {
             node={selectedNode}
             treeType={tree.type}
             busy={busy}
+            linkedTasks={tasksByNode[selectedNode.id] ?? []}
+            creatingTask={creatingTaskNodeId === selectedNode.id}
+            onLoadTasks={refreshNodeTasks}
+            onCreateTask={createTaskForNode}
             onClose={() => setSelectedId(null)}
             onPatch={patchNode}
             onSetVerification={setVerification}
@@ -1013,6 +1141,10 @@ function NodeEditPanel({
   node,
   treeType,
   busy,
+  linkedTasks,
+  creatingTask,
+  onLoadTasks,
+  onCreateTask,
   onClose,
   onPatch,
   onSetVerification,
@@ -1022,6 +1154,10 @@ function NodeEditPanel({
   node: BackendNode;
   treeType: 'WHY' | 'SOLUTION';
   busy: boolean;
+  linkedTasks: Task[];
+  creatingTask: boolean;
+  onLoadTasks: (nodeId: string) => void;
+  onCreateTask: (node: BackendNode) => void;
   onClose: () => void;
   onPatch: (nodeId: string, body: Record<string, unknown>) => void;
   onSetVerification: (nodeId: string, verification: Verification) => void;
@@ -1031,6 +1167,12 @@ function NodeEditPanel({
   const [label, setLabel] = useState(node.label);
   const [evidence, setEvidence] = useState(node.evidence ?? '');
   const kind = node.kind ?? 'ISSUE';
+  const flavor = KIND_TASK_FLAVOR[kind];
+
+  // パネルを開いた（=ノードを選択した）ら、そのノードの紐づくタスクを取得する。
+  useEffect(() => {
+    onLoadTasks(node.id);
+  }, [node.id, onLoadTasks]);
 
   return (
     <Card className="absolute inset-y-0 right-0 z-30 w-full overflow-y-auto border-gray-200 bg-white shadow-xl sm:static sm:z-auto sm:w-80 sm:shrink-0 sm:shadow-none">
@@ -1049,6 +1191,11 @@ function NodeEditPanel({
         {/* 種別 */}
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">種別</label>
+          <div
+            className={`mb-1.5 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${KIND_STYLE[kind].chip}`}
+          >
+            {KIND_FLOW_LABEL[kind]}
+          </div>
           <div className="flex gap-1">
             {KIND_OPTIONS.map((k) => {
               const active = k === kind;
@@ -1166,6 +1313,87 @@ function NodeEditPanel({
             className="resize-none text-sm"
           />
         </div>
+
+        {/* タスク連携（CAUSE=調査 / COUNTERMEASURE=実行） */}
+        {flavor && (
+          <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+            <div className="mb-2 flex items-center gap-1.5">
+              <flavor.icon className="h-3.5 w-3.5 text-gray-500" />
+              <span className="text-xs font-semibold text-gray-700">紐づくタスク</span>
+              {linkedTasks.length > 0 && (
+                <span className="rounded-full bg-gray-200 px-1.5 text-[10px] font-medium text-gray-600">
+                  {linkedTasks.length}
+                </span>
+              )}
+              <HelpTooltip
+                text={
+                  kind === 'CAUSE'
+                    ? 'この「なぜ（原因）」を確かめるための調査タスクを作成・確認します。掘り下げた原因を「調べて確定させる」流れです。'
+                    : 'この「打ち手（対策）」を実行に移すためのタスクを作成・確認します。採用した打ち手を「実行に落とす」流れです。'
+                }
+              />
+            </div>
+
+            {linkedTasks.length === 0 ? (
+              <p className="mb-2 text-[11px] text-gray-400">
+                まだタスクはありません。下のボタンで{flavor.titlePrefix}タスクを作成できます。
+              </p>
+            ) : (
+              <ul className="mb-2 space-y-1.5">
+                {linkedTasks.map((t) => {
+                  const st = taskStatusLabels[t.status];
+                  return (
+                    <li key={t.id}>
+                      <Link
+                        href={`../../tasks/${t.id}`}
+                        className="group flex items-center gap-1.5 rounded border border-gray-200 bg-white px-2 py-1.5 text-[11px] hover:border-blue-300 hover:bg-blue-50/40"
+                      >
+                        <span
+                          className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${st?.color ?? 'border-gray-200 bg-gray-100 text-gray-600'}`}
+                        >
+                          {st?.label ?? t.status}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-gray-800 group-hover:text-blue-700">
+                          {t.title}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-gray-400">{t.progress}%</span>
+                        <ExternalLink className="h-3 w-3 shrink-0 text-gray-300 group-hover:text-blue-500" />
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || creatingTask}
+              onClick={() => onCreateTask(node)}
+              className={`w-full ${flavor.chip}`}
+            >
+              {creatingTask ? (
+                <>
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  作成中...
+                </>
+              ) : (
+                <>
+                  <Plus className="mr-1 h-4 w-4" />
+                  {flavor.verb}
+                </>
+              )}
+            </Button>
+            {linkedTasks.length > 0 && (
+              <Link
+                href={`../../tasks?issueNodeId=${node.id}`}
+                className="mt-1.5 block text-center text-[11px] text-blue-600 hover:underline"
+              >
+                タスク一覧で開く
+              </Link>
+            )}
+          </div>
+        )}
 
         <Button
           size="sm"

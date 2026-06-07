@@ -1,4 +1,4 @@
-import { Task, TaskStatus, TaskPriority } from '../../../domain';
+import { Task, TaskStatus, TaskPriority, IssueNodeKind } from '../../../domain';
 import { TaskDependencyRecord } from '../../../domain';
 
 export interface TaskOutput {
@@ -11,6 +11,12 @@ export interface TaskOutput {
   priority: TaskPriority;
   assigneeName: string | null;
   assigneeRoleId: string | null;
+  /** 紐付くイシューノードID（ISSUE/CAUSE/COUNTERMEASURE）。未紐付けは null。 */
+  issueNodeId: string | null;
+  /** 紐付くノードのラベル（フロントが「由来」を追加フェッチなしで表示するため）。 */
+  issueNodeLabel: string | null;
+  /** 紐付くノードの種別。未紐付けは null。 */
+  issueNodeKind: IssueNodeKind | null;
   startDate: Date | null;
   dueDate: Date | null;
   progress: number;
@@ -21,6 +27,16 @@ export interface TaskOutput {
   order: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * 紐付け先イシューノードの最小情報。
+ * リポジトリが Task に同梱して返し、toTaskOutput が由来表示用フィールドに展開する。
+ */
+export interface LinkedIssueNodeInfo {
+  id: string;
+  label: string;
+  kind: IssueNodeKind;
 }
 
 export interface TaskDependencyOutput {
@@ -39,6 +55,7 @@ export interface TaskListOutput {
 }
 
 export function toTaskOutput(task: Task): TaskOutput {
+  const node = task.linkedIssueNode;
   return {
     id: task.id,
     projectId: task.projectId,
@@ -49,6 +66,9 @@ export function toTaskOutput(task: Task): TaskOutput {
     priority: task.priority,
     assigneeName: task.assigneeName,
     assigneeRoleId: task.assigneeRoleId,
+    issueNodeId: task.issueNodeId,
+    issueNodeLabel: node ? node.label : null,
+    issueNodeKind: node ? node.kind : null,
     startDate: task.startDate,
     dueDate: task.dueDate,
     progress: task.progress,

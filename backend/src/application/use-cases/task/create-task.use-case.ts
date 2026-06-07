@@ -9,6 +9,10 @@ import {
   PROJECT_REPOSITORY,
   OrganizationRepository,
   ORGANIZATION_REPOSITORY,
+  IIssueNodeRepository,
+  ISSUE_NODE_REPOSITORY,
+  IIssueTreeRepository,
+  ISSUE_TREE_REPOSITORY,
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
@@ -24,6 +28,7 @@ export interface CreateTaskInput {
   priority?: TaskPriority;
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
+  issueNodeId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -46,6 +51,10 @@ export class CreateTaskUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    @Inject(ISSUE_NODE_REPOSITORY)
+    private readonly issueNodeRepository: IIssueNodeRepository,
+    @Inject(ISSUE_TREE_REPOSITORY)
+    private readonly issueTreeRepository: IIssueTreeRepository,
   ) {}
 
   async execute(input: CreateTaskInput): Promise<TaskOutput> {
@@ -70,6 +79,11 @@ export class CreateTaskUseCase {
       }
     }
 
+    // 紐付けノードが指定されている場合、同一プロジェクトのツリーに属することを確認
+    if (input.issueNodeId) {
+      await this.assertIssueNodeInProject(input.issueNodeId, input.projectId);
+    }
+
     const id = this.taskRepository.generateId();
     const task = Task.create(
       {
@@ -81,6 +95,7 @@ export class CreateTaskUseCase {
         priority: input.priority,
         assigneeName: input.assigneeName,
         assigneeRoleId: input.assigneeRoleId,
+        issueNodeId: input.issueNodeId,
         startDate: input.startDate,
         dueDate: input.dueDate,
         progress: input.progress,
@@ -95,6 +110,23 @@ export class CreateTaskUseCase {
 
     await this.taskRepository.save(task);
 
-    return toTaskOutput(task);
+    // 紐付けノードのラベル/種別を出力に含めるため再読込（join 済み）
+    const saved = await this.taskRepository.findById(id);
+    return toTaskOutput(saved ?? task);
+  }
+
+  /** 指定ノードが当該プロジェクトのイシューツリーに属することを検証 */
+  private async assertIssueNodeInProject(
+    issueNodeId: string,
+    projectId: string,
+  ): Promise<void> {
+    const node = await this.issueNodeRepository.findById(issueNodeId);
+    if (!node) {
+      throw new EntityNotFoundError('IssueNode', issueNodeId);
+    }
+    const tree = await this.issueTreeRepository.findById(node.treeId);
+    if (!tree || tree.projectId !== projectId) {
+      throw new EntityNotFoundError('IssueNode', issueNodeId);
+    }
   }
 }

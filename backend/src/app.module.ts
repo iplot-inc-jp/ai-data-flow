@@ -64,6 +64,7 @@ import {
   UpdateIssueNodeUseCase,
   DeleteIssueNodeUseCase,
   SetNodeVerificationUseCase,
+  ListProjectIssueNodesUseCase,
   // FlowFolder
   CreateFlowFolderUseCase,
   GetFlowFoldersUseCase,
@@ -324,6 +325,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     UpdateIssueNodeUseCase,
     DeleteIssueNodeUseCase,
     SetNodeVerificationUseCase,
+    ListProjectIssueNodesUseCase,
     // FlowFolder
     CreateFlowFolderUseCase,
     GetFlowFoldersUseCase,

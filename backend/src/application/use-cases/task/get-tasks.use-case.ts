@@ -18,6 +18,8 @@ import {
 export interface GetTasksInput {
   userId: string;
   projectId: string;
+  /** 指定すると、その紐付けノードのタスクのみに絞り込む */
+  issueNodeId?: string;
 }
 
 /**
@@ -51,7 +53,10 @@ export class GetTasksUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
-    const tasks = await this.taskRepository.findByProjectId(input.projectId);
+    const tasks = await this.taskRepository.findByProjectId(
+      input.projectId,
+      input.issueNodeId,
+    );
     const dependencies =
       await this.taskRepository.findDependenciesByProjectId(input.projectId);
 

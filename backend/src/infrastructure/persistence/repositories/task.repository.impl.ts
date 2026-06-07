@@ -1,11 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { Task, TaskStatus, TaskPriority } from '../../../domain/entities/task.entity';
+import {
+  Task,
+  TaskStatus,
+  TaskPriority,
+} from '../../../domain/entities/task.entity';
+import { IssueNodeKind } from '../../../domain/entities/issue-node.entity';
 import {
   ITaskRepository,
   TaskDependencyRecord,
 } from '../../../domain/repositories/task.repository';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** read 時に issueNode リレーションを join するための include 条件 */
+const ISSUE_NODE_INCLUDE = {
+  issueNode: { select: { id: true, label: true, kind: true } },
+} as const;
 
 @Injectable()
 export class TaskRepositoryImpl implements ITaskRepository {
@@ -21,6 +31,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
     priority: string;
     assigneeName: string | null;
     assigneeRoleId: string | null;
+    issueNodeId: string | null;
     startDate: Date | null;
     dueDate: Date | null;
     progress: number;
@@ -31,6 +42,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
     order: number;
     createdAt: Date;
     updatedAt: Date;
+    issueNode?: { id: string; label: string; kind: string } | null;
   }): Task {
     return Task.reconstruct({
       id: record.id,
@@ -42,6 +54,14 @@ export class TaskRepositoryImpl implements ITaskRepository {
       priority: record.priority as TaskPriority,
       assigneeName: record.assigneeName,
       assigneeRoleId: record.assigneeRoleId,
+      issueNodeId: record.issueNodeId,
+      linkedIssueNode: record.issueNode
+        ? {
+            id: record.issueNode.id,
+            label: record.issueNode.label,
+            kind: record.issueNode.kind as IssueNodeKind,
+          }
+        : null,
       startDate: record.startDate,
       dueDate: record.dueDate,
       progress: record.progress,
@@ -56,15 +76,25 @@ export class TaskRepositoryImpl implements ITaskRepository {
   }
 
   async findById(id: string): Promise<Task | null> {
-    const record = await this.prisma.task.findUnique({ where: { id } });
+    const record = await this.prisma.task.findUnique({
+      where: { id },
+      include: ISSUE_NODE_INCLUDE,
+    });
     if (!record) return null;
     return this.toDomain(record);
   }
 
-  async findByProjectId(projectId: string): Promise<Task[]> {
+  async findByProjectId(
+    projectId: string,
+    issueNodeId?: string,
+  ): Promise<Task[]> {
     const records = await this.prisma.task.findMany({
-      where: { projectId },
+      where: {
+        projectId,
+        ...(issueNodeId ? { issueNodeId } : {}),
+      },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+      include: ISSUE_NODE_INCLUDE,
     });
     return records.map((r) => this.toDomain(r));
   }
@@ -73,6 +103,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
     const records = await this.prisma.task.findMany({
       where: { parentId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+      include: ISSUE_NODE_INCLUDE,
     });
     return records.map((r) => this.toDomain(r));
   }
@@ -87,6 +118,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
       priority: task.priority as TaskPriority,
       assigneeName: task.assigneeName,
       assigneeRoleId: task.assigneeRoleId,
+      issueNodeId: task.issueNodeId,
       startDate: task.startDate,
       dueDate: task.dueDate,
       progress: task.progress,

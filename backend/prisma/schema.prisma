@@ -637,6 +637,7 @@ model IssueNode {
   tree     IssueTree   @relation(fields: [treeId], references: [id], onDelete: Cascade)
   parent   IssueNode?  @relation("IssueNodeHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children IssueNode[] @relation("IssueNodeHierarchy")
+  tasks    Task[]
 
   @@map("issue_nodes")
 }
@@ -970,6 +971,8 @@ model Task {
   priority       TaskPriority @default(MEDIUM)
   assigneeName   String?      @map("assignee_name")
   assigneeRoleId String?      @map("assignee_role_id")
+  // イシューツリーのノードへの紐付け（ISSUE/CAUSE/COUNTERMEASURE）。任意。
+  issueNodeId    String?      @map("issue_node_id")
   startDate      DateTime?    @map("start_date")
   dueDate        DateTime?    @map("due_date")
   progress       Int          @default(0)
@@ -985,6 +988,7 @@ model Task {
   parent       Task?            @relation("TaskHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children     Task[]           @relation("TaskHierarchy")
   assigneeRole Role?            @relation("RoleAssignedTasks", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
+  issueNode    IssueNode?       @relation(fields: [issueNodeId], references: [id], onDelete: SetNull)
   // この依存関係でこのタスクが後続側（先行タスクへの参照を持つ）
   predecessors TaskDependency[] @relation("DepSuccessor")
   // この依存関係でこのタスクが先行側（後続タスクから参照される）

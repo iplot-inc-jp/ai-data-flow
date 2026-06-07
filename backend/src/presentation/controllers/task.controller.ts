@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiProperty,
+  ApiQuery,
 } from '@nestjs/swagger';
 import {
   IsString,
@@ -112,6 +114,16 @@ class CreateTaskDto {
   @IsOptional()
   @IsString()
   assigneeRoleId?: string | null;
+
+  @ApiProperty({
+    description:
+      '紐付けるイシューノードID（ISSUE/CAUSE/COUNTERMEASURE）。null で未紐付け',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  issueNodeId?: string | null;
 
   @ApiProperty({
     description: '開始日（ISO文字列）',
@@ -226,6 +238,16 @@ class UpdateTaskDto {
   assigneeRoleId?: string | null;
 
   @ApiProperty({
+    description:
+      '紐付けるイシューノードID。指定で紐付け差し替え / null で紐付け解除 / 省略で変更なし',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  issueNodeId?: string | null;
+
+  @ApiProperty({
     description: '開始日（ISO文字列）',
     required: false,
     nullable: true,
@@ -306,15 +328,22 @@ export class TaskController {
       'プロジェクトのタスク一覧取得（フラット tasks[] + dependencies[]）',
   })
   @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiQuery({
+    name: 'issueNodeId',
+    required: false,
+    description: '指定すると、その紐付けノードのタスクのみに絞り込む',
+  })
   @ApiResponse({ status: 403, description: '権限がありません' })
   @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
   async list(
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
+    @Query('issueNodeId') issueNodeId?: string,
   ): Promise<TaskListOutput> {
     return this.getTasksUseCase.execute({
       userId: user.id,
       projectId,
+      issueNodeId,
     });
   }
 
@@ -340,6 +369,7 @@ export class TaskController {
       priority: dto.priority,
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
+      issueNodeId: dto.issueNodeId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),
       progress: dto.progress,
@@ -399,6 +429,7 @@ export class TaskByIdController {
       priority: dto.priority,
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
+      issueNodeId: dto.issueNodeId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),
       progress: dto.progress,

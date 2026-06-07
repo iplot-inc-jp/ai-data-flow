@@ -1,10 +1,21 @@
 import { BaseEntity } from './base.entity';
 import { ValidationError } from '../errors';
+import { IssueNodeKind } from './issue-node.entity';
 
 /**
  * タスクステータス（Prisma enum TaskStatus と一致）
  */
 export type TaskStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+
+/**
+ * 紐付くイシューノードの最小情報（由来表示用）。
+ * リポジトリが read 時に IssueNode リレーションを join して同梱する。
+ */
+export interface LinkedIssueNode {
+  id: string;
+  label: string;
+  kind: IssueNodeKind;
+}
 
 /**
  * タスク優先度（Prisma enum TaskPriority と一致）
@@ -20,6 +31,7 @@ export interface CreateTaskProps {
   priority?: TaskPriority;
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
+  issueNodeId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -40,6 +52,9 @@ export interface ReconstructTaskProps {
   priority: TaskPriority;
   assigneeName: string | null;
   assigneeRoleId: string | null;
+  issueNodeId: string | null;
+  /** 紐付くノードの最小情報（join 済みの場合のみ）。 */
+  linkedIssueNode?: LinkedIssueNode | null;
   startDate: Date | null;
   dueDate: Date | null;
   progress: number;
@@ -63,6 +78,7 @@ export interface UpdateTaskProps {
   priority?: TaskPriority;
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
+  issueNodeId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -94,6 +110,7 @@ export class Task extends BaseEntity {
   private _priority: TaskPriority;
   private _assigneeName: string | null;
   private _assigneeRoleId: string | null;
+  private _issueNodeId: string | null;
   private _startDate: Date | null;
   private _dueDate: Date | null;
   private _progress: number;
@@ -102,6 +119,8 @@ export class Task extends BaseEntity {
   private _milestone: string | null;
   private _category: string | null;
   private _order: number;
+  // read 時に join された紐付けノードの最小情報（書き込みには使わない）
+  private _linkedIssueNode: LinkedIssueNode | null;
 
   private constructor(
     id: string,
@@ -113,6 +132,7 @@ export class Task extends BaseEntity {
     priority: TaskPriority,
     assigneeName: string | null,
     assigneeRoleId: string | null,
+    issueNodeId: string | null,
     startDate: Date | null,
     dueDate: Date | null,
     progress: number,
@@ -123,6 +143,7 @@ export class Task extends BaseEntity {
     order: number,
     createdAt: Date,
     updatedAt: Date,
+    linkedIssueNode: LinkedIssueNode | null = null,
   ) {
     super(id, createdAt, updatedAt);
     this._projectId = projectId;
@@ -133,6 +154,7 @@ export class Task extends BaseEntity {
     this._priority = priority;
     this._assigneeName = assigneeName;
     this._assigneeRoleId = assigneeRoleId;
+    this._issueNodeId = issueNodeId;
     this._startDate = startDate;
     this._dueDate = dueDate;
     this._progress = progress;
@@ -141,6 +163,7 @@ export class Task extends BaseEntity {
     this._milestone = milestone;
     this._category = category;
     this._order = order;
+    this._linkedIssueNode = linkedIssueNode;
   }
 
   // ========== バリデーションヘルパー ==========
@@ -222,6 +245,7 @@ export class Task extends BaseEntity {
       priority,
       props.assigneeName?.trim() || null,
       props.assigneeRoleId ?? null,
+      props.issueNodeId ?? null,
       props.startDate ?? null,
       props.dueDate ?? null,
       progress,
@@ -249,6 +273,7 @@ export class Task extends BaseEntity {
       props.priority,
       props.assigneeName,
       props.assigneeRoleId,
+      props.issueNodeId,
       props.startDate,
       props.dueDate,
       props.progress,
@@ -259,6 +284,7 @@ export class Task extends BaseEntity {
       props.order,
       props.createdAt,
       props.updatedAt,
+      props.linkedIssueNode ?? null,
     );
   }
 
@@ -286,6 +312,9 @@ export class Task extends BaseEntity {
     }
     if (props.assigneeRoleId !== undefined) {
       this._assigneeRoleId = props.assigneeRoleId ?? null;
+    }
+    if (props.issueNodeId !== undefined) {
+      this.linkIssueNode(props.issueNodeId ?? null);
     }
     if (props.startDate !== undefined) {
       this._startDate = props.startDate ?? null;
@@ -329,6 +358,19 @@ export class Task extends BaseEntity {
       throw new ValidationError('A task cannot be its own parent');
     }
     this._parentId = parentId ?? null;
+    this.touch();
+  }
+
+  /**
+   * イシューノードへの紐付けを設定/解除（null で解除）。
+   * 紐付けが変わると join 済みの最小情報キャッシュは無効化する。
+   */
+  linkIssueNode(issueNodeId: string | null): void {
+    const next = issueNodeId ?? null;
+    if (next !== this._issueNodeId) {
+      this._linkedIssueNode = null;
+    }
+    this._issueNodeId = next;
     this.touch();
   }
 
@@ -379,6 +421,15 @@ export class Task extends BaseEntity {
 
   get assigneeRoleId(): string | null {
     return this._assigneeRoleId;
+  }
+
+  get issueNodeId(): string | null {
+    return this._issueNodeId;
+  }
+
+  /** read 時に join された紐付けノードの最小情報（無ければ null）。 */
+  get linkedIssueNode(): LinkedIssueNode | null {
+    return this._linkedIssueNode;
   }
 
   get startDate(): Date | null {

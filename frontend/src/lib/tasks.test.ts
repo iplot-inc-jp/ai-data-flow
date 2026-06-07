@@ -25,6 +25,7 @@ function makeTask(partial: Partial<Task> & { id: string }): Task {
     milestone: false,
     category: null,
     order: 0,
+    issueNodeId: null,
     ...partial,
   };
 }

@@ -7,3 +7,4 @@ export * from './add-issue-node.use-case';
 export * from './update-issue-node.use-case';
 export * from './delete-issue-node.use-case';
 export * from './set-node-verification.use-case';
+export * from './list-project-issue-nodes.use-case';

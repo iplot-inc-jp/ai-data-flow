@@ -14,8 +14,11 @@ export interface TaskDependencyRecord {
 
 export interface ITaskRepository {
   findById(id: string): Promise<Task | null>;
-  /** プロジェクトのタスクをフラットに返す（order -> createdAt 昇順） */
-  findByProjectId(projectId: string): Promise<Task[]>;
+  /**
+   * プロジェクトのタスクをフラットに返す（order -> createdAt 昇順）。
+   * issueNodeId を渡すと、その紐付けノードのタスクのみに絞り込む。
+   */
+  findByProjectId(projectId: string, issueNodeId?: string): Promise<Task[]>;
   /** 直下の子タスク（親付け替えや削除前チェック用） */
   findChildrenByParentId(parentId: string): Promise<Task[]>;
   save(task: Task): Promise<void>;

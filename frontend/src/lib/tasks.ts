@@ -33,6 +33,24 @@ export interface Task {
   milestone: boolean;
   category: string | null;
   order: number;
+  /** 由来となる課題ツリーのノード（打ち手 / 調査）への紐付け。未設定なら null。 */
+  issueNodeId: string | null;
+  /** 紐付いた課題ノードのラベル（TaskOutput でのみ付与される表示用） */
+  issueNodeLabel?: string | null;
+  /** 紐付いた課題ノードの種別（CAUSE=調査 / COUNTERMEASURE=打ち手） */
+  issueNodeKind?: IssueNodeKind | null;
+}
+
+/** 課題ツリーのノード種別。タスク紐付けで使うのは CAUSE / COUNTERMEASURE。 */
+export type IssueNodeKind = 'ISSUE' | 'CAUSE' | 'COUNTERMEASURE';
+
+/** タスク紐付け用に列挙する課題ノード（GET /issue-nodes の戻り値） */
+export interface IssueNodeRef {
+  id: string;
+  label: string;
+  kind: IssueNodeKind;
+  treeId: string;
+  treeTitle: string;
 }
 
 export interface TaskDependency {
@@ -133,6 +151,30 @@ export const taskPriorityLabels: Record<
   LOW: { label: '低', color: 'bg-green-50 text-green-600 border-green-200' },
 };
 
+/**
+ * タスクに紐付く課題ノードの種別チップ表示。
+ * CAUSE=調査（amber）/ COUNTERMEASURE=打ち手（blue）。
+ * ISSUE は紐付け対象外だが念のため定義しておく。
+ */
+export const issueNodeKindLabels: Record<
+  IssueNodeKind,
+  { label: string; chip: string }
+> = {
+  ISSUE: { label: '問い', chip: 'bg-slate-100 text-slate-700 border-slate-200' },
+  CAUSE: { label: '調査', chip: 'bg-amber-50 text-amber-700 border-amber-200' },
+  COUNTERMEASURE: {
+    label: '打ち手',
+    chip: 'bg-blue-50 text-blue-700 border-blue-200',
+  },
+};
+
+/** セレクタ表示用：CAUSE は「なぜ/調査」、COUNTERMEASURE は「打ち手」。 */
+export function issueNodeKindOptionLabel(kind: IssueNodeKind): string {
+  if (kind === 'CAUSE') return 'なぜ/調査';
+  if (kind === 'COUNTERMEASURE') return '打ち手';
+  return issueNodeKindLabels[kind]?.label ?? kind;
+}
+
 export function taskStatusLabel(status: string): string {
   return taskStatusLabels[status as TaskStatus]?.label ?? status;
 }
@@ -219,6 +261,18 @@ export const tasksApi = {
     fetch(`${API_URL}/api/projects/${projectId}/roles`, {
       headers: authHeaders(),
     }).then((r) => handle<TaskRole[]>(r)),
+
+  /**
+   * GET /api/projects/:projectId/issue-nodes?kind=CAUSE|COUNTERMEASURE
+   * 課題ツリーのノード（打ち手 / 調査）をタスク紐付け候補として列挙する。
+   * kind 省略時は紐付け可能な全ノードを返す。
+   */
+  listIssueNodes: (projectId: string, kind?: IssueNodeKind) => {
+    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : '';
+    return fetch(`${API_URL}/api/projects/${projectId}/issue-nodes${qs}`, {
+      headers: authHeaders(),
+    }).then((r) => handle<IssueNodeRef[]>(r));
+  },
 };
 
 /** Authorization のみ（multipart は Content-Type をブラウザに任せる） */

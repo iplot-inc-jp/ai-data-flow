@@ -214,6 +214,26 @@ export class IssueNodeResponseDto {
 }
 
 /**
+ * プロジェクト横断イシューノード一覧の要素DTO（タスク紐付けセレクタ用）
+ */
+export class ProjectIssueNodeListItemDto {
+  @ApiProperty({ example: 'uuid-node-xxxx' })
+  id: string;
+
+  @ApiProperty({ example: 'オンボーディングが分かりにくい' })
+  label: string;
+
+  @ApiProperty({ enum: IssueNodeKindDto, example: 'CAUSE' })
+  kind: IssueNodeKindDto;
+
+  @ApiProperty({ example: 'uuid-tree-xxxx', description: '所属イシューツリーID' })
+  treeId: string;
+
+  @ApiProperty({ example: '解約率が高い', description: '所属イシューツリー名' })
+  treeTitle: string;
+}
+
+/**
  * ノード付きイシューツリーレスポンスDTO
  */
 export class IssueTreeWithNodesResponseDto {

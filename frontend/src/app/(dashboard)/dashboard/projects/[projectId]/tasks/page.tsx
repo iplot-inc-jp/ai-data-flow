@@ -46,6 +46,7 @@ import {
   Columns3,
   User,
   CalendarDays,
+  GitBranch,
 } from 'lucide-react';
 import {
   tasksApi,
@@ -55,6 +56,8 @@ import {
   collectDescendantIds,
   taskStatusLabels,
   taskPriorityLabels,
+  issueNodeKindLabels,
+  issueNodeKindOptionLabel,
   TASK_STATUSES,
   TASK_PRIORITIES,
   type Task,
@@ -63,6 +66,7 @@ import {
   type TaskDependency,
   type TaskRole,
   type TaskTreeNode,
+  type IssueNodeRef,
 } from '@/lib/tasks';
 
 type FormState = {
@@ -81,6 +85,7 @@ type FormState = {
   milestone: boolean;
   category: string;
   predecessorIds: string[];
+  issueNodeId: string;
 };
 
 const emptyForm: FormState = {
@@ -99,6 +104,7 @@ const emptyForm: FormState = {
   milestone: false,
   category: '',
   predecessorIds: [],
+  issueNodeId: '',
 };
 
 const NONE = '__none__'; // Select は空文字を value にできないためのプレースホルダ
@@ -110,6 +116,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
   const [roles, setRoles] = useState<TaskRole[]>([]);
+  const [issueNodes, setIssueNodes] = useState<IssueNodeRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -135,13 +142,15 @@ export default function TasksPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [data, roleList] = await Promise.all([
+      const [data, roleList, nodeList] = await Promise.all([
         tasksApi.list(projectId),
         tasksApi.listRoles(projectId).catch(() => [] as TaskRole[]),
+        tasksApi.listIssueNodes(projectId).catch(() => [] as IssueNodeRef[]),
       ]);
       setTasks(data.tasks ?? []);
       setDependencies(data.dependencies ?? []);
       setRoles(roleList ?? []);
+      setIssueNodes(nodeList ?? []);
     } catch (err) {
       console.error('Failed to fetch tasks:', err);
     } finally {
@@ -171,6 +180,12 @@ export default function TasksPage() {
     tasks.forEach((t) => m.set(t.id, t.title));
     return m;
   }, [tasks]);
+
+  const issueNodeById = useMemo(() => {
+    const m = new Map<string, IssueNodeRef>();
+    issueNodes.forEach((n) => m.set(n.id, n));
+    return m;
+  }, [issueNodes]);
 
   // 後続→先行の対応（特定タスクの先行タスク・依存IDを引く）
   const depsBySuccessor = useMemo(() => {
@@ -322,6 +337,7 @@ export default function TasksPage() {
       milestone: task.milestone,
       category: task.category ?? '',
       predecessorIds: preds,
+      issueNodeId: task.issueNodeId ?? '',
     });
     setError(null);
     setDialogOpen(true);
@@ -371,6 +387,7 @@ export default function TasksPage() {
     actualHours: form.actualHours === '' ? null : Number(form.actualHours),
     milestone: form.milestone,
     category: form.category.trim() || null,
+    issueNodeId: form.issueNodeId || null,
   });
 
   // 依存関係（先行タスク）の差分を反映
@@ -785,6 +802,15 @@ export default function TasksPage() {
                                     .join(', ')}
                                 </div>
                               )}
+                              <IssueOrigin
+                                projectId={projectId}
+                                task={node}
+                                nodeRef={
+                                  node.issueNodeId
+                                    ? issueNodeById.get(node.issueNodeId)
+                                    : undefined
+                                }
+                              />
                             </div>
                           </div>
                         </td>
@@ -1114,6 +1140,51 @@ export default function TasksPage() {
               )}
             </Field>
 
+            <Field
+              label="関連ノード（打ち手/調査）"
+              help="課題ツリーの「打ち手」や「なぜ/調査」ノードに紐付けると、このタスクの由来として表示されます。"
+            >
+              {issueNodes.length === 0 ? (
+                <p className="text-xs text-gray-400">
+                  紐付けできる課題ノードがありません（課題ツリーで打ち手・調査を作成してください）
+                </p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={form.issueNodeId || NONE}
+                    onValueChange={(v) =>
+                      setForm({ ...form, issueNodeId: v === NONE ? '' : v })
+                    }
+                  >
+                    <SelectTrigger className="bg-white border-gray-300">
+                      <SelectValue placeholder="（紐付けなし）" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value={NONE}>（紐付けなし）</SelectItem>
+                      {issueNodes.map((n) => (
+                        <SelectItem key={n.id} value={n.id}>
+                          [{issueNodeKindOptionLabel(n.kind)}] {n.label}
+                          {n.treeTitle ? `（${n.treeTitle}）` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {form.issueNodeId && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setForm({ ...form, issueNodeId: '' })}
+                      className="shrink-0 gap-1 text-gray-500"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      クリア
+                    </Button>
+                  )}
+                </div>
+              )}
+            </Field>
+
             {error && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 {error}
@@ -1155,6 +1226,54 @@ export default function TasksPage() {
 function clampProgress(n: number): number {
   if (Number.isNaN(n)) return 0;
   return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/**
+ * タスクの「由来」表示。紐付いた課題ノードのラベルと種別チップ
+ * （調査=amber / 打ち手=blue）を出し、課題ツリーへリンクする。
+ * nodeRef（列挙 API 由来・treeId を持つ）があればそれを優先し、
+ * 無ければ TaskOutput の issueNodeLabel/issueNodeKind にフォールバックする。
+ */
+function IssueOrigin({
+  projectId,
+  task,
+  nodeRef,
+}: {
+  projectId: string;
+  task: Task;
+  nodeRef?: IssueNodeRef;
+}) {
+  const label = nodeRef?.label ?? task.issueNodeLabel ?? null;
+  const kind = nodeRef?.kind ?? task.issueNodeKind ?? null;
+  if (!task.issueNodeId || !label || !kind) return null;
+  const meta = issueNodeKindLabels[kind];
+  const treeId = nodeRef?.treeId ?? null;
+  const inner = (
+    <span className="inline-flex items-center gap-1">
+      <GitBranch className="h-3 w-3 text-gray-400" />
+      <span
+        className={`inline-flex items-center rounded border px-1 py-px text-[10px] ${meta.chip}`}
+      >
+        {meta.label}
+      </span>
+      <span className="truncate">{label}</span>
+    </span>
+  );
+  return (
+    <div className="mt-0.5 text-[11px] text-gray-500">
+      <span className="text-gray-400">由来: </span>
+      {treeId ? (
+        <Link
+          href={`/dashboard/projects/${projectId}/issue-trees/${treeId}`}
+          className="hover:text-blue-600 hover:underline"
+        >
+          {inner}
+        </Link>
+      ) : (
+        inner
+      )}
+    </div>
+  );
 }
 
 function Field({

@@ -28,6 +28,8 @@ import {
   UpdateIssueNodeUseCase,
   DeleteIssueNodeUseCase,
   SetNodeVerificationUseCase,
+  ListProjectIssueNodesUseCase,
+  ProjectIssueNodeListItem,
 } from '../../application';
 import {
   CreateIssueTreeRequestDto,
@@ -42,6 +44,7 @@ import {
   SetNodeVerificationRequestDto,
   IssueNodeResponseDto,
   IssueTreeWithNodesResponseDto,
+  ProjectIssueNodeListItemDto,
 } from '../dto';
 import {
   CurrentUser,
@@ -62,6 +65,7 @@ export class IssueTreeController {
     private readonly updateIssueNodeUseCase: UpdateIssueNodeUseCase,
     private readonly deleteIssueNodeUseCase: DeleteIssueNodeUseCase,
     private readonly setNodeVerificationUseCase: SetNodeVerificationUseCase,
+    private readonly listProjectIssueNodesUseCase: ListProjectIssueNodesUseCase,
   ) {}
 
   // ===========================================
@@ -88,6 +92,37 @@ export class IssueTreeController {
     return result.map((tree) => ({
       ...tree,
       type: tree.type as IssueTreeTypeDto,
+    }));
+  }
+
+  @Get('projects/:projectId/issue-nodes')
+  @ApiOperation({
+    summary:
+      'プロジェクト横断のイシューノード一覧（タスク紐付けセレクタ用 / 任意で種別フィルタ）',
+  })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiQuery({ name: 'kind', enum: IssueNodeKindDto, required: false })
+  @ApiResponse({
+    status: 200,
+    description: '成功',
+    type: [ProjectIssueNodeListItemDto],
+  })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
+  async listProjectNodes(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Query('kind') kind?: IssueNodeKindDto,
+  ): Promise<ProjectIssueNodeListItemDto[]> {
+    const result: ProjectIssueNodeListItem[] =
+      await this.listProjectIssueNodesUseCase.execute({
+        userId: user.id,
+        projectId,
+        kind,
+      });
+    return result.map((node) => ({
+      ...node,
+      kind: node.kind as IssueNodeKindDto,
     }));
   }
 

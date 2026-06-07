@@ -33,6 +33,7 @@ import {
   CornerDownRight,
   Link2,
   FileText,
+  GitBranch,
   Image as ImageIcon,
 } from 'lucide-react';
 import {
@@ -41,6 +42,8 @@ import {
   attachmentsApi,
   taskStatusLabels,
   taskPriorityLabels,
+  issueNodeKindLabels,
+  issueNodeKindOptionLabel,
   TASK_STATUSES,
   TASK_PRIORITIES,
   type Task,
@@ -50,6 +53,7 @@ import {
   type TaskRole,
   type TaskComment,
   type TaskAttachment,
+  type IssueNodeRef,
 } from '@/lib/tasks';
 
 type EditState = {
@@ -61,7 +65,10 @@ type EditState = {
   startDate: string;
   dueDate: string;
   progress: number;
+  issueNodeId: string;
 };
+
+const NONE = '__none__'; // Select は空文字を value にできないためのプレースホルダ
 
 export default function TaskDetailPage() {
   const params = useParams();
@@ -72,6 +79,7 @@ export default function TaskDetailPage() {
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
   const [roles, setRoles] = useState<TaskRole[]>([]);
+  const [issueNodes, setIssueNodes] = useState<IssueNodeRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -125,6 +133,15 @@ export default function TaskDetailPage() {
     }
   }, [projectId]);
 
+  const fetchIssueNodes = useCallback(async () => {
+    try {
+      const list = await tasksApi.listIssueNodes(projectId);
+      setIssueNodes(list ?? []);
+    } catch {
+      setIssueNodes([]);
+    }
+  }, [projectId]);
+
   const fetchComments = useCallback(async () => {
     try {
       const list = await commentsApi.list(taskId);
@@ -146,9 +163,10 @@ export default function TaskDetailPage() {
   useEffect(() => {
     fetchTask();
     fetchRoles();
+    fetchIssueNodes();
     fetchComments();
     fetchAttachments();
-  }, [fetchTask, fetchRoles, fetchComments, fetchAttachments]);
+  }, [fetchTask, fetchRoles, fetchIssueNodes, fetchComments, fetchAttachments]);
 
   // -------------------------------------------------------------------------
   // 派生データ
@@ -164,6 +182,29 @@ export default function TaskDetailPage() {
     roles.forEach((r) => m.set(r.id, r.name));
     return m;
   }, [roles]);
+
+  const issueNodeById = useMemo(() => {
+    const m = new Map<string, IssueNodeRef>();
+    issueNodes.forEach((n) => m.set(n.id, n));
+    return m;
+  }, [issueNodes]);
+
+  // 紐付いた課題ノード（列挙 API を優先し、無ければ TaskOutput のフィールドから合成）
+  const linkedNode = useMemo<IssueNodeRef | null>(() => {
+    if (!task?.issueNodeId) return null;
+    const ref = issueNodeById.get(task.issueNodeId);
+    if (ref) return ref;
+    if (task.issueNodeLabel && task.issueNodeKind) {
+      return {
+        id: task.issueNodeId,
+        label: task.issueNodeLabel,
+        kind: task.issueNodeKind,
+        treeId: '',
+        treeTitle: '',
+      };
+    }
+    return null;
+  }, [task, issueNodeById]);
 
   const parent = task?.parentId ? taskById.get(task.parentId) ?? null : null;
 
@@ -206,6 +247,7 @@ export default function TaskDetailPage() {
       startDate: task.startDate ? task.startDate.slice(0, 10) : '',
       dueDate: task.dueDate ? task.dueDate.slice(0, 10) : '',
       progress: clampProgress(task.progress),
+      issueNodeId: task.issueNodeId ?? '',
     });
     setSaveError(null);
     setEditing(true);
@@ -235,6 +277,7 @@ export default function TaskDetailPage() {
         startDate: edit.startDate || null,
         dueDate: edit.dueDate || null,
         progress: clampProgress(edit.progress),
+        issueNodeId: edit.issueNodeId || null,
       });
       setTask((prev) => (prev ? { ...prev, ...updated } : updated));
       setAllTasks((prev) =>
@@ -531,6 +574,54 @@ export default function TaskDetailPage() {
                 />
               </DetailField>
 
+              <DetailField
+                label="関連ノード（打ち手/調査）"
+                help="課題ツリーの「打ち手」や「なぜ/調査」ノードに紐付けると、このタスクの由来として表示されます。"
+              >
+                {issueNodes.length === 0 ? (
+                  <p className="text-xs text-gray-400">
+                    紐付けできる課題ノードがありません（課題ツリーで打ち手・調査を作成してください）
+                  </p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={edit.issueNodeId || NONE}
+                      onValueChange={(v) =>
+                        setEdit({
+                          ...edit,
+                          issueNodeId: v === NONE ? '' : v,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="bg-white border-gray-300">
+                        <SelectValue placeholder="（紐付けなし）" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white">
+                        <SelectItem value={NONE}>（紐付けなし）</SelectItem>
+                        {issueNodes.map((n) => (
+                          <SelectItem key={n.id} value={n.id}>
+                            [{issueNodeKindOptionLabel(n.kind)}] {n.label}
+                            {n.treeTitle ? `（${n.treeTitle}）` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {edit.issueNodeId && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEdit({ ...edit, issueNodeId: '' })}
+                        className="shrink-0 gap-1 text-gray-500"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        クリア
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </DetailField>
+
               {saveError && (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                   {saveError}
@@ -638,6 +729,46 @@ export default function TaskDetailPage() {
                   </p>
                 ) : (
                   <span className="text-gray-400">（説明なし）</span>
+                )}
+              </DetailRow>
+
+              {/* 由来（紐付いた課題ノード） */}
+              <DetailRow label="由来（打ち手/調査）">
+                {linkedNode ? (
+                  (() => {
+                    const meta = issueNodeKindLabels[linkedNode.kind];
+                    const chip = (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] ${meta.chip}`}
+                        >
+                          {meta.label}
+                        </span>
+                        <span>{linkedNode.label}</span>
+                      </span>
+                    );
+                    return linkedNode.treeId ? (
+                      <Link
+                        href={`/dashboard/projects/${projectId}/issue-trees/${linkedNode.treeId}`}
+                        className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                      >
+                        <GitBranch className="h-3.5 w-3.5" />
+                        {chip}
+                        {linkedNode.treeTitle && (
+                          <span className="text-xs text-gray-400">
+                            （{linkedNode.treeTitle}）
+                          </span>
+                        )}
+                      </Link>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-gray-700">
+                        <GitBranch className="h-3.5 w-3.5 text-gray-400" />
+                        {chip}
+                      </span>
+                    );
+                  })()
+                ) : (
+                  <span className="text-gray-400">なし</span>
                 )}
               </DetailRow>
 
