@@ -16,3 +16,4 @@ export * from './issue-tree.repository';
 export * from './issue-node.repository';
 export * from './task.repository';
 export * from './task-comment.repository';
+export * from './dfd.repository';

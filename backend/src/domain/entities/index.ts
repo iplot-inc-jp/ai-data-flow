@@ -18,3 +18,6 @@ export * from './issue-tree.entity';
 export * from './issue-node.entity';
 export * from './task.entity';
 export * from './task-comment.entity';
+export * from './dfd-diagram.entity';
+export * from './dfd-node.entity';
+export * from './dfd-flow.entity';

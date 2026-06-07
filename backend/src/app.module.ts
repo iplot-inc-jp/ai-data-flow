@@ -24,6 +24,7 @@ import {
   ISSUE_NODE_REPOSITORY,
   TASK_REPOSITORY,
   TASK_COMMENT_REPOSITORY,
+  DFD_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -97,6 +98,17 @@ import {
   GetTaskCommentsUseCase,
   UpdateTaskCommentUseCase,
   DeleteTaskCommentUseCase,
+  // DFD
+  GetFlowDfdUseCase,
+  GenerateFlowDfdUseCase,
+  GetProjectDfdUseCase,
+  AddDfdNodeUseCase,
+  UpdateDfdNodeUseCase,
+  DeleteDfdNodeUseCase,
+  AddDfdFlowUseCase,
+  UpdateDfdFlowUseCase,
+  DeleteDfdFlowUseCase,
+  SaveDfdPositionsUseCase,
 } from './application';
 
 // Infrastructure
@@ -120,6 +132,7 @@ import {
   IssueNodeRepositoryImpl,
   TaskRepositoryImpl,
   TaskCommentRepositoryImpl,
+  DfdRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -145,6 +158,7 @@ import {
   TaskByIdController,
   TaskCommentController,
   TaskCommentByIdController,
+  DfdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -215,6 +229,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     AttachmentController,
     SubProjectController,
     RecordSheetController,
+    DfdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -300,6 +315,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       provide: TASK_COMMENT_REPOSITORY,
       useClass: TaskCommentRepositoryImpl,
     },
+    {
+      provide: DFD_REPOSITORY,
+      useClass: DfdRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -369,6 +388,17 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetTaskCommentsUseCase,
     UpdateTaskCommentUseCase,
     DeleteTaskCommentUseCase,
+    // DFD
+    GetFlowDfdUseCase,
+    GenerateFlowDfdUseCase,
+    GetProjectDfdUseCase,
+    AddDfdNodeUseCase,
+    UpdateDfdNodeUseCase,
+    DeleteDfdNodeUseCase,
+    AddDfdFlowUseCase,
+    UpdateDfdFlowUseCase,
+    DeleteDfdFlowUseCase,
+    SaveDfdPositionsUseCase,
 
     // ========== Services ==========
     ClaudeService,
