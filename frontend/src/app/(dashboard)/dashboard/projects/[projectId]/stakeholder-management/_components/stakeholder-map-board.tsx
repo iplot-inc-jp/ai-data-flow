@@ -2,8 +2,19 @@
 
 import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Loader2, Trash2, Plus, UserPlus, GripVertical, Pencil, X, Save } from 'lucide-react';
-import type { RecordTemplate } from '@/lib/record-templates';
+import {
+  Loader2,
+  Trash2,
+  Plus,
+  UserPlus,
+  GripVertical,
+  Pencil,
+  X,
+  Save,
+  UserCog,
+  Users,
+} from 'lucide-react';
+import { RECORD_TEMPLATES, type RecordTemplate } from '@/lib/record-templates';
 import { useSheetStore, type SheetRow } from './sheet-store';
 import { SaveBar } from './save-bar';
 
@@ -11,6 +22,10 @@ const INFLUENCE_LEVELS = ['高', '中', '低'] as const;
 const SUPPORT_LEVELS = ['支持', '中立', '反対'] as const;
 type Influence = (typeof INFLUENCE_LEVELS)[number];
 type Support = (typeof SUPPORT_LEVELS)[number];
+
+const ROLE_TEMPLATE_KEY = 'role-responsibility';
+// 「役割と責任」セクションでロールごとに表示・編集する主な列（ロール名以外）。
+const ROLE_DETAIL_KEYS = ['responsibility', 'decisionScope', 'kpi'] as const;
 
 // 編集モーダルで複数行入力にする列キー（長文項目）。
 const MULTILINE_KEYS = new Set([
@@ -59,6 +74,68 @@ export function StakeholderMapBoard({
     projectId,
     template.key,
   );
+
+  // ── ロール別責任範囲（role-responsibility）をステークホルダーマップに統合 ──
+  // ステークホルダーマップとは別データのまま、ロール名で突き合わせる。
+  const roleTemplate = useMemo(
+    () => RECORD_TEMPLATES.find((t) => t.key === ROLE_TEMPLATE_KEY) ?? null,
+    [],
+  );
+  const {
+    rows: roleRows,
+    update: updateRoles,
+    loading: rolesLoading,
+    saving: rolesSaving,
+    savedAt: rolesSavedAt,
+    save: saveRoles,
+    error: rolesError,
+  } = useSheetStore(projectId, ROLE_TEMPLATE_KEY);
+
+  // 定義済みロール名（編集モーダルの候補・グルーピングに使用）。空名は除く。
+  const roleNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          roleRows
+            .map((r) => (r.role ?? '').trim())
+            .filter((name) => name.length > 0),
+        ),
+      ),
+    [roleRows],
+  );
+
+  const roleColLabel = (key: string) =>
+    roleTemplate?.columns.find((c) => c.key === key)?.label ?? key;
+
+  const emptyRoleRow = (): SheetRow => {
+    const r: SheetRow = {};
+    if (roleTemplate) for (const c of roleTemplate.columns) r[c.key] = '';
+    return r;
+  };
+  const addRole = () => updateRoles((prev) => [...prev, emptyRoleRow()]);
+  const deleteRole = (i: number) =>
+    updateRoles((prev) => prev.filter((_, idx) => idx !== i));
+  const setRoleCell = (i: number, key: string, value: string) =>
+    updateRoles((prev) =>
+      prev.map((r, idx) => (idx === i ? { ...r, [key]: value } : r)),
+    );
+
+  // 各ロールに属するステークホルダー（map の役割列 == ロール名）。
+  const stakeholdersForRole = (roleName: string) =>
+    rows
+      .map((row, i) => ({ row, i }))
+      .filter(({ row }) => (row.role ?? '').trim() === roleName.trim());
+
+  // どのロールにも一致しないステークホルダー（未分類）。
+  const unroledStakeholders = useMemo(() => {
+    const known = new Set(roleNames.map((n) => n.trim()));
+    return rows
+      .map((row, i) => ({ row, i }))
+      .filter(({ row }) => {
+        const role = (row.role ?? '').trim();
+        return role.length === 0 || !known.has(role);
+      });
+  }, [rows, roleNames]);
 
   // 影響度×支持度 → そのセルに属する行のインデックス一覧
   const grid = useMemo(() => {
@@ -409,6 +486,154 @@ export function StakeholderMapBoard({
         </CardContent>
       </Card>
 
+      {/* 役割と責任（role-responsibility を統合）：各ロールの責任・意思決定範囲・関心KPI
+          と、その役割に属するステークホルダーをまとめて表示・編集する。 */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[#050f3e]">
+            <UserCog className="h-4 w-4 text-blue-600" />
+            役割と責任
+          </h3>
+          <SaveBar
+            onAdd={roleTemplate ? addRole : undefined}
+            addLabel="ロールを追加"
+            onSave={() => saveRoles(roleRows)}
+            saving={rolesSaving}
+            savedAt={rolesSavedAt}
+          />
+        </div>
+        <p className="text-xs text-gray-500">
+          ロールごとに責任・意思決定範囲・関心KPIを定義し、各ロールに該当するステークホルダー（上のマップの「役割」列が一致する人）をその責任のもとにまとめます。ロールとステークホルダーは別々に保存します。
+        </p>
+
+        {rolesError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            {rolesError}
+          </div>
+        )}
+
+        {rolesLoading ? (
+          <div className="flex items-center justify-center h-[160px]">
+            <Loader2 className="w-7 h-7 animate-spin text-primary" />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {roleRows.map((roleRow, ri) => {
+              const roleName = (roleRow.role ?? '').trim();
+              const members = roleName ? stakeholdersForRole(roleName) : [];
+              return (
+                <Card key={ri} className="bg-white border-gray-200">
+                  <CardContent className="space-y-3 p-4">
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="text"
+                        value={roleRow.role ?? ''}
+                        onChange={(e) => setRoleCell(ri, 'role', e.target.value)}
+                        placeholder={roleColLabel('role')}
+                        className="flex-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm font-semibold text-[#050f3e] focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => deleteRole(ri)}
+                        className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                        title="このロールを削除"
+                        aria-label="このロールを削除"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {ROLE_DETAIL_KEYS.map((key) => (
+                        <div key={key} className="space-y-1">
+                          <label className="block text-[11px] font-medium text-gray-500">
+                            {roleColLabel(key)}
+                          </label>
+                          <textarea
+                            value={roleRow[key] ?? ''}
+                            onChange={(e) => setRoleCell(ri, key, e.target.value)}
+                            rows={2}
+                            placeholder={roleColLabel(key)}
+                            className="w-full resize-y rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* このロールに属するステークホルダー */}
+                    <div className="rounded-md border border-gray-100 bg-gray-50/60 p-2.5">
+                      <p className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-gray-500">
+                        <Users className="h-3.5 w-3.5" />
+                        この役割の関係者 {members.length} 名
+                      </p>
+                      {members.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {members.map(({ row, i }) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setEditIndex(i)}
+                              className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-800 transition-colors hover:border-blue-300 hover:text-blue-700"
+                              title="クリックして編集"
+                            >
+                              {row.name || '（無名）'}
+                              {row.affiliation ? (
+                                <span className="ml-1 text-[10px] text-gray-400">
+                                  {row.affiliation}
+                                </span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-gray-400">
+                          このロールに割り当てられた関係者はいません（ステークホルダーの「役割」をこのロール名にすると、ここに表示されます）。
+                        </p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+
+            {roleRows.length === 0 && (
+              <Card className="bg-white border-gray-200">
+                <CardContent className="py-8 text-center text-sm text-gray-400">
+                  まだロールがありません。「ロールを追加」から責任範囲を定義しましょう。
+                </CardContent>
+              </Card>
+            )}
+
+            {/* どのロールにも一致しない関係者 */}
+            {unroledStakeholders.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                <p className="mb-2 text-xs font-semibold text-amber-700">
+                  役割が未設定／未定義の関係者 {unroledStakeholders.length} 名
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {unroledStakeholders.map(({ row, i }) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setEditIndex(i)}
+                      className="rounded-full border border-amber-200 bg-white px-2.5 py-1 text-xs text-gray-800 transition-colors hover:border-amber-400 hover:text-amber-700"
+                      title="クリックして役割を設定"
+                    >
+                      {row.name || '（無名）'}
+                      {row.role ? (
+                        <span className="ml-1 text-[10px] text-amber-500">
+                          役割: {row.role}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* 詳細テーブル（全列を編集） */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
@@ -521,6 +746,12 @@ export function StakeholderMapBoard({
             </div>
 
             <div className="max-h-[60vh] space-y-3 overflow-auto px-5 py-4">
+              {/* 役割の候補（「役割と責任」で定義したロール名） */}
+              <datalist id="sm-role-options">
+                {roleNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
               {template.columns.map((col) => {
                 const value = editRow[col.key] ?? '';
                 if (col.key === 'influence' || col.key === 'support') {
@@ -543,6 +774,31 @@ export function StakeholderMapBoard({
                           </option>
                         ))}
                       </select>
+                    </div>
+                  );
+                }
+                // 役割：定義済みロール名を候補に出す（datalist + 自由入力）。
+                if (col.key === 'role') {
+                  return (
+                    <div key={col.key} className="space-y-1">
+                      <label className="block text-[11px] font-medium text-gray-500">
+                        {col.label}
+                      </label>
+                      <input
+                        type="text"
+                        list="sm-role-options"
+                        value={value}
+                        onChange={(e) =>
+                          setCell(editIndex, col.key, e.target.value)
+                        }
+                        placeholder={col.label}
+                        className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      {roleNames.length > 0 && (
+                        <p className="text-[10px] text-gray-400">
+                          「役割と責任」で定義したロール名を選ぶと、その責任のもとにまとめられます。
+                        </p>
+                      )}
                     </div>
                   );
                 }

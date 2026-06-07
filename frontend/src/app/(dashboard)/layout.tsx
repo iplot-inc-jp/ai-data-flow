@@ -31,6 +31,7 @@ import {
   ListTodo,
   GanttChartSquare,
   Map as MapIcon,
+  ShieldAlert,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -605,6 +606,7 @@ export default function DashboardLayout({
         label: '推進',
         items: [
           { name: 'ステークホルダーマネジメント', href: `${base}/stakeholder-management`, icon: Users },
+          { name: 'リスクマネジメント', href: `${base}/risk-management`, icon: ShieldAlert },
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
           { name: 'コード連携', href: `${base}/integrations`, icon: Github },

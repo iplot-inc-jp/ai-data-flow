@@ -8,18 +8,15 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   Users,
   Grid3x3,
-  UserCog,
   CalendarClock,
   BookOpen,
   Megaphone,
-  ShieldAlert,
   AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
 import { RECORD_TEMPLATES, type RecordTemplate } from '@/lib/record-templates';
 import { RecordSheetTable } from '@/components/records/record-sheet-table';
 import { StakeholderMapBoard } from './_components/stakeholder-map-board';
-import { InterestMatrixGrid } from './_components/interest-matrix-grid';
 import { MeetingListEditor } from './_components/meeting-list-editor';
 
 /**
@@ -29,13 +26,11 @@ import { MeetingListEditor } from './_components/meeting-list-editor';
  * 各タブは RecordSheet（projectId × templateKey）に構造的に保存される。
  */
 const SM_TAB_DEFS: { key: string; tabLabel: string; icon: LucideIcon }[] = [
-  { key: 'stakeholder-map', tabLabel: 'ステークホルダーマップ', icon: Users },
+  { key: 'stakeholder-map', tabLabel: 'ステークホルダー', icon: Users },
   { key: 'interest-matrix', tabLabel: '関心ごとマトリクス', icon: Grid3x3 },
-  { key: 'role-responsibility', tabLabel: 'ロール別責任範囲', icon: UserCog },
   { key: 'meeting-list', tabLabel: '会議体一覧', icon: CalendarClock },
   { key: 'meeting-catalog', tabLabel: 'ミーティング体カタログ', icon: BookOpen },
   { key: 'report-calendar', tabLabel: '報告・連絡カレンダー', icon: Megaphone },
-  { key: 'risk-register', tabLabel: 'リスク登録簿', icon: ShieldAlert },
 ];
 
 type SmTab = {
@@ -123,8 +118,6 @@ export default function StakeholderManagementPage() {
           <p className="text-sm text-gray-500">{t.template.description}</p>
           {t.key === 'stakeholder-map' ? (
             <StakeholderMapBoard projectId={projectId} template={t.template} />
-          ) : t.key === 'interest-matrix' ? (
-            <InterestMatrixGrid projectId={projectId} template={t.template} />
           ) : t.key === 'meeting-list' ? (
             <MeetingListEditor projectId={projectId} template={t.template} />
           ) : (
