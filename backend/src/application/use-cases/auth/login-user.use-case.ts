@@ -20,7 +20,20 @@ export interface LoginUserOutput {
     id: string;
     email: string;
     name: string | null;
+    isSuperAdmin: boolean;
   };
+}
+
+/**
+ * SUPER_ADMIN_EMAILS（カンマ区切り・大文字小文字無視）に
+ * 含まれるメールアドレスかどうか判定。
+ */
+function isBootstrapSuperAdminEmail(email: string): boolean {
+  const list = (process.env.SUPER_ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+  return list.includes(email.trim().toLowerCase());
 }
 
 /**
@@ -53,19 +66,26 @@ export class LoginUserUseCase {
       throw new UnauthorizedError('Invalid credentials');
     }
 
-    // 3. トークン生成
+    // 3. 全体管理者ブートストラップ（既存アカウントも次回ログインで昇格）
+    if (!user.isSuperAdmin && isBootstrapSuperAdminEmail(user.email)) {
+      user.promoteToSuperAdmin();
+      await this.userRepository.save(user);
+    }
+
+    // 4. トークン生成
     const accessToken = this.tokenService.generateAccessToken({
       sub: user.id,
       email: user.email,
     });
 
-    // 4. 出力返却
+    // 5. 出力返却
     return {
       accessToken,
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
+        isSuperAdmin: user.isSuperAdmin,
       },
     };
   }

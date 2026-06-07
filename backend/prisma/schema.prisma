@@ -20,6 +20,8 @@ model User {
   password  String
   name      String?
   avatarUrl String?  @map("avatar_url")
+  // 全体管理者（プラットフォーム管理者）。会社の作成等はこの権限のみ。
+  isSuperAdmin Boolean @default(false) @map("is_super_admin")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -39,6 +41,10 @@ model Organization {
   name        String
   slug        String   @unique
   description String?
+  // 会社ステータス
+  status      String   @default("active") // active | suspended
+  // 会社ごとの Anthropic APIキー（AES-256-GCM 暗号化）。AI機能の鍵解決で最優先。
+  anthropicApiKeyEnc String? @map("anthropic_api_key_enc")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

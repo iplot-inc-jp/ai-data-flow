@@ -14,6 +14,7 @@ export interface ReconstructUserProps {
   password: string;
   name: string | null;
   avatarUrl: string | null;
+  isSuperAdmin?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +28,7 @@ export class User extends BaseEntity {
   private _password: string;
   private _name: string | null;
   private _avatarUrl: string | null;
+  private _isSuperAdmin: boolean;
 
   private constructor(
     id: string,
@@ -34,6 +36,7 @@ export class User extends BaseEntity {
     password: string,
     name: string | null,
     avatarUrl: string | null,
+    isSuperAdmin: boolean,
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -42,6 +45,7 @@ export class User extends BaseEntity {
     this._password = password;
     this._name = name;
     this._avatarUrl = avatarUrl;
+    this._isSuperAdmin = isSuperAdmin;
   }
 
   /**
@@ -63,7 +67,7 @@ export class User extends BaseEntity {
     }
 
     const now = new Date();
-    return new User(id, email, hashedPassword, name, null, now, now);
+    return new User(id, email, hashedPassword, name, null, false, now, now);
   }
 
   /**
@@ -76,6 +80,7 @@ export class User extends BaseEntity {
       props.password,
       props.name,
       props.avatarUrl,
+      props.isSuperAdmin ?? false,
       props.createdAt,
       props.updatedAt,
     );
@@ -116,6 +121,22 @@ export class User extends BaseEntity {
     this.touch();
   }
 
+  /**
+   * 全体管理者（プラットフォーム管理者）に昇格
+   */
+  promoteToSuperAdmin(): void {
+    this._isSuperAdmin = true;
+    this.touch();
+  }
+
+  /**
+   * 全体管理者フラグを設定
+   */
+  setSuperAdmin(value: boolean): void {
+    this._isSuperAdmin = value;
+    this.touch();
+  }
+
   // ========== Getter ==========
 
   get email(): string {
@@ -136,6 +157,10 @@ export class User extends BaseEntity {
 
   get avatarUrl(): string | null {
     return this._avatarUrl;
+  }
+
+  get isSuperAdmin(): boolean {
+    return this._isSuperAdmin;
   }
 }
 

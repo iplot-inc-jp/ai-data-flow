@@ -3,7 +3,11 @@ import {
   Organization,
   OrganizationRepository,
   ORGANIZATION_REPOSITORY,
+  UserRepository,
+  USER_REPOSITORY,
   EntityAlreadyExistsError,
+  EntityNotFoundError,
+  ForbiddenError,
 } from '../../../domain';
 
 export interface CreateOrganizationInput {
@@ -28,9 +32,20 @@ export class CreateOrganizationUseCase {
   constructor(
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    @Inject(USER_REPOSITORY)
+    private readonly userRepository: UserRepository,
   ) {}
 
   async execute(input: CreateOrganizationInput): Promise<CreateOrganizationOutput> {
+    // 0. 会社の作成は全体管理者のみ可能
+    const actor = await this.userRepository.findById(input.userId);
+    if (!actor) {
+      throw new EntityNotFoundError('User', input.userId);
+    }
+    if (!actor.isSuperAdmin) {
+      throw new ForbiddenError('会社の作成は全体管理者のみ可能です');
+    }
+
     // 1. スラッグ重複チェック
     const exists = await this.organizationRepository.existsBySlug(input.slug);
     if (exists) {

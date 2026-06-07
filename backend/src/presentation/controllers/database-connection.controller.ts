@@ -13,6 +13,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsOptional } from 'class-validator';
 import { ColumnDataType } from '@prisma/client';
 import { Client } from 'pg';
+import { createConnection } from 'mysql2/promise';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../infrastructure/services/crypto.service';
 
@@ -51,6 +52,9 @@ interface InformationSchemaColumn {
   is_nullable: string; // 'YES' | 'NO'
   column_default: string | null;
   ordinal_position: number;
+  // mysql のみ: 長さ/精度付きの完全な型（例: tinyint(1), char(36)）。
+  // tinyint(1)→BOOLEAN, char(36)→UUID の判定に使う。postgres では undefined。
+  column_type?: string | null;
 }
 
 @ApiTags('DB接続')
@@ -132,7 +136,7 @@ export class DatabaseConnectionController {
   @Post('database-connections/:id/introspect')
   @ApiOperation({
     summary:
-      'DBに接続してスキーマを取得し、テーブル/カラムをカタログにupsert（postgresのみ）',
+      'DBに接続してスキーマを取得し、テーブル/カラムをカタログにupsert（postgres/mysql）',
   })
   async introspect(@Param('id') id: string) {
     const connection = await this.prisma.databaseConnection.findUnique({
@@ -142,55 +146,108 @@ export class DatabaseConnectionController {
       throw new HttpException('DB接続が見つかりません', HttpStatus.NOT_FOUND);
     }
 
-    if (connection.dialect !== 'postgres') {
+    if (connection.dialect !== 'postgres' && connection.dialect !== 'mysql') {
       throw new HttpException(
-        '未対応のDB種別です（postgresのみ対応）',
+        '未対応のDB種別です（postgres / mysql のみ対応）',
         HttpStatus.BAD_REQUEST,
       );
     }
 
     const connString = this.cryptoService.decrypt(connection.connStringEnc);
 
-    // public スキーマの BASE TABLE とそのカラムを取得
+    // BASE TABLE とそのカラムを取得（postgres / mysql 共通のフォーマットへ正規化）
     const tableNames: string[] = [];
     const columnRows: InformationSchemaColumn[] = [];
 
-    const client = new Client({ connectionString: connString });
-    try {
-      await client.connect();
+    if (connection.dialect === 'postgres') {
+      // public スキーマの BASE TABLE とそのカラムを取得
+      const client = new Client({ connectionString: connString });
+      try {
+        await client.connect();
 
-      const tablesResult = await client.query<{ table_name: string }>(
-        `SELECT table_name
-           FROM information_schema.tables
-          WHERE table_schema = 'public'
-            AND table_type = 'BASE TABLE'
-          ORDER BY table_name`,
-      );
-      for (const row of tablesResult.rows) {
-        tableNames.push(row.table_name);
+        const tablesResult = await client.query<{ table_name: string }>(
+          `SELECT table_name
+             FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_type = 'BASE TABLE'
+            ORDER BY table_name`,
+        );
+        for (const row of tablesResult.rows) {
+          tableNames.push(row.table_name);
+        }
+
+        const columnsResult = await client.query<InformationSchemaColumn>(
+          `SELECT table_name,
+                  column_name,
+                  data_type,
+                  is_nullable,
+                  column_default,
+                  ordinal_position
+             FROM information_schema.columns
+            WHERE table_schema = 'public'
+            ORDER BY table_name, ordinal_position`,
+        );
+        columnRows.push(...columnsResult.rows);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new HttpException(
+          `DBへの接続またはスキーマ取得に失敗しました: ${message}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      } finally {
+        // 接続は必ずクローズ（接続失敗時の end() エラーは握りつぶす）
+        await client.end().catch(() => undefined);
       }
+    } else {
+      // mysql: 現在のデータベース（DATABASE()）の BASE TABLE とそのカラムを取得
+      const conn = await createConnection(connString);
+      try {
+        const [tableRows] = await conn.query(
+          `SELECT table_name AS table_name
+             FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_type = 'BASE TABLE'
+            ORDER BY table_name`,
+        );
+        for (const row of tableRows as Array<{ table_name: string }>) {
+          tableNames.push(row.table_name);
+        }
 
-      const columnsResult = await client.query<InformationSchemaColumn>(
-        `SELECT table_name,
-                column_name,
-                data_type,
-                is_nullable,
-                column_default,
-                ordinal_position
-           FROM information_schema.columns
-          WHERE table_schema = 'public'
-          ORDER BY table_name, ordinal_position`,
-      );
-      columnRows.push(...columnsResult.rows);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new HttpException(
-        `DBへの接続またはスキーマ取得に失敗しました: ${message}`,
-        HttpStatus.BAD_REQUEST,
-      );
-    } finally {
-      // 接続は必ずクローズ（接続失敗時の end() エラーは握りつぶす）
-      await client.end().catch(() => undefined);
+        const [colRows] = await conn.query(
+          `SELECT table_name AS table_name,
+                  column_name AS column_name,
+                  data_type AS data_type,
+                  column_type AS column_type,
+                  is_nullable AS is_nullable,
+                  column_default AS column_default,
+                  ordinal_position AS ordinal_position
+             FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+            ORDER BY table_name, ordinal_position`,
+        );
+        for (const row of colRows as Array<Record<string, unknown>>) {
+          columnRows.push({
+            table_name: String(row.table_name),
+            column_name: String(row.column_name),
+            data_type: String(row.data_type),
+            column_type:
+              row.column_type == null ? null : String(row.column_type),
+            is_nullable: String(row.is_nullable),
+            column_default:
+              row.column_default == null ? null : String(row.column_default),
+            ordinal_position: Number(row.ordinal_position),
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new HttpException(
+          `DBへの接続またはスキーマ取得に失敗しました: ${message}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      } finally {
+        // 接続は必ずクローズ
+        await conn.end();
+      }
     }
 
     // テーブルを upsert（[projectId, name]）し、name → tableId を作る
@@ -216,7 +273,7 @@ export class DatabaseConnectionController {
       // BASE TABLE 以外（ビュー等）のカラムは対象テーブルが無いのでスキップ
       if (!tableId) continue;
 
-      const dataType = this.mapSqlType(col.data_type);
+      const dataType = this.mapSqlType(col.data_type, col.column_type);
       const isNullable = col.is_nullable === 'YES';
 
       await this.prisma.column.upsert({
@@ -267,27 +324,43 @@ export class DatabaseConnectionController {
   }
 
   /**
-   * Postgres の information_schema.columns.data_type を ColumnDataType enum に
+   * Postgres / MySQL の information_schema.columns.data_type を ColumnDataType enum に
    * ベストエフォートでマッピングする。
+   *
+   * @param sqlType    information_schema.columns.data_type（長さ/精度なし）
+   * @param fullType   MySQL のみ: column_type（長さ/精度付き。例: tinyint(1), char(36)）。
+   *                   tinyint(1)→BOOLEAN, char(36)→UUID の判定に使う。
    */
-  private mapSqlType(sqlType: string): ColumnDataType {
+  private mapSqlType(
+    sqlType: string,
+    fullType?: string | null,
+  ): ColumnDataType {
     const t = sqlType.toLowerCase();
+    const full = (fullType ?? '').toLowerCase();
 
-    // uuid
+    // MySQL: tinyint(1) は慣習的に boolean
+    if (full.startsWith('tinyint(1)')) return ColumnDataType.BOOLEAN;
+
+    // MySQL: char(36) は UUID 格納に使われることが多い
+    if (full.startsWith('char(36)')) return ColumnDataType.UUID;
+
+    // uuid（postgres ネイティブ型）
     if (t === 'uuid') return ColumnDataType.UUID;
 
     // json / jsonb
     if (t.includes('json')) return ColumnDataType.JSON;
 
-    // boolean
+    // boolean（postgres bool / mysql boolean エイリアス）
     if (t.includes('bool')) return ColumnDataType.BOOLEAN;
 
-    // 整数系（integer, smallint, bigint, int, serial 等）
+    // 整数系（integer, smallint, bigint, int, serial,
+    //         mysql: tinyint/smallint/mediumint/bigint/int）
     if (t.includes('int') || t.includes('serial')) {
       return ColumnDataType.INTEGER;
     }
 
-    // 浮動小数・数値系（numeric, decimal, real, double precision, float, money）
+    // 浮動小数・数値系
+    // （numeric, decimal, real, double precision, double, float, money）
     if (
       t.includes('numeric') ||
       t.includes('decimal') ||
@@ -299,14 +372,20 @@ export class DatabaseConnectionController {
       return ColumnDataType.FLOAT;
     }
 
-    // 日時系（timestamp は DATETIME、date は DATE）
-    if (t.includes('timestamp') || t === 'time' || t.startsWith('time ')) {
+    // 日時系（timestamp / mysql datetime は DATETIME、date は DATE）
+    if (
+      t.includes('timestamp') ||
+      t === 'datetime' ||
+      t === 'time' ||
+      t.startsWith('time ')
+    ) {
       return ColumnDataType.DATETIME;
     }
     if (t === 'date') return ColumnDataType.DATE;
 
-    // テキスト系: text は TEXT、varchar/char 等は STRING
-    if (t === 'text') return ColumnDataType.TEXT;
+    // テキスト系: text 系（text/tinytext/mediumtext/longtext）は TEXT、
+    //             varchar/char 等は STRING
+    if (t.includes('text')) return ColumnDataType.TEXT;
     if (
       t.includes('char') ||
       t.includes('varchar') ||

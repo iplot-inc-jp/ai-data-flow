@@ -14,6 +14,7 @@ import { IsString, IsOptional, IsBoolean, IsInt, Min } from 'class-validator';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../infrastructure/services/crypto.service';
 import { SyncService } from '../../infrastructure/services/sync.service';
+import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 
 // ========== DTOs ==========
@@ -69,6 +70,7 @@ export class GithubConnectionController {
     private readonly prisma: PrismaService,
     private readonly cryptoService: CryptoService,
     private readonly syncService: SyncService,
+    private readonly companyKeyService: CompanyKeyService,
   ) {}
 
   @Get('projects/:projectId/github-connections')
@@ -161,7 +163,11 @@ export class GithubConnectionController {
       );
     }
 
-    const apiKey = await this.resolveApiKey(user.id);
+    // 会社(Organization)キー → ユーザーキー → 環境変数 の順で解決
+    const apiKey = await this.companyKeyService.resolveForProject(
+      connection.projectId,
+      user.id,
+    );
     if (!apiKey) {
       throw new HttpException(
         'Anthropic APIキーが未設定です',
@@ -205,15 +211,5 @@ export class GithubConnectionController {
       lastSyncedSha: c.lastSyncedSha,
       lastSyncedAt: c.lastSyncedAt,
     };
-  }
-
-  private async resolveApiKey(userId: string): Promise<string | null> {
-    const settings = await this.prisma.userSetting.findUnique({
-      where: { userId },
-    });
-    if (settings?.anthropicApiKey) {
-      return settings.anthropicApiKey;
-    }
-    return process.env.ANTHROPIC_API_KEY || null;
   }
 }

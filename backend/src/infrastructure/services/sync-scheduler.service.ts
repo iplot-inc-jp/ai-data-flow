@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../persistence/prisma/prisma.service';
 import { SyncService } from './sync.service';
+import { CompanyKeyService } from './company-key.service';
 
 /**
  * autoSync が有効な GithubConnection を定期的に同期するスケジューラ。
@@ -14,6 +15,7 @@ export class SyncSchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly syncService: SyncService,
+    private readonly companyKeyService: CompanyKeyService,
   ) {}
 
   // 毎時 0,5,10,... 分に実行（秒指定の6フィールド cron）。
@@ -32,7 +34,10 @@ export class SyncSchedulerService {
           now - connection.lastSyncedAt.getTime() >= intervalMs;
         if (!due) continue;
 
-        const apiKey = await this.resolveApiKey(connection.projectId);
+        // 会社(Organization)キー → ユーザーキー → 環境変数。AUTO のため userId なし。
+        const apiKey = await this.companyKeyService.resolveForProject(
+          connection.projectId,
+        );
         if (!apiKey) {
           this.logger.warn(
             `Skipping auto-sync for connection ${connection.id}: no Anthropic API key resolved.`,
@@ -50,33 +55,5 @@ export class SyncSchedulerService {
         );
       }
     }
-  }
-
-  /**
-   * APIキー解決:
-   *   process.env.ANTHROPIC_API_KEY を優先。
-   *   無ければ project → organization の OWNER メンバーの UserSetting.anthropicApiKey。
-   */
-  private async resolveApiKey(projectId: string): Promise<string | null> {
-    const envKey = process.env.ANTHROPIC_API_KEY;
-    if (envKey) return envKey;
-
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { organizationId: true },
-    });
-    if (!project) return null;
-
-    const owner = await this.prisma.organizationMember.findFirst({
-      where: { organizationId: project.organizationId, role: 'OWNER' },
-      select: { userId: true },
-    });
-    if (!owner) return null;
-
-    const setting = await this.prisma.userSetting.findUnique({
-      where: { userId: owner.userId },
-      select: { anthropicApiKey: true },
-    });
-    return setting?.anthropicApiKey ?? null;
   }
 }

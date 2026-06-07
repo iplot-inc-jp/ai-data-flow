@@ -25,6 +25,7 @@ import {
   Folder,
   Layers,
   Github,
+  Building2,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -72,6 +73,37 @@ function useProjectName(projectId: string | null) {
   }, [projectId])
 
   return projectName
+}
+
+// 現在のユーザー情報を一度だけ取得するhook（RBACナビゲーション制御用）
+function useCurrentUser() {
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchMe = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/auth/me`, {
+          headers: authHeaders(),
+        })
+        if (!cancelled && res.ok) {
+          const data = await res.json()
+          setIsSuperAdmin(Boolean(data?.isSuperAdmin))
+        }
+      } catch (err) {
+        console.error('Failed to fetch current user:', err)
+      }
+    }
+
+    fetchMe()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return { isSuperAdmin }
 }
 
 // 業務フローツリー用の型
@@ -329,12 +361,18 @@ export default function DashboardLayout({
   const projectId = useMemo(() => extractProjectId(pathname), [pathname])
   const projectName = useProjectName(projectId)
   const { subProjects, flows } = useFlowTree(projectId)
+  const { isSuperAdmin } = useCurrentUser()
 
   const navigation = useMemo(() => {
     const baseNav = [
       { name: 'ダッシュボード', href: '/dashboard', icon: Home },
       { name: 'プロジェクト', href: '/dashboard/projects', icon: FolderOpen },
     ]
+
+    // 全体管理者のみ「会社管理」を表示
+    if (isSuperAdmin) {
+      baseNav.push({ name: '会社管理', href: '/dashboard/companies', icon: Building2 })
+    }
 
     if (projectId) {
       const projectNav = [
@@ -355,7 +393,18 @@ export default function DashboardLayout({
     baseNav.push({ name: 'アカウント', href: '/dashboard/settings', icon: Settings })
 
     return baseNav
-  }, [projectId])
+  }, [projectId, isSuperAdmin])
+
+  // プロジェクトメニューが始まる最初のインデックス（区切り線を差し込む位置）
+  const firstProjectIndex = useMemo(
+    () =>
+      projectId
+        ? navigation.findIndex((item) =>
+            item.href.includes(`/dashboard/projects/${projectId}/`),
+          )
+        : -1,
+    [navigation, projectId],
+  )
 
   // 業務フローツリーを差し込む対象の href
   const flowsHref = projectId ? `/dashboard/projects/${projectId}/flows` : null
@@ -431,7 +480,7 @@ export default function DashboardLayout({
               return (
                 <div key={item.name}>
                   {/* Project section divider */}
-                  {projectId && index === 2 && !sidebarCollapsed && (
+                  {projectId && index === firstProjectIndex && !sidebarCollapsed && (
                     <div className="pt-4 pb-3 px-1">
                       <div className="section-title text-xs">
                         <FolderOpen className="h-3.5 w-3.5 text-primary" />
@@ -439,7 +488,7 @@ export default function DashboardLayout({
                       </div>
                     </div>
                   )}
-                  {projectId && index === 2 && sidebarCollapsed && (
+                  {projectId && index === firstProjectIndex && sidebarCollapsed && (
                     <div className="hidden lg:block py-2">
                       <div className="border-t border-border" />
                     </div>

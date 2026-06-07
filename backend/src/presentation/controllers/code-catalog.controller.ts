@@ -19,6 +19,7 @@ import {
 } from 'class-validator';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { SyncService } from '../../infrastructure/services/sync.service';
+import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 
 // ========== DTOs ==========
@@ -102,6 +103,7 @@ export class CodeCatalogController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly syncService: SyncService,
+    private readonly companyKeyService: CompanyKeyService,
   ) {}
 
   // ========== API Endpoints ==========
@@ -270,7 +272,11 @@ export class CodeCatalogController {
     @Param('projectId') projectId: string,
     @Body() dto: AnalyzeSchemaDto,
   ) {
-    const apiKey = await this.resolveApiKey(user.id);
+    // 会社(Organization)キー → ユーザーキー → 環境変数 の順で解決
+    const apiKey = await this.companyKeyService.resolveForProject(
+      projectId,
+      user.id,
+    );
     if (!apiKey) {
       throw new HttpException(
         'Anthropic APIキーが未設定です',
@@ -279,17 +285,5 @@ export class CodeCatalogController {
     }
 
     return this.syncService.analyzeSchema(projectId, dto.schemaText, apiKey);
-  }
-
-  // ========== Private Methods ==========
-
-  private async resolveApiKey(userId: string): Promise<string | null> {
-    const settings = await this.prisma.userSetting.findUnique({
-      where: { userId },
-    });
-    if (settings?.anthropicApiKey) {
-      return settings.anthropicApiKey;
-    }
-    return process.env.ANTHROPIC_API_KEY || null;
   }
 }

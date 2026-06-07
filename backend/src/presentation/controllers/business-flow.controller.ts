@@ -26,6 +26,7 @@ import {
 } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService } from '../../infrastructure/services/claude.service';
+import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { v4 as uuid } from 'uuid';
 
@@ -191,6 +192,7 @@ export class BusinessFlowController {
     private readonly crudMappingRepository: ICrudMappingRepository,
     private readonly prisma: PrismaService,
     private readonly claudeService: ClaudeService,
+    private readonly companyKeyService: CompanyKeyService,
   ) {}
 
   @Get('project/:projectId')
@@ -614,8 +616,11 @@ export class BusinessFlowController {
       throw new HttpException('Business flow not found', HttpStatus.NOT_FOUND);
     }
 
-    // APIキーを取得（ユーザー設定 > 環境変数）
-    const apiKey = await this.getApiKey(user.id);
+    // APIキーを取得（会社(Organization)キー > ユーザー設定 > 環境変数）
+    const apiKey = await this.companyKeyService.resolveForProject(
+      flow.projectId,
+      user.id,
+    );
     if (!apiKey) {
       throw new HttpException(
         'Anthropic APIキーが未設定です',
@@ -707,18 +712,6 @@ export class BusinessFlowController {
 
     // 更新後のフロー（ノード・エッジ含む）を返す
     return this.getById(id);
-  }
-
-  private async getApiKey(userId: string): Promise<string | null> {
-    const settings = await this.prisma.userSetting.findUnique({
-      where: { userId },
-    });
-
-    if (settings?.anthropicApiKey) {
-      return settings.anthropicApiKey;
-    }
-
-    return process.env.ANTHROPIC_API_KEY || null;
   }
 
   private async getBreadcrumbs(flow: BusinessFlow): Promise<{ id: string; name: string }[]> {
