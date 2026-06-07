@@ -5,14 +5,25 @@
  *
  * buildDataFlowRows(diagram.nodes, diagram.flows) で行を組み、
  * No./源泉/データ項目/宛先/方向/関連処理/帳票種別 を白テーマで描画する。
- * 帳票種別は Phase 3 で名前表示（現状は ID の有無のみチップ表示）。
+ * 帳票種別は reportTypes（プロジェクトの帳票種別一覧）から名前を解決して表示する。
  */
 
-import { buildDataFlowRows, type DfdDiagram } from '@/lib/dfd';
+import { useMemo } from 'react';
+import { buildDataFlowRows, type DfdDiagram, type ReportType } from '@/lib/dfd';
 import { ArrowDownLeft, ArrowUpRight, FileText } from 'lucide-react';
 
-export function DataFlowTable({ diagram }: { diagram: DfdDiagram }) {
+export function DataFlowTable({
+  diagram,
+  reportTypes = [],
+}: {
+  diagram: DfdDiagram;
+  reportTypes?: ReportType[];
+}) {
   const rows = buildDataFlowRows(diagram.nodes, diagram.flows);
+  const rtById = useMemo(
+    () => new Map(reportTypes.map((rt) => [rt.id, rt] as const)),
+    [reportTypes],
+  );
 
   if (rows.length === 0) {
     return (
@@ -56,13 +67,19 @@ export function DataFlowTable({ diagram }: { diagram: DfdDiagram }) {
               </td>
               <td className="px-3 py-2 text-gray-700">{r.relatedFunction || '—'}</td>
               <td className="px-3 py-2">
-                {r.reportTypeId ? (
-                  <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">
-                    <FileText className="h-3 w-3" />帳票
-                  </span>
-                ) : (
-                  <span className="text-gray-300">—</span>
-                )}
+                {(() => {
+                  const rt = r.reportTypeId ? rtById.get(r.reportTypeId) : undefined;
+                  if (!r.reportTypeId) return <span className="text-gray-300">—</span>;
+                  return (
+                    <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">
+                      <FileText className="h-3 w-3" />
+                      {rt?.name ?? '帳票'}
+                      {rt && rt.attachmentCount > 0 && (
+                        <span className="text-emerald-600">📎{rt.attachmentCount}</span>
+                      )}
+                    </span>
+                  );
+                })()}
               </td>
             </tr>
           ))}

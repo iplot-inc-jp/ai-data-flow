@@ -40,7 +40,7 @@ import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/S
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
-import { dfdApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind } from '@/lib/dfd';
+import { dfdApi, reportTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type ReportType } from '@/lib/dfd';
 import type {
   FlowData,
   FlowLinkDirection,
@@ -89,6 +89,7 @@ function DfdPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'diagram' | 'table'>('diagram');
+  const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,9 +104,18 @@ function DfdPanel({
     }
   }, [flowId]);
 
+  const loadReportTypes = useCallback(async () => {
+    try {
+      setReportTypes(await reportTypeApi.list(projectId));
+    } catch {
+      /* 帳票種別の取得失敗は致命ではない */
+    }
+  }, [projectId]);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadReportTypes();
+  }, [load, loadReportTypes]);
 
   const handleRegenerate = useCallback(async () => {
     setBusy(true);
@@ -279,6 +289,7 @@ function DfdPanel({
             <div className="h-[calc(100vh-320px)] overflow-hidden rounded-lg border border-gray-200">
               <DfdCanvas
                 diagram={diagram}
+                reportTypes={reportTypes}
                 onAddNode={handleAddNode}
                 onUpdateNode={handleUpdateNode}
                 onDeleteNode={handleDeleteNode}
@@ -290,7 +301,7 @@ function DfdPanel({
               />
             </div>
           ) : (
-            <DataFlowTable diagram={diagram} />
+            <DataFlowTable diagram={diagram} reportTypes={reportTypes} />
           )}
         </>
       )}

@@ -59,6 +59,13 @@ function headers(): Record<string, string> {
   if (t) h['Authorization'] = `Bearer ${t}`;
   return h;
 }
+/** multipart 用: Content-Type はブラウザに boundary 付きで設定させるため付けない */
+function authHeader(): Record<string, string> {
+  const h: Record<string, string> = {};
+  const t = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  if (t) h['Authorization'] = `Bearer ${t}`;
+  return h;
+}
 export const dfdApi = {
   async getByFlow(flowId: string): Promise<DfdDiagram> {
     const res = await fetch(`${API_URL}/api/business-flows/${flowId}/dfd`, { headers: headers() });
@@ -104,5 +111,72 @@ export const dfdApi = {
   async deleteFlow(id: string): Promise<void> { await fetch(`${API_URL}/api/dfd-flows/${id}`, { method: 'DELETE', headers: headers() }); },
   async savePositions(diagramId: string, positions: { id: string; positionX: number; positionY: number }[]): Promise<void> {
     await fetch(`${API_URL}/api/dfd-diagrams/${diagramId}/positions`, { method: 'PUT', headers: headers(), body: JSON.stringify({ positions }) });
+  },
+};
+
+// ========== 帳票種別（ReportType）+ 具体帳票（Attachment 流用） ==========
+
+export interface ReportType {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  order: number;
+  attachmentCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReportTypeAttachment {
+  id: string;
+  reportTypeId: string | null;
+  kind: 'IMAGE' | 'PDF' | 'FILE';
+  filename: string;
+  mimeType: string;
+  url: string;
+  size: number;
+  order: number;
+  createdAt: string;
+}
+
+export const reportTypeApi = {
+  async list(projectId: string): Promise<ReportType[]> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/report-types`, { headers: headers() });
+    if (!res.ok) throw new Error('帳票種別の取得に失敗しました');
+    return res.json();
+  },
+  async create(projectId: string, body: { name: string; description?: string | null; order?: number }): Promise<ReportType> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/report-types`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error('帳票種別の作成に失敗しました');
+    return res.json();
+  },
+  async update(id: string, patch: { name?: string; description?: string | null; order?: number }): Promise<ReportType> {
+    const res = await fetch(`${API_URL}/api/report-types/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(patch) });
+    if (!res.ok) throw new Error('帳票種別の更新に失敗しました');
+    return res.json();
+  },
+  async delete(id: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/report-types/${id}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) throw new Error('帳票種別の削除に失敗しました');
+  },
+  async listAttachments(reportTypeId: string): Promise<ReportTypeAttachment[]> {
+    const res = await fetch(`${API_URL}/api/report-types/${reportTypeId}/attachments`, { headers: headers() });
+    if (!res.ok) throw new Error('具体帳票の取得に失敗しました');
+    return res.json();
+  },
+  async upload(reportTypeId: string, file: File): Promise<ReportTypeAttachment> {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_URL}/api/report-types/${reportTypeId}/attachments`, { method: 'POST', headers: authHeader(), body: form });
+    if (!res.ok) throw new Error('具体帳票のアップロードに失敗しました');
+    return res.json();
+  },
+  async deleteAttachment(attachmentId: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/attachments/${attachmentId}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) throw new Error('具体帳票の削除に失敗しました');
+  },
+  /** 添付ファイルの配信URL（@Public, 認証不要） */
+  fileUrl(attachmentId: string): string {
+    return `${API_URL}/api/attachments/${attachmentId}/file`;
   },
 };

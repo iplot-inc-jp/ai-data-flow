@@ -9,12 +9,14 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
+import { ReportTypeRegistry } from '@/components/dfd/ReportTypeRegistry';
 import {
   dfdApi,
   type DfdDiagram,
   type DfdNode as DfdNodeModel,
   type DfdFlow as DfdFlowModel,
   type DfdNodeKind,
+  type ReportType,
 } from '@/lib/dfd';
 
 /**
@@ -32,6 +34,7 @@ export default function ProjectDfdPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'diagram' | 'table'>('diagram');
+  const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -232,6 +235,7 @@ export default function ProjectDfdPage() {
             <div className="h-[calc(100vh-320px)] overflow-hidden rounded-lg border border-gray-200">
               <DfdCanvas
                 diagram={diagram}
+                reportTypes={reportTypes}
                 onAddNode={handleAddNode}
                 onUpdateNode={handleUpdateNode}
                 onDeleteNode={handleDeleteNode}
@@ -244,9 +248,14 @@ export default function ProjectDfdPage() {
               />
             </div>
           ) : diagram ? (
-            <DataFlowTable diagram={diagram} />
+            <DataFlowTable diagram={diagram} reportTypes={reportTypes} />
           ) : null}
         </>
+      )}
+
+      {/* 帳票種別レジストリ（プロジェクト単位。DFDの有無に関わらず常時表示） */}
+      {!loading && !error && (
+        <ReportTypeRegistry projectId={projectId} onReportTypesChange={setReportTypes} />
       )}
     </div>
   );
