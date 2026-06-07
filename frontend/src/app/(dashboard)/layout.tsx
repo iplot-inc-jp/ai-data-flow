@@ -32,6 +32,7 @@ import {
   GanttChartSquare,
   Map as MapIcon,
   ShieldAlert,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -583,6 +584,7 @@ export default function DashboardLayout({
         label: '現状把握',
         items: [
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
+          { name: '業務定義シート', href: `${base}/business-definition`, icon: FileSpreadsheet },
           { name: 'データカタログ', href: `${base}/catalog`, icon: Database },
         ],
       },
