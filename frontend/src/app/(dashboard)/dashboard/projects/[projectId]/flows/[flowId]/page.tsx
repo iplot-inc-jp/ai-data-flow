@@ -31,9 +31,15 @@ import {
   ArrowDown,
   Save,
   Check,
+  Share2,
+  Table2,
+  Network,
 } from 'lucide-react';
 import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/SwimlaneCanvas';
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
+import { DfdCanvas } from '@/components/dfd/DfdCanvas';
+import { DataFlowTable } from '@/components/dfd/DataFlowTable';
+import { dfdApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind } from '@/lib/dfd';
 import type {
   FlowData,
   FlowLinkDirection,
@@ -62,7 +68,213 @@ if (typeof window !== 'undefined') {
   });
 }
 
-type FlowTab = 'flow' | 'definition' | 'cruoa';
+type FlowTab = 'flow' | 'definition' | 'cruoa' | 'dfd';
+
+// ===========================================
+// DFDタブ：このフローのデータフロー図（get-or-generate）＋ 図 / 一覧表 サブ切替
+// ===========================================
+
+function DfdPanel({ flowId }: { flowId: string }) {
+  const [diagram, setDiagram] = useState<DfdDiagram | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<'diagram' | 'table'>('diagram');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const d = await dfdApi.getByFlow(flowId);
+      setDiagram(d);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, [flowId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleRegenerate = useCallback(async () => {
+    setBusy(true);
+    try {
+      const d = await dfdApi.generateByFlow(flowId);
+      setDiagram(d);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setBusy(false);
+    }
+  }, [flowId]);
+
+  const handleAddNode = useCallback(
+    async (body: Partial<DfdNodeModel> & { kind: DfdNodeKind; label: string }) => {
+      if (!diagram) return;
+      await dfdApi.addNode(diagram.id, body);
+      await load();
+    },
+    [diagram, load],
+  );
+
+  const handleUpdateNode = useCallback(
+    async (id: string, patch: Partial<DfdNodeModel>) => {
+      await dfdApi.updateNode(id, patch);
+      await load();
+    },
+    [load],
+  );
+
+  const handleDeleteNode = useCallback(
+    async (id: string) => {
+      await dfdApi.deleteNode(id);
+      await load();
+    },
+    [load],
+  );
+
+  const handleAddFlow = useCallback(
+    async (body: { sourceNodeId: string; targetNodeId: string; dataItem: string }) => {
+      if (!diagram) return;
+      await dfdApi.addFlow(diagram.id, body);
+      await load();
+    },
+    [diagram, load],
+  );
+
+  const handleUpdateFlow = useCallback(
+    async (id: string, patch: Partial<DfdFlowModel>) => {
+      await dfdApi.updateFlow(id, patch);
+      await load();
+    },
+    [load],
+  );
+
+  const handleDeleteFlow = useCallback(
+    async (id: string) => {
+      await dfdApi.deleteFlow(id);
+      await load();
+    },
+    [load],
+  );
+
+  const handleSavePositions = useCallback(
+    async (positions: { id: string; positionX: number; positionY: number }[]) => {
+      if (!diagram) return;
+      // 楽観更新（再取得で fitView がリセットされ位置が飛ぶのを防ぐ）
+      setDiagram((prev) =>
+        prev
+          ? {
+              ...prev,
+              nodes: prev.nodes.map((n) => {
+                const p = positions.find((q) => q.id === n.id);
+                return p ? { ...n, positionX: p.positionX, positionY: p.positionY } : n;
+              }),
+            }
+          : prev,
+      );
+      await dfdApi.savePositions(diagram.id, positions);
+    },
+    [diagram],
+  );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="bg-white border-red-200">
+        <CardContent className="py-8 text-center space-y-3">
+          <p className="text-red-600">{error}</p>
+          <Button variant="outline" onClick={() => void load()}>再読み込み</Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!diagram) return null;
+
+  const isEmpty = diagram.nodes.length === 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+        <Share2 className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" />
+        <p className="text-sm text-indigo-800">
+          このフローのノードを「処理（プロセス）」として、データの流れ（源泉/吸収＝外部実体、データストア）を
+          DFD（データフロー図）で可視化します。SEC帳票風に描画し、PNG出力・データフロー一覧表に切り替えられます。
+        </p>
+      </div>
+
+      {isEmpty ? (
+        <Card className="bg-white border-gray-200">
+          <CardContent className="py-12 text-center space-y-3">
+            <p className="text-gray-500">
+              このフローのDFDはまだ生成されていません。「DFDを生成」で業務フローのノードから自動生成します。
+            </p>
+            <Button onClick={handleRegenerate} disabled={busy}>
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Network className="mr-2 h-4 w-4" />}
+              DFDを生成
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* 図 / 一覧表 サブ切替 */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setView('diagram')}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                view === 'diagram'
+                  ? 'border-blue-600 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <Network className="h-4 w-4" />図
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('table')}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                view === 'table'
+                  ? 'border-blue-600 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <Table2 className="h-4 w-4" />一覧表
+            </button>
+          </div>
+
+          {view === 'diagram' ? (
+            <div className="h-[calc(100vh-320px)] overflow-hidden rounded-lg border border-gray-200">
+              <DfdCanvas
+                diagram={diagram}
+                onAddNode={handleAddNode}
+                onUpdateNode={handleUpdateNode}
+                onDeleteNode={handleDeleteNode}
+                onAddFlow={handleAddFlow}
+                onUpdateFlow={handleUpdateFlow}
+                onDeleteFlow={handleDeleteFlow}
+                onSavePositions={handleSavePositions}
+                onRegenerate={handleRegenerate}
+              />
+            </div>
+          ) : (
+            <DataFlowTable diagram={diagram} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 // ===========================================
 // 個別定義タブ：このフロー1本分の業務定義を編集する
@@ -1192,6 +1404,7 @@ export default function ProjectFlowDetailPage() {
           { key: 'flow', label: 'フロー図', icon: GitBranch },
           { key: 'definition', label: '個別定義', icon: ClipboardList },
           { key: 'cruoa', label: '情報の地図(CRUOA)', icon: Grid3x3 },
+          { key: 'dfd', label: 'DFD', icon: Share2 },
         ] as const).map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.key;
@@ -1276,6 +1489,9 @@ export default function ProjectFlowDetailPage() {
           />
         </div>
       )}
+
+      {/* DFD（データフロー図）タブ */}
+      {activeTab === 'dfd' && <DfdPanel flowId={flowId} />}
 
       {/* Mermaidモーダル（プレビュー機能付き） */}
       {showMermaid && mermaidCode && (
