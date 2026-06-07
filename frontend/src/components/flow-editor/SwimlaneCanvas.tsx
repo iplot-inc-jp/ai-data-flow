@@ -859,7 +859,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 function readMeta(node: FlowDataNode | null): {
   duration: string;
   input: string;
+  inputKinds: string;
   output: string;
+  outputKinds: string;
+  handledCount: string;
   notes: string;
 } {
   const meta = (node?.metadata ?? {}) as Record<string, unknown>;
@@ -867,7 +870,10 @@ function readMeta(node: FlowDataNode | null): {
   return {
     duration: s(meta.duration),
     input: s(meta.input),
+    inputKinds: s(meta.inputKinds),
     output: s(meta.output),
+    outputKinds: s(meta.outputKinds),
+    handledCount: s(meta.handledCount),
     notes: s(meta.notes),
   };
 }
@@ -1289,20 +1295,23 @@ function NodePropertyPanel({
   const initMeta = readMeta(node);
   const [duration, setDuration] = useState(initMeta.duration);
   const [input, setInput] = useState(initMeta.input);
+  const [inputKinds, setInputKinds] = useState(initMeta.inputKinds);
   const [output, setOutput] = useState(initMeta.output);
+  const [outputKinds, setOutputKinds] = useState(initMeta.outputKinds);
+  const [handledCount, setHandledCount] = useState(initMeta.handledCount);
   const [notes, setNotes] = useState(initMeta.notes);
 
   const save = useCallback(() => {
     if (!node) return;
     const patch: NodeUpdatePatch = {
-      metadata: { duration, input, output, notes },
+      metadata: { duration, input, inputKinds, output, outputKinds, handledCount, notes },
     };
     if (label !== node.label) patch.label = label;
     if (type !== node.type) patch.type = type;
     const currentRole = node.roleId ?? node.role?.id ?? '';
     if (roleId && roleId !== currentRole) patch.roleId = roleId;
     onUpdateNode?.(node.id, patch);
-  }, [node, label, type, roleId, duration, input, output, notes, onUpdateNode]);
+  }, [node, label, type, roleId, duration, input, inputKinds, output, outputKinds, handledCount, notes, onUpdateNode]);
 
   if (!node) return null;
 
@@ -1378,8 +1387,22 @@ function NodePropertyPanel({
             onChange={(e) => setInput(e.target.value)}
             onBlur={save}
             rows={2}
+            placeholder="例: 受注票、在庫データ"
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <label className="text-[11px] font-medium text-gray-500 whitespace-nowrap">INPUT種類数</label>
+            <input
+              type="number"
+              min={0}
+              value={inputKinds}
+              onChange={(e) => setInputKinds(e.target.value)}
+              onBlur={save}
+              placeholder="例: 3"
+              className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <span className="text-[11px] text-gray-400">種類</span>
+          </div>
         </div>
 
         <div>
@@ -1389,8 +1412,38 @@ function NodePropertyPanel({
             onChange={(e) => setOutput(e.target.value)}
             onBlur={save}
             rows={2}
+            placeholder="例: 発注書、更新済み在庫"
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <label className="text-[11px] font-medium text-gray-500 whitespace-nowrap">OUTPUT種類数</label>
+            <input
+              type="number"
+              min={0}
+              value={outputKinds}
+              onChange={(e) => setOutputKinds(e.target.value)}
+              onBlur={save}
+              placeholder="例: 2"
+              className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <span className="text-[11px] text-gray-400">種類</span>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">今回の対応数</label>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={0}
+              value={handledCount}
+              onChange={(e) => setHandledCount(e.target.value)}
+              onBlur={save}
+              placeholder="例: 120"
+              className="w-28 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <span className="text-[11px] text-gray-400">件（今回処理した件数）</span>
+          </div>
         </div>
 
         <div>
