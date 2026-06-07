@@ -8,4 +8,5 @@ export * from './issue-tree';
 export * from './flow-folder';
 export * from './flow-node-link';
 export * from './flow-node';
+export * from './task';
 

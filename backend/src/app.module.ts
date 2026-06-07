@@ -21,6 +21,7 @@ import {
   GAP_ITEM_REPOSITORY,
   ISSUE_TREE_REPOSITORY,
   ISSUE_NODE_REPOSITORY,
+  TASK_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -76,6 +77,14 @@ import {
   CreateNodeChildFlowUseCase,
   // FlowTree (project-wide hierarchy map)
   GetFlowTreeUseCase,
+  // Task
+  CreateTaskUseCase,
+  GetTasksUseCase,
+  GetTaskUseCase,
+  UpdateTaskUseCase,
+  DeleteTaskUseCase,
+  AddTaskDependencyUseCase,
+  RemoveTaskDependencyUseCase,
 } from './application';
 
 // Infrastructure
@@ -96,6 +105,7 @@ import {
   GapItemRepositoryImpl,
   IssueTreeRepositoryImpl,
   IssueNodeRepositoryImpl,
+  TaskRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -116,6 +126,8 @@ import {
   GapItemController,
   GapItemByIdController,
   IssueTreeController,
+  TaskController,
+  TaskByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -172,6 +184,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GapItemController,
     GapItemByIdController,
     IssueTreeController,
+    TaskController,
+    TaskByIdController,
     RequirementController,
     UserSettingsController,
     ApiKeyController,
@@ -254,6 +268,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       provide: ISSUE_NODE_REPOSITORY,
       useClass: IssueNodeRepositoryImpl,
     },
+    {
+      provide: TASK_REPOSITORY,
+      useClass: TaskRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -305,6 +323,14 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     CreateNodeChildFlowUseCase,
     // FlowTree (project-wide hierarchy map)
     GetFlowTreeUseCase,
+    // Task
+    CreateTaskUseCase,
+    GetTasksUseCase,
+    GetTaskUseCase,
+    UpdateTaskUseCase,
+    DeleteTaskUseCase,
+    AddTaskDependencyUseCase,
+    RemoveTaskDependencyUseCase,
 
     // ========== Services ==========
     ClaudeService,

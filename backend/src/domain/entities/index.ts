@@ -15,3 +15,4 @@ export * from './project-phase.entity';
 export * from './gap-item.entity';
 export * from './issue-tree.entity';
 export * from './issue-node.entity';
+export * from './task.entity';
