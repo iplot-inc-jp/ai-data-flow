@@ -30,6 +30,7 @@ import {
   Target,
   ListTodo,
   GanttChartSquare,
+  Map as MapIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -595,6 +596,7 @@ export default function DashboardLayout({
         label: '設計',
         items: [
           { name: 'TOBE管理', href: `${base}/tobe`, icon: Target },
+          { name: 'ロードマップ', href: `${base}/roadmap`, icon: MapIcon },
           { name: '要求定義', href: `${base}/requirements`, icon: FileText },
           { name: 'CRUD表', href: `${base}/crud-matrix`, icon: Grid3X3 },
         ],
