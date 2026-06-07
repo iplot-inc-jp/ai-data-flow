@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -9,33 +9,40 @@ import { Card } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Loader2,
   GanttChartSquare,
-  ZoomIn,
-  ZoomOut,
   ListTodo,
+  Link2,
+  X,
+  Plus,
 } from 'lucide-react';
 import {
   tasksApi,
   buildTaskTree,
   computeWbsNumbers,
+  collectDescendantIds,
   type Task,
   type TaskDependency,
 } from '@/lib/tasks';
 import {
-  mapTasksToSvar,
-  mapDepsToSvar,
+  mapTasksToFrappe,
   dateToYmd,
-} from '@/components/gantt/svar-mapping';
+} from '@/components/gantt/frappe-mapping';
 import type {
-  SvarGanttScaleMode,
-  SvarGanttProps,
-} from '@/components/gantt/SvarGantt';
-import type { SvarColumn } from 'wx-react-gantt';
+  FrappeGanttProps,
+} from '@/components/gantt/FrappeGantt';
+import type { FrappeViewMode } from 'frappe-gantt';
 
-// SVAR Gantt は DOM 依存のクライアント専用ライブラリのため、SSR を切って動的読み込み。
-const SvarGantt = dynamic<SvarGanttProps>(
-  () => import('@/components/gantt/SvarGantt'),
+// frappe-gantt は DOM 依存のクライアント専用ライブラリのため、SSR を切って動的読み込み。
+const FrappeGantt = dynamic<FrappeGanttProps>(
+  () => import('@/components/gantt/FrappeGantt'),
   {
     ssr: false,
     loading: () => (
@@ -46,23 +53,34 @@ const SvarGantt = dynamic<SvarGanttProps>(
   }
 );
 
-// 左側グリッドの列定義（WBS 表示）。
-const GANTT_COLUMNS: SvarColumn[] = [
-  { id: 'text', header: 'WBS / タスク名', flexgrow: 2, width: 280 },
-  { id: 'start', header: '開始', align: 'center', width: 96 },
-  { id: 'duration', header: '日数', align: 'center', width: 64 },
-];
+type ZoomMode = 'day' | 'week' | 'month';
 
-const ROW_HEIGHT = 36;
+const VIEW_MODE_MAP: Record<ZoomMode, FrappeViewMode> = {
+  day: 'Day',
+  week: 'Week',
+  month: 'Month',
+};
+
+const ZOOM_OPTIONS: { mode: ZoomMode; label: string; title: string }[] = [
+  { mode: 'day', label: '日', title: '日表示（拡大）' },
+  { mode: 'week', label: '週', title: '週表示' },
+  { mode: 'month', label: '月', title: '月表示（縮小）' },
+];
 
 export default function GanttPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.projectId as string;
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
   const [loading, setLoading] = useState(true);
-  const [zoom, setZoom] = useState<SvarGanttScaleMode>('day');
+  const [zoom, setZoom] = useState<ZoomMode>('day');
+
+  // 依存関係パネルで編集対象に選ぶタスク。
+  const [depTaskId, setDepTaskId] = useState<string>('');
+  // 「先行に追加」プルダウンの選択値。
+  const [pickPredId, setPickPredId] = useState<string>('');
 
   // ---------------------------------------------------------------------
   // データ取得
@@ -84,71 +102,113 @@ export default function GanttPage() {
   }, [fetchAll]);
 
   // ---------------------------------------------------------------------
-  // ドメイン -> SVAR データ
+  // ドメイン -> frappe-gantt データ（WBS 表示順）
   // ---------------------------------------------------------------------
+  const frappeTasks = useMemo(
+    () => mapTasksToFrappe(tasks, dependencies),
+    [tasks, dependencies]
+  );
+
+  // WBS 番号・表示順（依存関係パネルのラベル・並び用）。
   const tree = useMemo(() => buildTaskTree(tasks), [tasks]);
   const wbs = useMemo(() => computeWbsNumbers(tree), [tree]);
 
-  const svarTasks = useMemo(
-    () => mapTasksToSvar(tasks, { wbsNumbers: wbs }),
+  // WBS 表示順に並べた一覧（id / 表示ラベル）。
+  const orderedTaskList = useMemo(() => {
+    return [...tasks]
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        wbs: wbs.get(t.id) ?? '',
+      }))
+      .sort((a, b) => {
+        // WBS 文字列を数値ごとに比較（'1.10' > '1.2'）。
+        const pa = a.wbs.split('.').map(Number);
+        const pb = b.wbs.split('.').map(Number);
+        const len = Math.max(pa.length, pb.length);
+        for (let i = 0; i < len; i++) {
+          const da = pa[i] ?? 0;
+          const db = pb[i] ?? 0;
+          if (da !== db) return da - db;
+        }
+        return a.title.localeCompare(b.title);
+      });
+  }, [tasks, wbs]);
+
+  const taskLabel = useCallback(
+    (id: string) => {
+      const t = tasks.find((x) => x.id === id);
+      if (!t) return id;
+      const num = wbs.get(id);
+      return num ? `${num} ${t.title}` : t.title;
+    },
     [tasks, wbs]
   );
-  const svarLinks = useMemo(() => mapDepsToSvar(dependencies), [dependencies]);
 
   // ---------------------------------------------------------------------
-  // インタラクション -> バックエンド
+  // ガント操作 -> バックエンド
   // ---------------------------------------------------------------------
 
-  // バー移動 / リサイズ / 進捗変更（確定時）。
-  const handleTaskCommit = useCallback(
-    async (
-      id: string,
-      patch: { start?: Date; end?: Date; progress?: number }
-    ) => {
-      const body: {
-        startDate?: string;
-        dueDate?: string;
-        progress?: number;
-      } = {};
-      if (patch.start) body.startDate = dateToYmd(patch.start);
-      if (patch.end) {
-        // SVAR の end は「終了日の翌日 0:00（排他）」を指すため 1 日戻して期限日にする。
-        const due = new Date(patch.end.getTime() - 24 * 60 * 60 * 1000);
-        body.dueDate = dateToYmd(due);
-      }
-      if (typeof patch.progress === 'number') {
-        body.progress = Math.max(0, Math.min(100, Math.round(patch.progress)));
-      }
-      if (Object.keys(body).length === 0) return;
+  // バー移動 / リサイズ確定。frappe の end は終了日「込み」なのでそのまま期限日にする。
+  const handleDateChange = useCallback(
+    async (id: string, start: Date, end: Date) => {
       try {
-        await tasksApi.update(id, body);
+        await tasksApi.update(id, {
+          startDate: dateToYmd(start),
+          dueDate: dateToYmd(end),
+        });
         await fetchAll();
       } catch (err) {
-        console.error('Failed to update task:', err);
-        // 失敗時はサーバ状態へ戻すため再取得
+        console.error('Failed to update task dates:', err);
         await fetchAll();
       }
     },
     [fetchAll]
   );
 
-  // 依存（リンク）作成: source=先行, target=後続。
-  // 我々の API は addDep(後続Id, 先行Id)。
-  const handleLinkCreate = useCallback(
-    async (predecessorId: string, successorId: string) => {
+  // 進捗ハンドル操作確定。
+  const handleProgressChange = useCallback(
+    async (id: string, progress: number) => {
       try {
-        await tasksApi.addDep(successorId, predecessorId);
+        await tasksApi.update(id, {
+          progress: Math.max(0, Math.min(100, Math.round(progress))),
+        });
         await fetchAll();
       } catch (err) {
-        console.error('Failed to add dependency:', err);
+        console.error('Failed to update task progress:', err);
         await fetchAll();
       }
     },
     [fetchAll]
   );
 
-  // 依存（リンク）削除: link.id = 我々の dependency.id。
-  const handleLinkDelete = useCallback(
+  // バークリック -> タスク詳細へ。
+  const handleClick = useCallback(
+    (id: string) => {
+      router.push(`/dashboard/projects/${projectId}/tasks/${id}`);
+    },
+    [router, projectId]
+  );
+
+  // ---------------------------------------------------------------------
+  // 依存関係パネル -> バックエンド
+  // ---------------------------------------------------------------------
+
+  // 先行を追加: addDep(後続Id=選択中タスク, 先行Id=ピック)。
+  const handleAddPredecessor = useCallback(async () => {
+    if (!depTaskId || !pickPredId) return;
+    try {
+      await tasksApi.addDep(depTaskId, pickPredId);
+      setPickPredId('');
+      await fetchAll();
+    } catch (err) {
+      console.error('Failed to add dependency:', err);
+      await fetchAll();
+    }
+  }, [depTaskId, pickPredId, fetchAll]);
+
+  // 依存を削除: removeDep(dependency.id)。
+  const handleRemoveDep = useCallback(
     async (dependencyId: string) => {
       try {
         await tasksApi.removeDep(dependencyId);
@@ -160,6 +220,23 @@ export default function GanttPage() {
     },
     [fetchAll]
   );
+
+  // 選択中タスクを後続とする既存依存（先行リスト）。
+  const currentDeps = useMemo(
+    () => dependencies.filter((d) => d.successorId === depTaskId),
+    [dependencies, depTaskId]
+  );
+
+  // 先行候補: 自分・自分の子孫・既に先行になっているものを除外（循環/重複防止）。
+  const predecessorCandidates = useMemo(() => {
+    if (!depTaskId) return [];
+    const descendants = collectDescendantIds(tasks, depTaskId);
+    const already = new Set(currentDeps.map((d) => d.predecessorId));
+    return orderedTaskList.filter(
+      (t) =>
+        t.id !== depTaskId && !descendants.has(t.id) && !already.has(t.id)
+    );
+  }, [depTaskId, tasks, currentDeps, orderedTaskList]);
 
   // ---------------------------------------------------------------------
   // 描画
@@ -181,8 +258,8 @@ export default function GanttPage() {
             WBS / ガントチャート
           </span>
         }
-        description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗、バー間をつないで依存関係を編集できます（変更は即保存）"
-        help="左の WBS グリッドと右のタイムラインが同じ行で並びます。バーは開始日〜期限、塗りは進捗、親行は子の範囲をまとめたサマリーバーです。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、バー同士をつなぐと先行→後続の依存（矢印）が作成されます。すべて自動でサーバに保存されます。"
+        description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗を編集できます（変更は即保存）。依存関係は下の「依存関係」パネルで追加・削除します。"
+        help="左の WBS 一覧と右のタイムラインが同じ行で並びます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。先行→後続の依存（矢印）は下の依存関係パネルで編集できます。バーをクリックするとそのタスクの詳細へ移動します。"
         backHref={`/dashboard/projects/${projectId}/tasks`}
         backLabel="タスク管理に戻る"
         actions={
@@ -191,11 +268,10 @@ export default function GanttPage() {
               steps={[
                 'バー本体を左右にドラッグすると、開始日と期限がスライドして即保存されます。',
                 'バーの左右の端を掴んでドラッグすると、開始日／期限だけを伸縮できます。',
-                'バー上の進捗ハンドル（左下の丸）をドラッグすると進捗％が更新されます。',
-                'バーの端から別のバーへドラッグして離すと、先行→後続の依存関係（矢印）が作成されます。',
-                '依存線（矢印）をクリックして削除すると、依存関係が解除されます。',
-                '親（サマリー）行は子タスクの範囲を自動でまとめて表示します。',
-                '右上の「日 / 週」で目盛りの粒度を切り替えられます。',
+                'バー上の進捗ハンドル（バー右端の小さなつまみ）をドラッグすると進捗％が更新されます。',
+                'バー本体をクリックすると、そのタスクの詳細画面へ移動します。',
+                '依存関係（矢印）は下の「依存関係」パネルで、先行タスクを追加（＋）／削除（×）して編集します。',
+                '右上の「日 / 週 / 月」で目盛りの粒度を切り替えられます。',
               ]}
             />
             <Link href={`/dashboard/projects/${projectId}/tasks`}>
@@ -205,30 +281,21 @@ export default function GanttPage() {
               </Button>
             </Link>
             <div className="flex items-center rounded-md border border-gray-300 bg-white p-0.5">
-              <button
-                type="button"
-                onClick={() => setZoom('day')}
-                className={`flex items-center gap-1 rounded px-2.5 py-1 text-sm transition-colors ${
-                  zoom === 'day'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-                title="日表示（拡大）"
-              >
-                <ZoomIn className="h-3.5 w-3.5" />日
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoom('week')}
-                className={`flex items-center gap-1 rounded px-2.5 py-1 text-sm transition-colors ${
-                  zoom === 'week'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-                title="週表示（縮小）"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />週
-              </button>
+              {ZOOM_OPTIONS.map((opt) => (
+                <button
+                  key={opt.mode}
+                  type="button"
+                  onClick={() => setZoom(opt.mode)}
+                  className={`flex items-center gap-1 rounded px-2.5 py-1 text-sm transition-colors ${
+                    zoom === opt.mode
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title={opt.title}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
           </>
         }
@@ -252,21 +319,132 @@ export default function GanttPage() {
           </div>
         </Card>
       ) : (
-        <Card className="overflow-hidden border-gray-200 bg-white">
-          {/* SVAR Gantt（クライアント専用・SSR 無効） */}
-          <div className="gantt-host" style={{ height: '70vh', minHeight: 420 }}>
-            <SvarGantt
-              tasks={svarTasks}
-              links={svarLinks}
-              columns={GANTT_COLUMNS}
-              scaleMode={zoom}
-              cellHeight={ROW_HEIGHT}
-              onTaskCommit={handleTaskCommit}
-              onLinkCreate={handleLinkCreate}
-              onLinkDelete={handleLinkDelete}
-            />
-          </div>
-        </Card>
+        <>
+          <Card className="overflow-auto border-gray-200 bg-white">
+            {/* frappe-gantt（クライアント専用・SSR 無効） */}
+            <div className="gantt-host" style={{ minHeight: 420 }}>
+              <FrappeGantt
+                tasks={frappeTasks}
+                viewMode={VIEW_MODE_MAP[zoom]}
+                onDateChange={handleDateChange}
+                onProgressChange={handleProgressChange}
+                onClick={handleClick}
+              />
+            </div>
+          </Card>
+
+          {/* 依存関係パネル（frappe-gantt はドラッグでの依存作成に未対応のため） */}
+          <Card className="border-gray-200 bg-white p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-blue-600" />
+              <h2 className="text-base font-semibold text-gray-800">
+                依存関係
+              </h2>
+              <span className="text-xs text-gray-400">
+                タスクを選んで、その「先行」タスクを追加・削除します（先行→後続の矢印が引かれます）。
+              </span>
+            </div>
+
+            <div className="mb-4 max-w-md">
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                対象タスク（後続）
+              </label>
+              <Select value={depTaskId} onValueChange={setDepTaskId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="タスクを選択…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {orderedTaskList.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.wbs ? `${t.wbs} ${t.title}` : t.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {depTaskId ? (
+              <div className="space-y-4">
+                {/* 既存の先行リスト */}
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-gray-500">
+                    現在の先行タスク
+                  </p>
+                  {currentDeps.length === 0 ? (
+                    <p className="text-sm text-gray-400">
+                      先行タスクはありません
+                    </p>
+                  ) : (
+                    <ul className="flex flex-wrap gap-2">
+                      {currentDeps.map((d) => (
+                        <li
+                          key={d.id}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 py-1 pl-3 pr-1.5 text-sm text-blue-700"
+                        >
+                          <span>{taskLabel(d.predecessorId)}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDep(d.id)}
+                            className="flex h-5 w-5 items-center justify-center rounded-full text-blue-400 transition-colors hover:bg-blue-100 hover:text-blue-700"
+                            title="この依存を削除"
+                            aria-label="この依存を削除"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* 先行を追加 */}
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-gray-500">
+                    先行タスクを追加
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-[16rem] flex-1">
+                      <Select
+                        value={pickPredId}
+                        onValueChange={setPickPredId}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="先行にするタスクを選択…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {predecessorCandidates.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-gray-400">
+                              追加できるタスクがありません
+                            </div>
+                          ) : (
+                            predecessorCandidates.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.wbs ? `${t.wbs} ${t.title}` : t.title}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={handleAddPredecessor}
+                      disabled={!pickPredId}
+                      className="gap-1.5 bg-blue-600 hover:bg-blue-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      追加
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">
+                まずは上で対象タスクを選択してください。
+              </p>
+            )}
+          </Card>
+        </>
       )}
     </div>
   );
