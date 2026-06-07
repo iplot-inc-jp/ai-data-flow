@@ -102,6 +102,8 @@ model Project {
   recordSheets      RecordSheet[]
   flowFolders       FlowFolder[]
   tasks             Task[]
+  dfdDiagrams       DfdDiagram[]
+  reportTypes       ReportType[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -240,6 +242,8 @@ model BusinessFlow {
   // 他フローのノードからこのフローへ向かう入出力リンク
   nodeLinkTargets     FlowNodeLink[]           @relation("NodeLinkTargetFlow")
   definition          FlowDefinition?
+  dfd                 DfdDiagram?              @relation("FlowDfd")
+  dfdNodeRefs         DfdNode[]                @relation("DfdNodeRefFlow")
 
   @@map("business_flows")
 }
@@ -300,6 +304,7 @@ model FlowNode {
   links               FlowNodeLink[]           @relation("NodeLinks")
   // 他ノードのリンクがこのノードを参照しているもの
   linkTargets         FlowNodeLink[]           @relation("NodeLinkTargetNode")
+  dfdNodeRefs         DfdNode[]                @relation("DfdNodeRefNode")
 
   @@map("flow_nodes")
 }
@@ -911,9 +916,12 @@ model Attachment {
   order     Int            @default(0)
   createdAt DateTime       @default(now()) @map("created_at")
 
+  reportTypeId String?  @map("report_type_id")
+
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   phase   ProjectPhase? @relation(fields: [phaseId], references: [id], onDelete: Cascade)
   task    Task?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  reportType ReportType? @relation(fields: [reportTypeId], references: [id], onDelete: Cascade)
 
   @@map("attachments")
 }
@@ -1049,4 +1057,91 @@ model TaskDependency {
 
   @@unique([predecessorId, successorId])
   @@map("task_dependencies")
+}
+
+// ===========================================
+// DFD（データフロー図）
+// ===========================================
+
+enum DfdNodeKind {
+  FUNCTION
+  EXTERNAL_ENTITY
+  DATA_STORE
+}
+
+model DfdDiagram {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  flowId      String?  @unique @map("flow_id")
+  title       String?
+  docId       String?  @map("doc_id")
+  authorName  String?  @map("author_name")
+  approverName String? @map("approver_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  flow    BusinessFlow? @relation("FlowDfd", fields: [flowId], references: [id], onDelete: Cascade)
+  nodes   DfdNode[]
+  flows   DfdFlow[]
+
+  @@unique([projectId, flowId])
+  @@map("dfd_diagrams")
+}
+
+model DfdNode {
+  id         String      @id @default(uuid())
+  diagramId  String      @map("diagram_id")
+  kind       DfdNodeKind
+  label      String
+  number     String?
+  refFlowId  String?     @map("ref_flow_id")
+  refNodeId  String?     @map("ref_node_id")
+  positionX  Float       @default(0) @map("position_x")
+  positionY  Float       @default(0) @map("position_y")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+
+  diagram    DfdDiagram    @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  refFlow    BusinessFlow? @relation("DfdNodeRefFlow", fields: [refFlowId], references: [id], onDelete: SetNull)
+  refNode    FlowNode?     @relation("DfdNodeRefNode", fields: [refNodeId], references: [id], onDelete: SetNull)
+  outFlows   DfdFlow[]     @relation("DfdFlowSource")
+  inFlows    DfdFlow[]     @relation("DfdFlowTarget")
+
+  @@map("dfd_nodes")
+}
+
+model DfdFlow {
+  id           String   @id @default(uuid())
+  diagramId    String   @map("diagram_id")
+  sourceNodeId String   @map("source_node_id")
+  targetNodeId String   @map("target_node_id")
+  dataItem     String   @map("data_item")
+  reportTypeId String?  @map("report_type_id")
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  diagram    DfdDiagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  sourceNode DfdNode     @relation("DfdFlowSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode DfdNode     @relation("DfdFlowTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+  reportType ReportType? @relation(fields: [reportTypeId], references: [id], onDelete: SetNull)
+
+  @@map("dfd_flows")
+}
+
+model ReportType {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  name        String
+  description String?  @db.Text
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dfdFlows    DfdFlow[]
+  attachments Attachment[]
+
+  @@map("report_types")
 }
