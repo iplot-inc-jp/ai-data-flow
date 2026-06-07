@@ -21,3 +21,4 @@ export * from './task-comment.entity';
 export * from './dfd-diagram.entity';
 export * from './dfd-node.entity';
 export * from './dfd-flow.entity';
+export * from './report-type.entity';

@@ -25,6 +25,7 @@ import {
   TASK_REPOSITORY,
   TASK_COMMENT_REPOSITORY,
   DFD_REPOSITORY,
+  REPORT_TYPE_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -110,6 +111,11 @@ import {
   UpdateDfdFlowUseCase,
   DeleteDfdFlowUseCase,
   SaveDfdPositionsUseCase,
+  // ReportType
+  GetReportTypesUseCase,
+  CreateReportTypeUseCase,
+  UpdateReportTypeUseCase,
+  DeleteReportTypeUseCase,
 } from './application';
 
 // Infrastructure
@@ -134,6 +140,7 @@ import {
   TaskRepositoryImpl,
   TaskCommentRepositoryImpl,
   DfdRepositoryImpl,
+  ReportTypeRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -171,6 +178,10 @@ import { GithubConnectionController } from './presentation/controllers/github-co
 import { CodeCatalogController } from './presentation/controllers/code-catalog.controller';
 import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
 import { AttachmentController } from './presentation/controllers/attachment.controller';
+import {
+  ReportTypeController,
+  ReportTypeByIdController,
+} from './presentation/controllers/report-type.controller';
 import { SubProjectController } from './presentation/controllers/sub-project.controller';
 import { RecordSheetController } from './presentation/controllers/record-sheet.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
@@ -231,6 +242,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     SubProjectController,
     RecordSheetController,
     DfdController,
+    ReportTypeController,
+    ReportTypeByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -320,6 +333,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       provide: DFD_REPOSITORY,
       useClass: DfdRepositoryImpl,
     },
+    {
+      provide: REPORT_TYPE_REPOSITORY,
+      useClass: ReportTypeRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -401,6 +418,11 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     UpdateDfdFlowUseCase,
     DeleteDfdFlowUseCase,
     SaveDfdPositionsUseCase,
+    // ReportType
+    GetReportTypesUseCase,
+    CreateReportTypeUseCase,
+    UpdateReportTypeUseCase,
+    DeleteReportTypeUseCase,
 
     // ========== Services ==========
     ClaudeService,

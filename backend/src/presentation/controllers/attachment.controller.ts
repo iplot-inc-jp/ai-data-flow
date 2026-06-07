@@ -179,6 +179,70 @@ export class AttachmentController {
     });
   }
 
+  @Post('report-types/:reportTypeId/attachments')
+  @ApiOperation({ summary: '帳票種別に具体帳票ファイルをアップロード' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadToReportType(
+    @Param('reportTypeId') reportTypeId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new NotFoundException('No file uploaded');
+    }
+
+    const reportType = await this.prisma.reportType.findUnique({
+      where: { id: reportTypeId },
+    });
+    if (!reportType) {
+      throw new NotFoundException('ReportType not found');
+    }
+
+    const id = uuid();
+    const sanitized = sanitizeFilename(file.originalname);
+
+    // 保存先ディレクトリを保証
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    const diskPath = path.join(UPLOAD_DIR, `${id}-${sanitized}`);
+    fs.writeFileSync(diskPath, file.buffer);
+
+    const kind = file.mimetype.startsWith('image/')
+      ? 'IMAGE'
+      : file.mimetype === 'application/pdf'
+        ? 'PDF'
+        : 'FILE';
+
+    // 既存添付数を order の初期値に
+    const order = await this.prisma.attachment.count({
+      where: { reportTypeId },
+    });
+
+    const row = await this.prisma.attachment.create({
+      data: {
+        id,
+        projectId: reportType.projectId,
+        reportTypeId,
+        kind: kind as 'IMAGE' | 'PDF' | 'FILE',
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        url: `/api/attachments/${id}/file`,
+        size: file.size,
+        order,
+      },
+    });
+
+    return row;
+  }
+
+  @Get('report-types/:reportTypeId/attachments')
+  @ApiOperation({ summary: '帳票種別の具体帳票ファイル一覧を取得' })
+  async listForReportType(@Param('reportTypeId') reportTypeId: string) {
+    return this.prisma.attachment.findMany({
+      where: { reportTypeId },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
   @Public()
   @Get('attachments/:id/file')
   @ApiOperation({ summary: '添付ファイルの実体を配信（認証不要）' })
