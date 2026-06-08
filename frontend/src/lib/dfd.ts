@@ -11,6 +11,12 @@ export interface DfdFlow {
   dataItem: string; informationTypeId: string | null; order: number;
   /** 接続側（辺）。'top'|'right'|'bottom'|'left'。未保存なら null。 */
   sourceHandle?: string | null; targetHandle?: string | null;
+  /** 線の形状。'smoothstep'|'bezier'|'straight'。未保存なら null（既定は smoothstep）。 */
+  pathStyle?: string | null;
+  /** データ項目ラベルのパス上位置（0〜1）。未保存なら null（既定は 0.5）。 */
+  labelT?: number | null;
+  /** 情報チップのパス上位置（0〜1）。未保存なら null（既定は 0.5）。 */
+  infoT?: number | null;
 }
 export interface DfdDiagram {
   id: string; projectId: string; flowId: string | null;

@@ -8,11 +8,18 @@ import {
   ReactFlowProvider,
   Background,
   Controls,
+  Panel,
   Handle,
   Position,
+  BaseEdge,
+  EdgeLabelRenderer,
+  MarkerType,
+  getSmoothStepPath,
+  getBezierPath,
   type Node,
   type Edge,
   type NodeProps,
+  type EdgeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Button } from '@/components/ui/button';
@@ -44,6 +51,9 @@ import {
   ListChecks,
   Search,
   ExternalLink,
+  Unlink,
+  Spline,
+  Waypoints,
 } from 'lucide-react';
 import {
   parseIssueMarkdown,
@@ -410,6 +420,90 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
 const nodeTypes = { mind: MindNode };
 
 // ===========================================
+// カスタムエッジ（親→子の構造リンク）
+// ===========================================
+//
+// イシューツリーのエッジは「親→子」の構造リンクなので、Swimlane の
+// EditableEdge のような自由な付け替え・ラベル編集はあえて持たせない。
+// ここで足すのは編集に効く最小限だけ:
+//   1) 線のどこをクリックしても選択できる（interactionWidth を広く取る）
+//   2) 選択中のエッジは「親リンクを外す（＝子ノードをルート直下へ）」操作を出す。
+//      これは既存の PUT /nodes/:nodeId { parentId: null } を再利用する非破壊操作で、
+//      ノードや配下のサブツリーは削除しない（“切り離し”であって“削除”ではない）。
+//   3) 線の形（角ばり smoothstep / 曲線 bezier）は親側の状態でセッション内トグル。
+//      永続化フィールドが無いためサーバ保存はしない（見た目のみ）。
+
+type IssueEdgeShape = 'smoothstep' | 'bezier';
+
+type IssueEdgeData = {
+  shape: IssueEdgeShape;
+  /** 親リンクを外せるか（ルート直下のエッジは既に親なしなので不可）。 */
+  detachable: boolean;
+  /** 親リンクを外す（子ノードをルート直下へ移す＝デタッチ）。 */
+  onDetach?: (childNodeId: string) => void;
+  /** このエッジが指す子ノードID（デタッチ対象）。 */
+  childNodeId: string;
+};
+
+const IssueEdge = memo(function IssueEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  selected,
+  data,
+}: EdgeProps) {
+  const d = data as unknown as IssueEdgeData;
+  const params = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
+  const [edgePath, labelX, labelY] =
+    d.shape === 'bezier' ? getBezierPath(params) : getSmoothStepPath(params);
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        // 線が細くても掴みやすいよう、クリック判定の帯を広く取る（線のどこでも選択可能に）。
+        interactionWidth={28}
+        style={{
+          strokeWidth: selected ? 2.5 : 1.5,
+          stroke: selected ? '#6366f1' : '#cbd5e1',
+        }}
+      />
+      <EdgeLabelRenderer>
+        {/* 選択中のみ「親リンクを外す」ボタンをパス中点に出す。
+            ルート直下エッジ（detachable=false）は親が無いので出さない。 */}
+        {selected && d.detachable && d.onDetach && (
+          <button
+            type="button"
+            title="親リンクを外す（このノードをルート直下へ移動）"
+            onClick={(e) => {
+              e.stopPropagation();
+              d.onDetach?.(d.childNodeId);
+            }}
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`,
+              pointerEvents: 'all',
+            }}
+            className="nodrag nopan flex h-5 w-5 items-center justify-center rounded-full border border-indigo-400 bg-white text-indigo-600 shadow-sm transition-all hover:scale-110 hover:bg-indigo-50"
+          >
+            <Unlink className="h-3 w-3" />
+          </button>
+        )}
+      </EdgeLabelRenderer>
+    </>
+  );
+});
+
+const edgeTypes = { issue: IssueEdge };
+
+// ===========================================
 // ページ
 // ===========================================
 
@@ -428,6 +522,11 @@ function IssueTreeMindMap() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // 選択中のエッジ（親→子リンク）。Delete でデタッチ、選択中は外すボタンを出す。
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  // 線の形（角ばり / 曲線）。永続化フィールドが無いためセッション内のみ（見た目だけ）。
+  const [edgeShape, setEdgeShape] = useState<IssueEdgeShape>('smoothstep');
 
   // 取り込みダイアログ
   const [importOpen, setImportOpen] = useState(false);
@@ -683,6 +782,31 @@ function IssueTreeMindMap() {
     [treeId, getHeaders, fetchTree],
   );
 
+  // 親リンクを外す（＝子ノードをルート直下へ移す / デタッチ）。
+  // 既存の PUT /nodes/:nodeId { parentId: null } を再利用する非破壊操作。
+  // ノードや配下のサブツリーは消さない（“削除”ではなく“切り離し”）。
+  const detachNode = useCallback(
+    async (nodeId: string) => {
+      setBusy(true);
+      setActionError(null);
+      try {
+        const res = await fetch(`${API_URL}/api/issue-trees/${treeId}/nodes/${nodeId}`, {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify({ parentId: null }),
+        });
+        if (!res.ok) throw new Error('親リンクの解除に失敗しました');
+        setSelectedEdgeId(null);
+        await fetchTree();
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : '親リンクの解除に失敗しました');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [treeId, getHeaders, fetchTree],
+  );
+
   const saveName = useCallback(async () => {
     if (!tree) return;
     setEditingName(false);
@@ -845,21 +969,59 @@ function IssueTreeMindMap() {
       });
     }
 
-    const edges: Edge[] = backendNodes.map((n) => ({
-      id: `e-${n.parentId ?? ROOT_ID}-${n.id}`,
-      source: n.parentId ?? ROOT_ID,
-      target: n.id,
-      type: 'smoothstep',
-      style: { stroke: '#cbd5e1', strokeWidth: 1.5 },
-    }));
+    const edges: Edge[] = backendNodes.map((n) => {
+      const edgeId = `e-${n.parentId ?? ROOT_ID}-${n.id}`;
+      // ルート直下のノードは「仮想ルート」にぶら下がるだけで実際の親リンクは無い。
+      // よってデタッチ（親外し）はできない（既に親なし）。実ノード→実ノードのみ外せる。
+      const detachable = n.parentId != null;
+      return {
+        id: edgeId,
+        source: n.parentId ?? ROOT_ID,
+        target: n.id,
+        type: 'issue',
+        selected: edgeId === selectedEdgeId,
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8', width: 16, height: 16 },
+        data: {
+          shape: edgeShape,
+          detachable,
+          childNodeId: n.id,
+          onDetach: detachable ? detachNode : undefined,
+        } as unknown as Record<string, unknown>,
+      };
+    });
 
     return { rfNodes: nodes, rfEdges: edges };
-  }, [tree, selectedId, tasksByNode, addCause, addCountermeasure, openIdeate, deleteNode]);
+  }, [
+    tree,
+    selectedId,
+    selectedEdgeId,
+    edgeShape,
+    tasksByNode,
+    addCause,
+    addCountermeasure,
+    openIdeate,
+    deleteNode,
+    detachNode,
+  ]);
 
   const selectedNode = useMemo(
     () => (selectedId ? (tree?.nodes ?? []).find((n) => n.id === selectedId) ?? null : null),
     [selectedId, tree],
   );
+
+  // Delete / Backspace の対象を決める。
+  // エッジ選択中は「親リンクを外す」（非破壊・デタッチ）、ノード選択中はノード削除。
+  // エッジIDは UUID にハイフンを含むため文字列分割せず、rfEdges.data.childNodeId を引く。
+  const deleteSelected = useCallback(() => {
+    if (busy) return;
+    if (selectedEdgeId) {
+      const edge = rfEdges.find((e) => e.id === selectedEdgeId);
+      const ed = edge?.data as unknown as IssueEdgeData | undefined;
+      if (ed?.detachable && ed.childNodeId) detachNode(ed.childNodeId);
+      return;
+    }
+    if (selectedId) deleteNode(selectedId);
+  }, [busy, selectedEdgeId, rfEdges, selectedId, detachNode, deleteNode]);
 
   // キーボードショートカット
   // Shift+/（?） … 操作方法 / N … 論点を追加 / Delete・Backspace … 選択ノードを削除 /
@@ -877,15 +1039,11 @@ function IssueTreeMindMap() {
     },
     {
       combo: 'delete',
-      handler: () => {
-        if (selectedId && !busy) deleteNode(selectedId);
-      },
+      handler: () => deleteSelected(),
     },
     {
       combo: 'backspace',
-      handler: () => {
-        if (selectedId && !busy) deleteNode(selectedId);
-      },
+      handler: () => deleteSelected(),
     },
     {
       combo: 'mod+s',
@@ -989,11 +1147,13 @@ function IssueTreeMindMap() {
                 '原因ノードは検証マーク（○確定／×否定／△未確認／?要ヒアリング）で確からしさを記録します。',
                 '打ち手ノードは推奨（採用／保留／不採用）を設定して取捨選択します。',
                 '原因（なぜ）ノードからは「調査タスク」、打ち手ノードからは「実行タスク」を作成し、ノードに紐づけてタスク管理できます。紐づくタスクは右パネルに一覧表示されます。',
+                '親→子をつなぐ線（矢印）はどこをクリックしても選択できます。選択中の線の中点に出る「鎖を外す」ボタン（または Delete）で、その子ノードを親から切り離してルート直下へ移動できます（ノード自体は削除されません）。',
+                '右上の「角ばり / 曲線」で線の見た目を切り替えられます（表示のみ・保存はされません）。',
                 '「テキストから取り込み」でインデント箇条書きを一括投入できます（作成時向け）。',
               ]}
               shortcuts={[
                 { keys: 'N', desc: 'ルート直下に論点を追加' },
-                { keys: 'Delete / Backspace', desc: '選択中のノードを削除' },
+                { keys: 'Delete / Backspace', desc: '選択中のノードを削除 / 線を選択中なら親リンクを外す' },
                 { keys: '⌘/Ctrl+S', desc: '保存は自動（ブラウザ保存を抑止）' },
                 { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
               ]}
@@ -1038,7 +1198,12 @@ function IssueTreeMindMap() {
               nodes={rfNodes}
               edges={rfEdges}
               nodeTypes={nodeTypes}
-              onPaneClick={() => setSelectedId(null)}
+              edgeTypes={edgeTypes}
+              onPaneClick={() => {
+                setSelectedId(null);
+                setSelectedEdgeId(null);
+              }}
+              onEdgeClick={(_, edge) => setSelectedEdgeId(edge.id)}
               fitView
               fitViewOptions={{ padding: 0.2 }}
               minZoom={0.2}
@@ -1046,9 +1211,42 @@ function IssueTreeMindMap() {
               proOptions={{ hideAttribution: true }}
               nodesDraggable={false}
               nodesConnectable={false}
+              elementsSelectable
+              // 標準の Delete はノードまで巻き込むため無効化し、矢印の切り離しは自前で扱う。
+              deleteKeyCode={null}
             >
               <Background color="#e2e8f0" gap={20} />
               <Controls showInteractive={false} />
+              <Panel position="top-right" className="rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setEdgeShape('smoothstep')}
+                    title="線を角ばりにする"
+                    className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition ${
+                      edgeShape === 'smoothstep'
+                        ? 'bg-indigo-50 text-indigo-700'
+                        : 'text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Waypoints className="h-3.5 w-3.5" />
+                    角ばり
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEdgeShape('bezier')}
+                    title="線を曲線にする"
+                    className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition ${
+                      edgeShape === 'bezier'
+                        ? 'bg-indigo-50 text-indigo-700'
+                        : 'text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Spline className="h-3.5 w-3.5" />
+                    曲線
+                  </button>
+                </div>
+              </Panel>
             </ReactFlow>
           </CardContent>
         </Card>

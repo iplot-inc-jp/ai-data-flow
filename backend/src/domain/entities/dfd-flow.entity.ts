@@ -9,6 +9,9 @@ export interface CreateDfdFlowProps {
   targetHandle?: string | null;
   dataItem: string;
   informationTypeId?: string | null;
+  pathStyle?: string | null;
+  labelT?: number | null;
+  infoT?: number | null;
   order?: number;
 }
 
@@ -21,6 +24,9 @@ export interface ReconstructDfdFlowProps {
   targetHandle: string | null;
   dataItem: string;
   informationTypeId: string | null;
+  pathStyle: string | null;
+  labelT: number | null;
+  infoT: number | null;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -35,6 +41,9 @@ export class DfdFlow extends BaseEntity {
   private _targetHandle: string | null;
   private _dataItem: string;
   private _informationTypeId: string | null;
+  private _pathStyle: string | null;
+  private _labelT: number | null;
+  private _infoT: number | null;
   private _order: number;
 
   private constructor(
@@ -46,6 +55,9 @@ export class DfdFlow extends BaseEntity {
     targetHandle: string | null,
     dataItem: string,
     informationTypeId: string | null,
+    pathStyle: string | null,
+    labelT: number | null,
+    infoT: number | null,
     order: number,
     createdAt: Date,
     updatedAt: Date,
@@ -58,6 +70,9 @@ export class DfdFlow extends BaseEntity {
     this._targetHandle = targetHandle;
     this._dataItem = dataItem;
     this._informationTypeId = informationTypeId;
+    this._pathStyle = pathStyle;
+    this._labelT = labelT;
+    this._infoT = infoT;
     this._order = order;
   }
 
@@ -76,6 +91,9 @@ export class DfdFlow extends BaseEntity {
       props.targetHandle ?? null,
       props.dataItem ?? '',
       props.informationTypeId ?? null,
+      props.pathStyle ?? null,
+      props.labelT ?? null,
+      props.infoT ?? null,
       props.order ?? 0,
       now,
       now,
@@ -92,6 +110,9 @@ export class DfdFlow extends BaseEntity {
       props.targetHandle,
       props.dataItem,
       props.informationTypeId,
+      props.pathStyle,
+      props.labelT,
+      props.infoT,
       props.order,
       props.createdAt,
       props.updatedAt,
@@ -105,6 +126,21 @@ export class DfdFlow extends BaseEntity {
 
   updateInformationType(informationTypeId: string | null): void {
     this._informationTypeId = informationTypeId ?? null;
+    this.touch();
+  }
+
+  updatePathStyle(pathStyle: string | null): void {
+    this._pathStyle = pathStyle ?? null;
+    this.touch();
+  }
+
+  updateLabelT(labelT: number | null): void {
+    this._labelT = labelT ?? null;
+    this.touch();
+  }
+
+  updateInfoT(infoT: number | null): void {
+    this._infoT = infoT ?? null;
     this.touch();
   }
 
@@ -139,5 +175,8 @@ export class DfdFlow extends BaseEntity {
   get targetHandle(): string | null { return this._targetHandle; }
   get dataItem(): string { return this._dataItem; }
   get informationTypeId(): string | null { return this._informationTypeId; }
+  get pathStyle(): string | null { return this._pathStyle; }
+  get labelT(): number | null { return this._labelT; }
+  get infoT(): number | null { return this._infoT; }
   get order(): number { return this._order; }
 }

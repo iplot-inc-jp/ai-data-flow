@@ -21,6 +21,9 @@ export interface DfdFlowOutput {
   targetHandle: string | null;
   dataItem: string;
   informationTypeId: string | null;
+  pathStyle: string | null;
+  labelT: number | null;
+  infoT: number | null;
   order: number;
 }
 
@@ -59,6 +62,9 @@ export function toDfdFlowOutput(f: DfdFlow): DfdFlowOutput {
     targetHandle: f.targetHandle,
     dataItem: f.dataItem,
     informationTypeId: f.informationTypeId,
+    pathStyle: f.pathStyle,
+    labelT: f.labelT,
+    infoT: f.infoT,
     order: f.order,
   };
 }

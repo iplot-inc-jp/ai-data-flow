@@ -246,15 +246,93 @@ function normalizeType(t?: string): LayoutNodeType {
 }
 
 /**
- * order 昇順のユニーク値 → タイムライン列インデックス（0始まり）への写像を作る。
- * order が無いノードは 0 として扱う。安定性のため同値は入力順を保つ。
+ * 各ノード id → タイムライン列インデックス（0始まり, 連続整数）への写像を作る。
+ *
+ * 主軸は order（昇順）。ただし「同じ order を持つノードどうしがエッジで繋がっている」
+ * 場合は、それらを同一列に積み上げず、エッジの向き（依存関係）に沿って別々の列へ
+ * 展開する。これにより n1→n2→n1 のような小さな連鎖（循環含む）が、左端の 1 列に
+ * 重なって潰れる（screenshot のバグ）のを防ぎ、時間軸方向に展開される。
+ *
+ * 一方で「同じ order を持つがエッジで繋がっていない」ノード群（例: 同一セルに意図的に
+ * 積みたいノード）は同じ列のままにして、従来どおりクロス軸へ積み上げる。
+ *
+ * 安定性: order が無いノードは 0 として扱い、同値・非連結のタイブレークは入力順。
+ * 循環があっても例外を投げず決定的に列を割り当てる。
  */
-function buildTimelineIndex(inputNodes: LayoutInputNode[]): Map<number, number> {
-  const uniqueOrders = Array.from(
-    new Set(inputNodes.map((n) => n.order ?? 0)),
-  ).sort((a, b) => a - b);
-  const timelineIndexOf = new Map<number, number>();
-  uniqueOrders.forEach((o, i) => timelineIndexOf.set(o, i));
+function buildTimelineIndex(
+  inputNodes: LayoutInputNode[],
+  edges: LayoutInputEdge[],
+): Map<string, number> {
+  const idIndex = new Map<string, number>();
+  inputNodes.forEach((n, i) => idIndex.set(n.id, i));
+  const orderOf = (n: LayoutInputNode) =>
+    typeof n.order === 'number' && Number.isFinite(n.order) ? n.order : 0;
+
+  // order 値ごとにノードをグループ化する（グループ内は入力順を保持）。
+  // 各グループ内で、エッジ source→target を「左→右（時間が進む）」とみなして
+  // ノードを別々の列へ直列化する。同一 order でも連鎖は時間軸へ展開される。
+  const groups = new Map<number, LayoutInputNode[]>();
+  for (const n of inputNodes) {
+    const o = orderOf(n);
+    if (!groups.has(o)) groups.set(o, []);
+    groups.get(o)!.push(n);
+  }
+
+  const timelineIndexOf = new Map<string, number>();
+  let nextColumn = 0;
+  const orderedKeys = Array.from(groups.keys()).sort((a, b) => a - b);
+  for (const o of orderedKeys) {
+    const members = groups.get(o)!;
+    const memberIds = new Set(members.map((m) => m.id));
+
+    // グループ内に閉じた（source/target が両方このグループ内の）エッジだけ採用。
+    // 自己ループ・重複は無視。隣接リストは入力順で安定化する。
+    const adjacency = new Map<string, string[]>();
+    for (const m of members) adjacency.set(m.id, []);
+    const seenEdge = new Set<string>();
+    for (const e of edges) {
+      if (e.source === e.target) continue;
+      if (!memberIds.has(e.source) || !memberIds.has(e.target)) continue;
+      const k = `${e.source}->${e.target}`;
+      if (seenEdge.has(k)) continue;
+      seenEdge.add(k);
+      adjacency.get(e.source)!.push(e.target);
+    }
+    for (const list of Array.from(adjacency.values())) {
+      list.sort((a, b) => idIndex.get(a)! - idIndex.get(b)!);
+    }
+
+    // DFS でグループ内を「source→target = 時間が進む」順に直列化する。
+    // すでに列を割ったノードへ戻るエッジ（= 循環のバックエッジ）は無視して
+    // 列を確定するので、n1→n2→n1 のような循環も n1, n2 と右へ展開され、
+    // 左端 1 列に潰れない（screenshot のバグ）。エッジで繋がっていない同 order
+    // ノードは同じ列のまま（クロス軸に積み上げ → 従来挙動を維持）。
+    let col = nextColumn;
+    const assign = (id: string) => {
+      timelineIndexOf.set(id, col);
+      for (const next of adjacency.get(id) ?? []) {
+        if (!timelineIndexOf.has(next)) {
+          col += 1;
+          assign(next);
+        }
+      }
+    };
+    // 入力順で未割当ノードを起点に直列化（決定的）。連結成分ごとに
+    // nextColumn から開始するので、非連結ノードは同列で積み上がる。
+    for (const m of members) {
+      if (!timelineIndexOf.has(m.id)) {
+        col = nextColumn;
+        assign(m.id);
+      }
+    }
+    // 次の order グループは、このグループが使った最大列の右隣から始める。
+    let maxCol = nextColumn;
+    for (const m of members) {
+      maxCol = Math.max(maxCol, timelineIndexOf.get(m.id) ?? nextColumn);
+    }
+    nextColumn = maxCol + 1;
+  }
+
   return timelineIndexOf;
 }
 
@@ -307,8 +385,8 @@ export function computeFlowLayout(
   const resolveRoleId = (roleId?: string | null): string =>
     roleId && knownRoleIds.has(roleId) ? roleId : opt.unassignedLaneId;
 
-  // --- タイムライン軸（order 昇順）を算出 ---
-  const timelineIndexOf = buildTimelineIndex(inputNodes);
+  // --- タイムライン軸（order 昇順 + エッジによる同 order 連鎖の展開）を算出 ---
+  const timelineIndexOf = buildTimelineIndex(inputNodes, _inputEdges);
 
   // --- (timeline, レーン) セルへグルーピング ---
   type Cell = LayoutInputNode & {
@@ -325,7 +403,7 @@ export function computeFlowLayout(
     const rid = resolveRoleId(n.roleId);
     const laneIndex = laneIndexOf.get(rid)!;
     const orderValue = n.order ?? 0;
-    const timeline = timelineIndexOf.get(orderValue) ?? 0;
+    const timeline = timelineIndexOf.get(n.id) ?? 0;
     maxTimeline = Math.max(maxTimeline, timeline);
     const key = cellKey(timeline, laneIndex);
     if (!cells.has(key)) cells.set(key, []);

@@ -18,6 +18,9 @@ export interface AddDfdFlowInput {
   targetHandle?: string | null;
   dataItem?: string;
   informationTypeId?: string | null;
+  pathStyle?: string | null;
+  labelT?: number | null;
+  infoT?: number | null;
   order?: number;
 }
 
@@ -49,6 +52,9 @@ export class AddDfdFlowUseCase {
         targetHandle: input.targetHandle ?? null,
         dataItem: input.dataItem ?? '',
         informationTypeId: input.informationTypeId ?? null,
+        pathStyle: input.pathStyle ?? null,
+        labelT: input.labelT ?? null,
+        infoT: input.infoT ?? null,
         order: input.order ?? 0,
       },
       this.repo.generateId(),
@@ -63,6 +69,9 @@ export interface UpdateDfdFlowInput {
   id: string;
   dataItem?: string;
   informationTypeId?: string | null;
+  pathStyle?: string | null;
+  labelT?: number | null;
+  infoT?: number | null;
   sourceNodeId?: string;
   targetNodeId?: string;
   sourceHandle?: string | null;
@@ -86,6 +95,9 @@ export class UpdateDfdFlowUseCase {
     if (input.dataItem !== undefined) flow.updateDataItem(input.dataItem);
     if (input.informationTypeId !== undefined)
       flow.updateInformationType(input.informationTypeId);
+    if (input.pathStyle !== undefined) flow.updatePathStyle(input.pathStyle);
+    if (input.labelT !== undefined) flow.updateLabelT(input.labelT);
+    if (input.infoT !== undefined) flow.updateInfoT(input.infoT);
     if (input.sourceNodeId !== undefined || input.targetNodeId !== undefined) {
       flow.updateEndpoints(
         input.sourceNodeId ?? flow.sourceNodeId,
