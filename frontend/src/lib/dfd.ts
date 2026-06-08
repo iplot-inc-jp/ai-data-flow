@@ -9,6 +9,8 @@ export interface DfdNode {
 export interface DfdFlow {
   id: string; sourceNodeId: string; targetNodeId: string;
   dataItem: string; reportTypeId: string | null; order: number;
+  /** 接続側（辺）。'top'|'right'|'bottom'|'left'。未保存なら null。 */
+  sourceHandle?: string | null; targetHandle?: string | null;
 }
 export interface DfdDiagram {
   id: string; projectId: string; flowId: string | null;
@@ -98,12 +100,34 @@ export const dfdApi = {
     return res.json();
   },
   async deleteNode(id: string): Promise<void> { await fetch(`${API_URL}/api/dfd-nodes/${id}`, { method: 'DELETE', headers: headers() }); },
-  async addFlow(diagramId: string, body: { sourceNodeId: string; targetNodeId: string; dataItem: string }): Promise<DfdFlow> {
+  async addFlow(
+    diagramId: string,
+    body: {
+      sourceNodeId: string;
+      targetNodeId: string;
+      dataItem: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    },
+  ): Promise<DfdFlow> {
     const res = await fetch(`${API_URL}/api/dfd-diagrams/${diagramId}/flows`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error('データフロー追加に失敗しました');
     return res.json();
   },
-  async updateFlow(id: string, patch: Partial<DfdFlow>): Promise<DfdFlow> {
+  /**
+   * データフロー更新。dataItem/reportTypeId のラベル系編集に加えて、
+   * 端点ドラッグの付け替え（sourceNodeId/targetNodeId/sourceHandle/targetHandle）も送れる。
+   * PATCH /api/dfd-flows/:id。
+   */
+  async updateFlow(
+    id: string,
+    patch: Partial<DfdFlow> & {
+      sourceNodeId?: string;
+      targetNodeId?: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    },
+  ): Promise<DfdFlow> {
     const res = await fetch(`${API_URL}/api/dfd-flows/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(patch) });
     if (!res.ok) throw new Error('データフロー更新に失敗しました');
     return res.json();

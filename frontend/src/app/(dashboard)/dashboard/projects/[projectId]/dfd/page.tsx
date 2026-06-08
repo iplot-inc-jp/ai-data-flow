@@ -92,7 +92,13 @@ export default function ProjectDfdPage() {
   );
 
   const handleAddFlow = useCallback(
-    async (body: { sourceNodeId: string; targetNodeId: string; dataItem: string }) => {
+    async (body: {
+      sourceNodeId: string;
+      targetNodeId: string;
+      dataItem: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    }) => {
       if (!diagram) return;
       await dfdApi.addFlow(diagram.id, body);
       await load();
@@ -103,6 +109,29 @@ export default function ProjectDfdPage() {
   const handleUpdateFlow = useCallback(
     async (id: string, patch: Partial<DfdFlowModel>) => {
       await dfdApi.updateFlow(id, patch);
+      await load();
+    },
+    [load],
+  );
+
+  // データフロー再ルーティング（端点ドラッグで source/target ノード・接続側を付け替え）
+  // PATCH /api/dfd-flows/:id で sourceNodeId/targetNodeId/sourceHandle/targetHandle を更新 → 再取得。
+  const handleReconnectFlow = useCallback(
+    async (
+      flowId: string,
+      next: {
+        sourceNodeId: string;
+        targetNodeId: string;
+        sourceHandle?: string | null;
+        targetHandle?: string | null;
+      },
+    ) => {
+      await dfdApi.updateFlow(flowId, {
+        sourceNodeId: next.sourceNodeId,
+        targetNodeId: next.targetNodeId,
+        sourceHandle: next.sourceHandle ?? null,
+        targetHandle: next.targetHandle ?? null,
+      });
       await load();
     },
     [load],
@@ -245,6 +274,7 @@ export default function ProjectDfdPage() {
                 onDeleteNode={handleDeleteNode}
                 onAddFlow={handleAddFlow}
                 onUpdateFlow={handleUpdateFlow}
+                onReconnectFlow={handleReconnectFlow}
                 onDeleteFlow={handleDeleteFlow}
                 onSavePositions={handleSavePositions}
                 onRegenerate={handleRegenerate}

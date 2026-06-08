@@ -156,7 +156,13 @@ function DfdPanel({
   );
 
   const handleAddFlow = useCallback(
-    async (body: { sourceNodeId: string; targetNodeId: string; dataItem: string }) => {
+    async (body: {
+      sourceNodeId: string;
+      targetNodeId: string;
+      dataItem: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    }) => {
       if (!diagram) return;
       await dfdApi.addFlow(diagram.id, body);
       await load();
@@ -167,6 +173,29 @@ function DfdPanel({
   const handleUpdateFlow = useCallback(
     async (id: string, patch: Partial<DfdFlowModel>) => {
       await dfdApi.updateFlow(id, patch);
+      await load();
+    },
+    [load],
+  );
+
+  // データフロー再ルーティング（端点ドラッグで source/target ノード・接続側を付け替え）
+  // PATCH /api/dfd-flows/:id で sourceNodeId/targetNodeId/sourceHandle/targetHandle を更新 → 再取得。
+  const handleReconnectFlow = useCallback(
+    async (
+      dfdFlowId: string,
+      next: {
+        sourceNodeId: string;
+        targetNodeId: string;
+        sourceHandle?: string | null;
+        targetHandle?: string | null;
+      },
+    ) => {
+      await dfdApi.updateFlow(dfdFlowId, {
+        sourceNodeId: next.sourceNodeId,
+        targetNodeId: next.targetNodeId,
+        sourceHandle: next.sourceHandle ?? null,
+        targetHandle: next.targetHandle ?? null,
+      });
       await load();
     },
     [load],
@@ -296,6 +325,7 @@ function DfdPanel({
                 onDeleteNode={handleDeleteNode}
                 onAddFlow={handleAddFlow}
                 onUpdateFlow={handleUpdateFlow}
+                onReconnectFlow={handleReconnectFlow}
                 onDeleteFlow={handleDeleteFlow}
                 onSavePositions={handleSavePositions}
                 onRegenerate={handleRegenerate}

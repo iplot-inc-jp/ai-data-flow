@@ -75,9 +75,33 @@ export interface DfdCanvasProps {
   /** ノード追加（外部実体/データストア）。 */
   onAddNode?: (body: Partial<DfdNodeModel> & { kind: DfdNodeKind; label: string }) => void | Promise<void>;
   onDeleteNode?: (id: string) => void | Promise<void>;
-  /** データフロー追加（接続）。 */
-  onAddFlow?: (body: { sourceNodeId: string; targetNodeId: string; dataItem: string }) => void | Promise<void>;
+  /**
+   * データフロー追加（接続）。
+   * ドラッグで使ったハンドル側（'top'|'right'|'bottom'|'left'）を
+   * sourceHandle/targetHandle として渡す。呼び出し側は create body に含める。
+   */
+  onAddFlow?: (body: {
+    sourceNodeId: string;
+    targetNodeId: string;
+    dataItem: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  }) => void | Promise<void>;
   onUpdateFlow?: (id: string, patch: Partial<DfdFlowModel>) => void | Promise<void>;
+  /**
+   * 既存データフローの端点をドラッグで付け替える（再ルーティング）。
+   * React Flow v12 の onReconnect から呼ばれ、新しい source/target ノードとハンドル側を渡す。
+   * 呼び出し側は PATCH /api/dfd-flows/:id で永続化する。
+   */
+  onReconnectFlow?: (
+    flowId: string,
+    next: {
+      sourceNodeId: string;
+      targetNodeId: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    },
+  ) => void | Promise<void>;
   onDeleteFlow?: (id: string) => void | Promise<void>;
   /** ノード位置の一括保存（ドラッグ完了で呼ぶ）。 */
   onSavePositions?: (positions: { id: string; positionX: number; positionY: number }[]) => void | Promise<void>;
@@ -100,11 +124,52 @@ type DfdNodeData = {
   hasRefFlow: boolean;
 };
 
+// 4辺の接続ハンドル定義。ConnectionMode.Loose 下では各ハンドルが source/target 両用。
+// id は安定値（'top'|'right'|'bottom'|'left'）で、保存された接続側の復元に使う。
+const HANDLE_SIDES: Array<{ id: string; position: Position }> = [
+  { id: 'top', position: Position.Top },
+  { id: 'right', position: Position.Right },
+  { id: 'bottom', position: Position.Bottom },
+  { id: 'left', position: Position.Left },
+];
+
+/**
+ * 4辺の接続ハンドル（source/target 兼用）。
+ * - source/target を同位置に重ね、見た目は source 側のドットのみ表示する。
+ * - ノード本体のドラッグを邪魔しないよう nodrag を付与。
+ * - 矢印を任意の辺へ付け替え／任意の辺から接続できるようにする。
+ */
+function SideHandles({ color }: { color: string }) {
+  return (
+    <>
+      {HANDLE_SIDES.map((h) => (
+        <Handle
+          key={`s-${h.id}`}
+          type="source"
+          id={h.id}
+          position={h.position}
+          className="nodrag !w-2 !h-2 !min-w-0 !min-h-0 !border !border-white opacity-50 transition-opacity"
+          style={{ backgroundColor: color }}
+        />
+      ))}
+      {HANDLE_SIDES.map((h) => (
+        <Handle
+          key={`t-${h.id}`}
+          type="target"
+          id={h.id}
+          position={h.position}
+          className="nodrag !w-2 !h-2 !min-w-0 !min-h-0 !bg-transparent !border-0"
+        />
+      ))}
+    </>
+  );
+}
+
 /** FUNCTION = 楕円（navy枠 / 番号＋label）。 */
 function FunctionNode({ data, selected }: { data: DfdNodeData; selected?: boolean }) {
   return (
     <div
-      className="w-full h-full flex flex-col items-center justify-center text-center px-3 transition-all"
+      className="group/node w-full h-full flex flex-col items-center justify-center text-center px-3 transition-all"
       style={{
         borderRadius: '50%',
         border: `2.5px solid ${NAVY}`,
@@ -113,16 +178,13 @@ function FunctionNode({ data, selected }: { data: DfdNodeData; selected?: boolea
         boxShadow: selected ? `0 0 0 3px ${BLUE}55` : '0 1px 2px rgba(0,0,0,0.06)',
       }}
     >
-      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-slate-400" />
-      <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-slate-400" />
+      <SideHandles color="#94a3b8" />
       {data.number && (
         <div className="text-[11px] font-bold leading-none mb-0.5" style={{ color: BLUE }}>
           {data.number}
         </div>
       )}
       <div className="font-semibold text-[13px] leading-tight line-clamp-2">{data.label}</div>
-      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-slate-400" />
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-slate-400" />
     </div>
   );
 }
@@ -131,7 +193,7 @@ function FunctionNode({ data, selected }: { data: DfdNodeData; selected?: boolea
 function ExternalNode({ data, selected }: { data: DfdNodeData; selected?: boolean }) {
   return (
     <div
-      className="w-full h-full flex items-center justify-center text-center px-3 rounded-sm transition-all"
+      className="group/node w-full h-full flex items-center justify-center text-center px-3 rounded-sm transition-all"
       style={{
         border: `2.5px solid ${SLATE}`,
         backgroundColor: '#f1f5f9',
@@ -139,11 +201,8 @@ function ExternalNode({ data, selected }: { data: DfdNodeData; selected?: boolea
         boxShadow: selected ? `0 0 0 3px ${BLUE}55` : '0 1px 2px rgba(0,0,0,0.06)',
       }}
     >
-      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-slate-400" />
-      <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-slate-400" />
+      <SideHandles color="#94a3b8" />
       <div className="font-medium text-[13px] leading-tight line-clamp-2">{data.label}</div>
-      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-slate-400" />
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-slate-400" />
     </div>
   );
 }
@@ -152,7 +211,7 @@ function ExternalNode({ data, selected }: { data: DfdNodeData; selected?: boolea
 function DataStoreNode({ data, selected }: { data: DfdNodeData; selected?: boolean }) {
   return (
     <div
-      className="w-full h-full flex items-center justify-center text-center px-3 transition-all"
+      className="group/node w-full h-full flex items-center justify-center text-center px-3 transition-all"
       style={{
         borderTop: `2.5px solid ${EMERALD}`,
         borderBottom: `2.5px solid ${EMERALD}`,
@@ -161,11 +220,8 @@ function DataStoreNode({ data, selected }: { data: DfdNodeData; selected?: boole
         boxShadow: selected ? `0 0 0 3px ${BLUE}55` : 'none',
       }}
     >
-      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-emerald-400" />
-      <Handle type="target" position={Position.Top} id="t-top" className="!w-2 !h-2 !bg-emerald-400" />
+      <SideHandles color="#34d399" />
       <div className="font-medium text-[13px] leading-tight line-clamp-2">{data.label}</div>
-      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-emerald-400" />
-      <Handle type="source" position={Position.Bottom} id="s-bottom" className="!w-2 !h-2 !bg-emerald-400" />
     </div>
   );
 }
@@ -363,9 +419,15 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           id: f.id,
           source: f.sourceNodeId,
           target: f.targetNodeId,
+          // 保存された接続側（辺）を描画に反映する。未保存(null/undefined)なら
+          // React Flow が向き既定（Loose）でハンドルを自動選択する。
+          sourceHandle: f.sourceHandle ?? undefined,
+          targetHandle: f.targetHandle ?? undefined,
           label: f.dataItem,
           type: 'dataflow',
           selected: f.id === selectedEdgeId,
+          // 端点ドラッグで付け替え可能にする（onReconnect が発火する）。
+          reconnectable: !!props.onReconnectFlow,
           markerEnd: { type: MarkerType.ArrowClosed, color: SLATE, width: 18, height: 18 },
           data: {
             reportName: f.reportTypeId ? (rt?.name ?? '帳票') : null,
@@ -385,8 +447,32 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   const onConnect = useCallback(
     (c: Connection) => {
       if (c.source && c.target && c.source !== c.target) {
-        void props.onAddFlow?.({ sourceNodeId: c.source, targetNodeId: c.target, dataItem: '情報' });
+        // ドラッグで使った辺（ハンドル）を保存する。
+        void props.onAddFlow?.({
+          sourceNodeId: c.source,
+          targetNodeId: c.target,
+          dataItem: '情報',
+          sourceHandle: c.sourceHandle ?? null,
+          targetHandle: c.targetHandle ?? null,
+        });
       }
+    },
+    [props],
+  );
+
+  // --- エッジ端点ドラッグで付け替え（再ルーティング） ---
+  // React Flow v12 の onReconnect(oldEdge, newConnection)。
+  // 新しい source/target ノードとハンドル側を PATCH で永続化する（呼び出し側に委譲）。
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      if (!newConnection.source || !newConnection.target) return;
+      if (newConnection.source === newConnection.target) return;
+      void props.onReconnectFlow?.(oldEdge.id, {
+        sourceNodeId: newConnection.source,
+        targetNodeId: newConnection.target,
+        sourceHandle: newConnection.sourceHandle ?? null,
+        targetHandle: newConnection.targetHandle ?? null,
+      });
     },
     [props],
   );
@@ -498,6 +584,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onConnect={onConnect}
+          onReconnect={onReconnect}
           onNodesChange={onNodesChange}
           nodesDraggable
           nodesConnectable
@@ -674,7 +761,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
       {/* 帳票フッタ */}
       <div className="border-t-2 px-4 py-1 flex items-center justify-between text-[10px] text-gray-400" style={{ borderColor: NAVY }}>
         <span>処理 {numberedNodes.filter((n) => n.kind === 'FUNCTION').length} ／ 外部実体 {numberedNodes.filter((n) => n.kind === 'EXTERNAL_ENTITY').length} ／ データストア {numberedNodes.filter((n) => n.kind === 'DATA_STORE').length} ／ データフロー {diagram.flows.length}</span>
-        <span>ノードはドラッグで配置（位置は保存されます）｜ ハンドルから接続でデータフロー追加 ｜ 矢印をWクリックでデータ項目編集</span>
+        <span>ノードはドラッグで配置（位置は保存されます）｜ 4辺のハンドルから接続でデータフロー追加 ｜ 矢印の端点をドラッグで付け替え ｜ 矢印をWクリックでデータ項目編集</span>
       </div>
     </div>
   );
