@@ -45,6 +45,8 @@ class UpdateNodeDto {
 class AddFlowDto {
   @IsString() sourceNodeId!: string;
   @IsString() targetNodeId!: string;
+  @IsOptional() @IsString() sourceHandle?: string | null;
+  @IsOptional() @IsString() targetHandle?: string | null;
   @IsOptional() @IsString() dataItem?: string;
   @IsOptional() @IsString() reportTypeId?: string | null;
   @IsOptional() @IsNumber() order?: number;
@@ -55,6 +57,8 @@ class UpdateFlowDto {
   @IsOptional() @IsString() reportTypeId?: string | null;
   @IsOptional() @IsString() sourceNodeId?: string;
   @IsOptional() @IsString() targetNodeId?: string;
+  @IsOptional() @IsString() sourceHandle?: string | null;
+  @IsOptional() @IsString() targetHandle?: string | null;
   @IsOptional() @IsNumber() order?: number;
 }
 

@@ -38,6 +38,8 @@ interface FlowRow {
   diagramId: string;
   sourceNodeId: string;
   targetNodeId: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
   dataItem: string;
   reportTypeId: string | null;
   order: number;
@@ -85,6 +87,8 @@ export class DfdRepositoryImpl implements IDfdRepository {
       diagramId: r.diagramId,
       sourceNodeId: r.sourceNodeId,
       targetNodeId: r.targetNodeId,
+      sourceHandle: r.sourceHandle,
+      targetHandle: r.targetHandle,
       dataItem: r.dataItem,
       reportTypeId: r.reportTypeId,
       order: r.order,
@@ -224,6 +228,8 @@ export class DfdRepositoryImpl implements IDfdRepository {
       diagramId: f.diagramId,
       sourceNodeId: f.sourceNodeId,
       targetNodeId: f.targetNodeId,
+      sourceHandle: f.sourceHandle,
+      targetHandle: f.targetHandle,
       dataItem: f.dataItem,
       reportTypeId: f.reportTypeId,
       order: f.order,

@@ -1120,6 +1120,8 @@ model DfdFlow {
   diagramId    String   @map("diagram_id")
   sourceNodeId String   @map("source_node_id")
   targetNodeId String   @map("target_node_id")
+  sourceHandle String?  @map("source_handle")
+  targetHandle String?  @map("target_handle")
   dataItem     String   @map("data_item")
   reportTypeId String?  @map("report_type_id")
   order        Int      @default(0)

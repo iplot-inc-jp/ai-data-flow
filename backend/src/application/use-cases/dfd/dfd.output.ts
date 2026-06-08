@@ -17,6 +17,8 @@ export interface DfdFlowOutput {
   id: string;
   sourceNodeId: string;
   targetNodeId: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
   dataItem: string;
   reportTypeId: string | null;
   order: number;
@@ -53,6 +55,8 @@ export function toDfdFlowOutput(f: DfdFlow): DfdFlowOutput {
     id: f.id,
     sourceNodeId: f.sourceNodeId,
     targetNodeId: f.targetNodeId,
+    sourceHandle: f.sourceHandle,
+    targetHandle: f.targetHandle,
     dataItem: f.dataItem,
     reportTypeId: f.reportTypeId,
     order: f.order,

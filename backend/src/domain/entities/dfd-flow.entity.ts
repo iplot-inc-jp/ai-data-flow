@@ -5,6 +5,8 @@ export interface CreateDfdFlowProps {
   diagramId: string;
   sourceNodeId: string;
   targetNodeId: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
   dataItem: string;
   reportTypeId?: string | null;
   order?: number;
@@ -15,6 +17,8 @@ export interface ReconstructDfdFlowProps {
   diagramId: string;
   sourceNodeId: string;
   targetNodeId: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
   dataItem: string;
   reportTypeId: string | null;
   order: number;
@@ -27,6 +31,8 @@ export class DfdFlow extends BaseEntity {
   private readonly _diagramId: string;
   private _sourceNodeId: string;
   private _targetNodeId: string;
+  private _sourceHandle: string | null;
+  private _targetHandle: string | null;
   private _dataItem: string;
   private _reportTypeId: string | null;
   private _order: number;
@@ -36,6 +42,8 @@ export class DfdFlow extends BaseEntity {
     diagramId: string,
     sourceNodeId: string,
     targetNodeId: string,
+    sourceHandle: string | null,
+    targetHandle: string | null,
     dataItem: string,
     reportTypeId: string | null,
     order: number,
@@ -46,6 +54,8 @@ export class DfdFlow extends BaseEntity {
     this._diagramId = diagramId;
     this._sourceNodeId = sourceNodeId;
     this._targetNodeId = targetNodeId;
+    this._sourceHandle = sourceHandle;
+    this._targetHandle = targetHandle;
     this._dataItem = dataItem;
     this._reportTypeId = reportTypeId;
     this._order = order;
@@ -62,6 +72,8 @@ export class DfdFlow extends BaseEntity {
       props.diagramId,
       props.sourceNodeId,
       props.targetNodeId,
+      props.sourceHandle ?? null,
+      props.targetHandle ?? null,
       props.dataItem ?? '',
       props.reportTypeId ?? null,
       props.order ?? 0,
@@ -76,6 +88,8 @@ export class DfdFlow extends BaseEntity {
       props.diagramId,
       props.sourceNodeId,
       props.targetNodeId,
+      props.sourceHandle,
+      props.targetHandle,
       props.dataItem,
       props.reportTypeId,
       props.order,
@@ -103,6 +117,16 @@ export class DfdFlow extends BaseEntity {
     this.touch();
   }
 
+  updateSourceHandle(sourceHandle: string | null): void {
+    this._sourceHandle = sourceHandle ?? null;
+    this.touch();
+  }
+
+  updateTargetHandle(targetHandle: string | null): void {
+    this._targetHandle = targetHandle ?? null;
+    this.touch();
+  }
+
   updateOrder(order: number): void {
     this._order = order;
     this.touch();
@@ -111,6 +135,8 @@ export class DfdFlow extends BaseEntity {
   get diagramId(): string { return this._diagramId; }
   get sourceNodeId(): string { return this._sourceNodeId; }
   get targetNodeId(): string { return this._targetNodeId; }
+  get sourceHandle(): string | null { return this._sourceHandle; }
+  get targetHandle(): string | null { return this._targetHandle; }
   get dataItem(): string { return this._dataItem; }
   get reportTypeId(): string | null { return this._reportTypeId; }
   get order(): number { return this._order; }

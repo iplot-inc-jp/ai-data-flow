@@ -14,6 +14,8 @@ export interface AddDfdFlowInput {
   diagramId: string;
   sourceNodeId: string;
   targetNodeId: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
   dataItem?: string;
   reportTypeId?: string | null;
   order?: number;
@@ -43,6 +45,8 @@ export class AddDfdFlowUseCase {
         diagramId: input.diagramId,
         sourceNodeId: input.sourceNodeId,
         targetNodeId: input.targetNodeId,
+        sourceHandle: input.sourceHandle ?? null,
+        targetHandle: input.targetHandle ?? null,
         dataItem: input.dataItem ?? '',
         reportTypeId: input.reportTypeId ?? null,
         order: input.order ?? 0,
@@ -61,6 +65,8 @@ export interface UpdateDfdFlowInput {
   reportTypeId?: string | null;
   sourceNodeId?: string;
   targetNodeId?: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
   order?: number;
 }
 
@@ -85,6 +91,8 @@ export class UpdateDfdFlowUseCase {
         input.targetNodeId ?? flow.targetNodeId,
       );
     }
+    if (input.sourceHandle !== undefined) flow.updateSourceHandle(input.sourceHandle);
+    if (input.targetHandle !== undefined) flow.updateTargetHandle(input.targetHandle);
     if (input.order !== undefined) flow.updateOrder(input.order);
     await this.repo.saveFlow(flow);
     return toDfdFlowOutput(flow);
