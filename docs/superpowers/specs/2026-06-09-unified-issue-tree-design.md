@@ -1,87 +1,81 @@
-# 統合イシューツリー（課題→なぜ→打ち手を1本で）設計
+# 方法論ツリー（イシュー/Why/対象分割/打ち手/調査）設計 — 改訂版
 
-- 日付: 2026-06-09
+- 日付: 2026-06-09（改訂）
 - ブランチ: feat/methodology-pipeline
-- 状態: 設計合意済み（実装は走行中ワークフロー wg0prtcds 完了後に着手）
+- 状態: 設計合意済み（実装着手）。本書は初版「型廃止・3種別統合」を**全面上書き**。
 
-## 背景・課題
+## 背景
 
-現在のイシューツリーは作成時に **型（WHY=なぜ型 / SOLUTION=打ち手型）** を必須選択させ、なぜ掘り下げの木と打ち手の木を別々に作る。しかし実務では「なぜ？で根本原因を掘り下げ、確定した原因にそのまま打ち手をぶら下げる」流れが普通で、1本のツリーに**なぜも打ち手も混在**するのが自然。さらに現状、作成ダイアログから作成すると「エラーが発生しました」になり作成自体ができない。
+教材 `~/iplot-hp/shanai_kyoiku/イシューツリー/編集用/03_ツリーパターン早見表.md` では用途別に複数のツリー型が定義されているが、イシューツリー/Whyツリー/調査ツリーの関係が混在している。これを整理し、ツールで「型をテンプレ選択 + ノード種別は混在可・強制しない」形で扱えるようにする。あわせて現状の作成エラーを解消する。
 
-スキーマは既に統合に必要な要素を備えている（後述）。よって新規テーブルは不要で、**UI/UX とノード種別運用の再設計**が中心。
+## ツリーパターン（作成時に選ぶテンプレ）
 
-## ゴール
+1. **イシューツリー（論点・調査）** — 課題→**論点(疑問形)** にMECE分解（**論点はサブ論点・サブサブ論点へ再帰分解可**）→各論点に**仮説**→各仮説に**検証(アクション)**→末端に**検証結果(○×△＋結果メモ)**。発散→収束で結論。（教材の「論点ツリー＝調査ツリー＋仮説検証」を統合）
+2. **Whyツリー（原因究明）** — 課題→なぜ?(CAUSE 再帰)→根本原因。○×△検証。
+3. **Whatツリー（対象分割）** — 対象→構成要素(ELEMENT 再帰)。単純（仕掛けなし）。
+4. **Howツリー（打ち手・発散）** — 課題→解決候補(OPTION 再帰)。採用/保留/不採用。
+5. **MECEアクションツリー（打ち手・網羅）** — ゴール→「ために」→行動(ACTION 再帰)。タスク化。
+6. **KPIツリー** — KPI→構成KPI(METRIC 再帰)。数値。
 
-- 作成時の「型」選択を廃止し、**常に1本の統合ツリー**を作る。
-- ノード種別 `kind`（ISSUE/CAUSE/COUNTERMEASURE）で「課題 / なぜ・原因 / 打ち手」を表現し、**種別連動のガイド付き**で作り進める。
-- 方法論（課題→なぜ→確定原因→打ち手）を **ガイドするが強制はしない**。
-- 現状の作成エラーを解消する。
+- すべて「開始テンプレ」。**ノード種別は混在可・配置は強制しない**（種別は後から変更可）。
+- **GAP起点で How / MECEアクション を直接作成可**（＝なぜ無しで打ち手から）。GapItem.issueTreeId リンク維持。
 
-## 非ゴール（YAGNI）
+## ノード種別（kind）と仕掛け
 
-- WHY/SOLUTION の2画面運用・別ツリー間リンク（rootCauseNodeId）の新規活用はしない。
-- ノード文法のハード強制（種別ごとの配置制限のバリデーション）はしない。
-- スキーマ破壊的変更（型列の削除等）はしない。
+既存 `IssueNodeKind`(ISSUE/CAUSE/COUNTERMEASURE) を拡張:
+- `ISSUE` 課題/ゴール/対象（汎用ルート） / `POINT` 論点(疑問形・再帰) / `HYPOTHESIS` 仮説 / `VERIFICATION` 検証アクション / `RESULT` 検証結果
+- `CAUSE` 原因(なぜ・再帰。○確定で根本原因扱い)
+- `ELEMENT` 構成要素(What) / `OPTION` 解決候補(How) / `ACTION` 行動(MECE) / `METRIC` KPI
+- 互換: 既存 `COUNTERMEASURE` は残置（OPTION相当として表示）。
+- 仕掛け（種別連動・強制しない）:
+  - `CAUSE`/`POINT`/`HYPOTHESIS`/`VERIFICATION`/`RESULT` → ○CONFIRMED/×REJECTED/△UNKNOWN/要ヒアリング の `verification` ＋ 根拠/結果メモ(evidence)
+  - `OPTION`/`COUNTERMEASURE` → `recommendation` 採用/保留/不採用
+  - `ACTION` → タスク化(Task.issueNodeId)
+  - `METRIC` → 数値(metadata 値)
+  - 種別ごとに色分け（ISSUE/POINT=ネイビー系、CAUSE=アンバー、OPTION/ACTION=エメラルド、HYPOTHESIS=紫、VERIFICATION/RESULT=シアン、ELEMENT=グレー、METRIC=青）
 
-## データモデル（既存を活用・新規テーブルなし）
+## 種別連動ガイド（強制しない）
 
-- `IssueTree.type`(WHY/SOLUTION): **UI から外す**。DB互換のため列は残置（既定 WHY）。一覧・作成で type による分類/選択をやめる。
-- `IssueNode.kind`: **ISSUE(課題) / CAUSE(なぜ・原因) / COUNTERMEASURE(打ち手)** が主役。
-- `IssueNode.verification`(○CONFIRMED/×REJECTED/△UNKNOWN/NEEDS_HEARING/NA) + `evidence`: CAUSE で使用。
-- `IssueNode.recommendation`(ADOPT採用/HOLD保留/REJECT不採用/NA): COUNTERMEASURE で使用。
-- `IssueNode.rootCauseNodeId`: 1本に統合するため新規では使わない（打ち手は確定原因の親子で表現）。列は残置。
-- `IssueTree.gapItems` / `GapItem.issueTreeId`: GAP起点リンクは維持。
+選択ノードの kind に応じた追加ボタン:
+- イシュー(ISSUE)→「論点を追加」(POINT) /（任意で他種別も）
+- 論点(POINT)→「サブ論点を追加」(POINT 再帰) / 「仮説を追加」(HYPOTHESIS)
+- 仮説(HYPOTHESIS)→「検証を追加」(VERIFICATION)
+- 検証(VERIFICATION)→「検証結果を追加」(RESULT, ○×△)
+- Why: ISSUE→「なぜ?」(CAUSE)→さらに「なぜ?」(CAUSE 再帰)
+- What: 「構成要素を追加」(ELEMENT 再帰)
+- How: 「打ち手候補を追加」(OPTION 再帰)
+- MECE: 「『ために』で行動を追加」(ACTION 再帰)
+- KPI: 「子KPIを追加」(METRIC 再帰)
+- どのノードも種別を後から変更可。配置の強制バリデーションはしない。
 
-## 作成フロー（型なし）
+## 発散→収束（イシューツリー）
 
-作成ダイアログ項目:
-1. ツリー名（必須）
-2. ルートの問い（任意）
-3. GAP起点（任意・既存どおり）
+- 発散: 課題→論点(再帰)→仮説→検証。
+- 収束: 検証結果(RESULT, ○×△＋結果)が上位の論点へロールアップ表示 → 最初の課題(イシュー)に結論が組み上がる。論点ノードは配下の RESULT を集約した判定を表示（○が揃う/×がある等）。ルートに「結論」テキスト。
+- 同一ツリー内（1本）で発散も収束も完結（ユーザー選択）。
 
-挙動:
-- 作成時に **ルートノードを `kind=ISSUE` で自動生成**（ラベル = ルートの問い、空ならツリー名）。
-- バックエンドへ送る `type` は廃止（または常に WHY 固定で送る）。**現状の作成エラーの根本原因を実装時に特定して除去**（型必須バリデーション or ルートノード生成不整合の疑い）。
+## データモデル（要 db push）
 
-## 作り進め方（種別連動ガイド）＋ ノード文法
+- `IssueNodeKind` enum を上記 kind に拡張（既存値は残置）。
+- `IssueTree` に `pattern` 列追加（ISSUE_POINT/WHY/WHAT/HOW/MECE_ACTION/KPI）。旧 `type`(WHY/SOLUTION) は互換残置・UI から外す。
+- `RESULT`/`METRIC` の値は既存 `verification`/`evidence`/`metadata` で表現（新規列は最小限）。
+- 既存ツリーは壊さず（kind 既定 + 表示で吸収）。
 
-ノード選択時、その `kind` に応じた追加アクションを出す:
+## 作成フロー（型→パターン）
 
-- **ISSUE 選択** → 「なぜ？（原因を追加）」= CAUSE 子生成 / 「打ち手を追加」= COUNTERMEASURE 子生成（飛ばしも可）
-- **CAUSE 選択** → 「さらに なぜ？」= CAUSE 子 / 「打ち手を追加」= COUNTERMEASURE 子。`verification=CONFIRMED(○)` のとき「打ち手を追加」を**強調**。
-- **COUNTERMEASURE 選択** → 「下位の打ち手」= COUNTERMEASURE 子 / 「タスク化」= 既存 Task 連携（Task.issueNodeId）
-- どのノードも `kind` を**後から変更可**（取り違え救済）。配置の**強制はしない**（課題直下に打ち手も可）。
+作成ダイアログ: **パターン選択(6)** + ツリー名 + ルートの問い(任意) + GAP起点(任意)。作成時に**パターン対応の kind でルートノードを自動生成**（現状の作成エラーを解消）。
 
-## 種別ごとの仕掛け（UI 工夫）
+## 影響範囲
 
-- 色分け: ISSUE=ネイビー(#050f3e系) / CAUSE=アンバー / COUNTERMEASURE=エメラルド。
-- CAUSE ノード: ○×△/要ヒアリング バッジ + 根拠(evidence)メモ。○確定で枠を確定色にし「打ち手を追加」へ誘導。
-- COUNTERMEASURE ノード: 採用/保留/不採用 バッジ。採用はタスク化導線を強調。
-- 未確認(△/要ヒアリング)の原因は淡色で表示し、ヒアリングへの示唆を出す。
+- backend: schema(IssueNodeKind/IssueTree.pattern)、create-issue-tree(pattern + ルート自動生成 + エラー除去)、issue-node create/update(既に kind/verification/recommendation 対応)。DTO enum 拡張。
+- frontend: `issue-trees/page.tsx`(パターン picker)、`issue-trees/[treeId]/page.tsx`(KIND/PATTERN config 駆動の guided add・色・○×△/採用/数値/タスク化・種別変更・再帰論点・発散収束ロールアップ)、lib。
 
-## 発想アシスト / AI 連携（既存を接続）
+## 段階実装
 
-- 既存「発想法で分解」(`frontend/src/lib/ideation-methods.ts` + components/issue-trees/ideation-assist-dialog) を CAUSE/COUNTERMEASURE 候補生成に接続。
-- 任意（鍵がある時のみ、既存 ClaudeService）: 「この課題のなぜ候補」「この確定原因の打ち手候補」を生成して子ノード候補に。鍵未設定時はガイド付き手動のみ。
-
-## 既存データ移行
-
-- 既存 WHY ツリー: そのまま（root を ISSUE 相当として扱う）。
-- 既存 SOLUTION ツリー: root を ISSUE 扱いにし、打ち手をその下にぶら下げる。破壊はせずベストエフォート。
-- マイグレーションスクリプトは不要（kind 既定 + 表示ロジックで吸収）。
-
-## 影響範囲（想定ファイル）
-
-- frontend: `issue-trees/page.tsx`（作成ダイアログから型削除・一覧の型分類削除）、`issue-trees/[treeId]/page.tsx`（種別連動の追加ボタン・色分け・○×△/採用バッジ・確定→打ち手誘導）、`lib`（issue-tree API/型）。
-- backend: create-issue-tree（type 必須を緩和 + ルートノード ISSUE 自動生成、作成エラー除去）、issue-node 作成 API（kind/verification/recommendation はノードごと既存）。
-- 既存の per-node 安定 API（add/update/delete）を活用。スキーマ変更なし。
+- **Ph1（今回）**: schema 全 kind/pattern 追加 + backend + 作成パターン picker + イシューツリー(論点→仮説→検証→結果→収束, 再帰論点) + Whyツリー を完全実装。What/How/MECE/KPI は作成・追加・基本仕掛けまで（config 駆動なので同時に動く）。
+- 以降: What/How/MECE/KPI の磨き込み、AI(発想アシスト/Claude)候補生成。
 
 ## 検証
 
-- backend tsc 0 / frontend tsc 0 / 既存 vitest 維持。
-- ライブ smoke: 型なしで作成 200（ルート ISSUE 自動生成）、CAUSE 追加 → verification 設定、COUNTERMEASURE 追加 → recommendation 設定、各 per-node API 200。
-- 旧データ（既存ツリー）が壊れず開けること。
-
-## 実装タイミング
-
-走行中ワークフロー `wg0prtcds`（issue-tree を含む）完了・コミット後に、本 spec を writing-plans → 実装。
+- backend tsc 0 / frontend tsc 0 / vitest 維持。
+- ライブ smoke: 各パターンで作成 201（ルート自動生成）、論点→サブ論点→仮説→検証→結果(○×△)追加、Why の CAUSE 追加、How の OPTION+採用、種別変更、いずれも per-node API 200。既存ツリーが開ける。
