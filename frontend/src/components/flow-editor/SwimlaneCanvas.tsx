@@ -124,9 +124,31 @@ export interface SwimlaneCanvasProps {
   onBack?: () => void;
   onUpdateFlow?: (id: string, name: string, description?: string) => void;
   onCreateNode?: (input: { type: string; roleId?: string; afterNodeId?: string }) => void;
-  onConnectNodes?: (sourceNodeId: string, targetNodeId: string) => void;
+  /**
+   * 2ノードを接続する。ドラッグで使ったハンドル側（'top'|'right'|'bottom'|'left'）を
+   * sourceHandle/targetHandle として渡す。呼び出し側は POST /edges の body に含める。
+   */
+  onConnectNodes?: (
+    sourceNodeId: string,
+    targetNodeId: string,
+    handles?: { sourceHandle?: string | null; targetHandle?: string | null },
+  ) => void;
   onDeleteNode?: (nodeId: string) => void;
   onDeleteEdge?: (edgeId: string) => void;
+  /**
+   * 既存エッジの端点をドラッグで付け替える（再ルーティング）。
+   * React Flow v12 の onReconnect から呼ばれ、新しい source/target ノードとハンドル側を渡す。
+   * 呼び出し側は PATCH /:flowId/edges/:edgeId で永続化する。
+   */
+  onReconnectEdge?: (
+    edgeId: string,
+    next: {
+      sourceNodeId: string;
+      targetNodeId: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    },
+  ) => void;
   onUpdateEdgeLabel?: (edgeId: string, label: string) => void;
   /**
    * 接続線（エッジ）の途中にノードを挿入する。
@@ -238,19 +260,45 @@ const NODE_STYLE: Record<string, string> = {
   PROCESS: 'bg-sky-50 border-sky-400 text-sky-700',
 };
 
+// 4辺の接続ハンドル定義。ConnectionMode.Loose 下では各ハンドルが source/target 両用。
+// id は安定値（'top'|'right'|'bottom'|'left'）で、保存された接続側の復元に使う。
+const HANDLE_SIDES: Array<{ id: string; position: Position }> = [
+  { id: 'top', position: Position.Top },
+  { id: 'right', position: Position.Right },
+  { id: 'bottom', position: Position.Bottom },
+  { id: 'left', position: Position.Left },
+];
+
 function ContentNode({ data, selected }: { data: ContentNodeData; selected?: boolean }) {
   const cls = NODE_STYLE[data.ntype] ?? NODE_STYLE.PROCESS;
-  // horizontal: 時間は左→右なので target=Left / source=Right
-  // vertical:   時間は上→下なので target=Top  / source=Bottom
-  const targetPos = data.orientation === 'vertical' ? Position.Top : Position.Left;
-  const sourcePos = data.orientation === 'vertical' ? Position.Bottom : Position.Right;
   return (
     <div
-      className={`px-3 py-2 rounded-lg border-2 shadow-sm w-full h-full flex flex-col items-center justify-center text-center transition-all ${cls} ${
+      className={`group/node px-3 py-2 rounded-lg border-2 shadow-sm w-full h-full flex flex-col items-center justify-center text-center transition-all ${cls} ${
         selected ? 'ring-2 ring-blue-500 ring-offset-1' : ''
       }`}
     >
-      <Handle type="target" position={targetPos} className="w-2 h-2 !bg-gray-400" />
+      {/* 4辺のハンドル: それぞれ source/target 兼用（ConnectionMode.Loose）。
+          矢印を任意の辺へ付け替えられるようにする。小さなドットで、
+          ノード本体のドラッグを邪魔しないよう nodrag を付与。
+          source/target を同位置に重ね、見た目は source 側のドットのみ表示する。 */}
+      {HANDLE_SIDES.map((h) => (
+        <Handle
+          key={`s-${h.id}`}
+          type="source"
+          id={h.id}
+          position={h.position}
+          className="nodrag !w-2 !h-2 !min-w-0 !min-h-0 !bg-gray-400 !border !border-white opacity-50 transition-opacity group-hover/node:opacity-100"
+        />
+      ))}
+      {HANDLE_SIDES.map((h) => (
+        <Handle
+          key={`t-${h.id}`}
+          type="target"
+          id={h.id}
+          position={h.position}
+          className="nodrag !w-2 !h-2 !min-w-0 !min-h-0 !bg-transparent !border-0"
+        />
+      ))}
       <div className="font-medium text-sm leading-tight line-clamp-2">{data.label}</div>
       {(data.hasChildFlow || data.hasLinks) && (
         <div className="mt-0.5 flex items-center justify-center gap-1.5">
@@ -274,7 +322,6 @@ function ContentNode({ data, selected }: { data: ContentNodeData; selected?: boo
           )}
         </div>
       )}
-      <Handle type="source" position={sourcePos} className="w-2 h-2 !bg-gray-400" />
     </div>
   );
 }
@@ -744,13 +791,25 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         id: e.id,
         source: e.sourceNodeId,
         target: e.targetNodeId,
+        // 保存された接続側（辺）を描画に反映する。未保存(null/undefined)なら
+        // React Flow が向き既定（Loose）でハンドルを自動選択する。
+        sourceHandle: e.sourceHandle ?? undefined,
+        targetHandle: e.targetHandle ?? undefined,
         label: e.label || e.condition || undefined,
         type: 'editable',
         selected: e.id === selectedEdgeId,
+        // 端点ドラッグで付け替え可能にする（onReconnect が発火する）。
+        reconnectable: !!props.onReconnectEdge,
         markerEnd: { type: MarkerType.ArrowClosed, color: '#64748b', width: 18, height: 18 },
         data: { onLabelUpdate: props.onUpdateEdgeLabel, onInsertNode: props.onInsertNodeOnEdge },
       })),
-    [flowData.edges, selectedEdgeId, props.onUpdateEdgeLabel, props.onInsertNodeOnEdge],
+    [
+      flowData.edges,
+      selectedEdgeId,
+      props.onUpdateEdgeLabel,
+      props.onInsertNodeOnEdge,
+      props.onReconnectEdge,
+    ],
   );
 
   useEffect(() => {
@@ -760,7 +819,30 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
   const onConnect = useCallback(
     (c: Connection) => {
-      if (c.source && c.target && c.source !== c.target) props.onConnectNodes?.(c.source, c.target);
+      if (c.source && c.target && c.source !== c.target) {
+        // ドラッグで使った辺（ハンドル）を保存する。
+        props.onConnectNodes?.(c.source, c.target, {
+          sourceHandle: c.sourceHandle ?? null,
+          targetHandle: c.targetHandle ?? null,
+        });
+      }
+    },
+    [props],
+  );
+
+  // --- エッジ端点ドラッグで付け替え（再ルーティング） ---
+  // React Flow v12 の onReconnect(oldEdge, newConnection)。
+  // 新しい source/target ノードとハンドル側を PATCH で永続化する（呼び出し側に委譲）。
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      if (!newConnection.source || !newConnection.target) return;
+      if (newConnection.source === newConnection.target) return;
+      props.onReconnectEdge?.(oldEdge.id, {
+        sourceNodeId: newConnection.source,
+        targetNodeId: newConnection.target,
+        sourceHandle: newConnection.sourceHandle ?? null,
+        targetHandle: newConnection.targetHandle ?? null,
+      });
     },
     [props],
   );
@@ -887,6 +969,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onConnect={onConnect}
+        onReconnect={onReconnect}
         onNodesChange={onNodesChange}
         nodesDraggable
         nodesConnectable

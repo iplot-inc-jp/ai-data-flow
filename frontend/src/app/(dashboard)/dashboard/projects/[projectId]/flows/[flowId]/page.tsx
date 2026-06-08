@@ -892,22 +892,67 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
-  // エッジ作成
+  // エッジ作成（ドラッグで使った接続側ハンドル sourceHandle/targetHandle も保存）
   const handleEdgeCreate = useCallback(
-    async (sourceNodeId: string, targetNodeId: string) => {
+    async (
+      sourceNodeId: string,
+      targetNodeId: string,
+      handles?: { sourceHandle?: string | null; targetHandle?: string | null }
+    ) => {
       if (!flowData) return;
       try {
         const headers = getHeaders();
         const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ sourceNodeId, targetNodeId }),
+          body: JSON.stringify({
+            sourceNodeId,
+            targetNodeId,
+            ...(handles?.sourceHandle ? { sourceHandle: handles.sourceHandle } : {}),
+            ...(handles?.targetHandle ? { targetHandle: handles.targetHandle } : {}),
+          }),
         });
 
         if (!res.ok) throw new Error('Failed to create edge');
         fetchFlowData(flowData.id);
       } catch (err) {
         console.error('Failed to create edge:', err);
+      }
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
+  // エッジ再ルーティング（端点ドラッグで source/target ノード・接続側を付け替え）
+  // PATCH /api/business-flows/:flowId/edges/:edgeId で sourceNodeId/targetNodeId/
+  // sourceHandle/targetHandle を更新 → 再取得。
+  const handleReconnectEdge = useCallback(
+    async (
+      edgeId: string,
+      next: {
+        sourceNodeId: string;
+        targetNodeId: string;
+        sourceHandle?: string | null;
+        targetHandle?: string | null;
+      }
+    ) => {
+      if (!flowData) return;
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges/${edgeId}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({
+            sourceNodeId: next.sourceNodeId,
+            targetNodeId: next.targetNodeId,
+            sourceHandle: next.sourceHandle ?? null,
+            targetHandle: next.targetHandle ?? null,
+          }),
+        });
+
+        if (!res.ok) throw new Error('Failed to reconnect edge');
+        fetchFlowData(flowData.id);
+      } catch (err) {
+        console.error('Failed to reconnect edge:', err);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -1592,6 +1637,7 @@ export default function ProjectFlowDetailPage() {
           onConnectNodes={handleEdgeCreate}
           onDeleteNode={handleNodeDelete}
           onDeleteEdge={handleEdgeDelete}
+          onReconnectEdge={handleReconnectEdge}
           onUpdateEdgeLabel={handleEdgeLabelUpdate}
           onInsertNodeOnEdge={handleInsertNodeOnEdge}
           onChangeNodeRole={handleNodeRoleUpdate}

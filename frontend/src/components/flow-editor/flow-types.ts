@@ -62,6 +62,10 @@ export type FlowDataEdge = {
   targetNodeId: string;
   label?: string;
   condition?: string;
+  /** 接続元ハンドルの辺（'top'|'right'|'bottom'|'left'）。再ルーティング/側固定用。 */
+  sourceHandle?: string | null;
+  /** 接続先ハンドルの辺（'top'|'right'|'bottom'|'left'）。 */
+  targetHandle?: string | null;
 };
 
 export type FlowData = {
