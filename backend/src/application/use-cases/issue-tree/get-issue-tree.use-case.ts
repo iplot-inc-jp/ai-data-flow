@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   IssueTreeType,
+  IssueTreePattern,
   IssueNodeKind,
   NodeVerification,
   NodeRecommendation,
@@ -42,6 +43,7 @@ export interface IssueTreeWithNodesDto {
   id: string;
   projectId: string;
   type: IssueTreeType;
+  pattern: IssueTreePattern;
   name: string;
   rootQuestion: string | null;
   createdAt: Date;
@@ -95,6 +97,7 @@ export class GetIssueTreeUseCase {
       id: tree.id,
       projectId: tree.projectId,
       type: tree.type,
+      pattern: tree.pattern,
       name: tree.name,
       rootQuestion: tree.rootQuestion,
       createdAt: tree.createdAt,

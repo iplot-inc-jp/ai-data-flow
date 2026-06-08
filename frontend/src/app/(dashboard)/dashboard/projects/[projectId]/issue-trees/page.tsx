@@ -37,23 +37,30 @@ import {
   Search,
   Lightbulb,
   HelpCircle,
+  Layers,
+  ListChecks,
+  BarChart3,
 } from 'lucide-react';
+import {
+  ISSUE_TREE_PATTERNS,
+  PATTERN_META,
+  type IssueTreePattern,
+} from '@/lib/issue-tree-patterns';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
-
-type IssueTreeType = 'WHY' | 'SOLUTION';
 
 type IssueTree = {
   id: string;
   projectId: string;
-  type: IssueTreeType;
+  pattern?: IssueTreePattern;
+  type?: 'WHY' | 'SOLUTION';
   name: string;
   rootQuestion: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
 
-type FilterType = 'ALL' | IssueTreeType;
+type FilterType = 'ALL' | IssueTreePattern;
 
 type GapItemOption = {
   id: string;
@@ -63,37 +70,22 @@ type GapItemOption = {
 
 const NO_GAP = '__none__';
 
-const typeMeta: Record<
-  IssueTreeType,
-  {
-    label: string;
-    sublabel: string;
-    description: string;
-    accent: string; // left border + icon bg accent
-    badge: string; // badge classes
-    icon: typeof Search;
-    cardHover: string;
-  }
-> = {
-  WHY: {
-    label: 'なぜ型',
-    sublabel: '調査・原因究明',
-    description: '「なぜ？」を繰り返して問題の根本原因を掘り下げるツリーです。',
-    accent: 'border-l-blue-500',
-    badge: 'text-blue-700 bg-blue-50 border-blue-200',
-    icon: Search,
-    cardHover: 'hover:border-blue-300',
-  },
-  SOLUTION: {
-    label: '打ち手型',
-    sublabel: 'How・MECEアクション',
-    description: '「どうやって？」をMECEに分解して具体的な打ち手を洗い出すツリーです。',
-    accent: 'border-l-emerald-500',
-    badge: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-    icon: Lightbulb,
-    cardHover: 'hover:border-emerald-300',
-  },
+// pattern ごとのアイコン（一覧/picker 共有）。
+const PATTERN_ICON: Record<IssueTreePattern, typeof Search> = {
+  ISSUE_POINT: Search,
+  WHY: HelpCircle,
+  WHAT: Layers,
+  HOW: Lightbulb,
+  MECE_ACTION: ListChecks,
+  KPI: BarChart3,
 };
+
+// 旧 type(WHY/SOLUTION) しか持たない既存ツリーを pattern にフォールバック。
+function patternOf(tree: IssueTree): IssueTreePattern {
+  if (tree.pattern) return tree.pattern;
+  if (tree.type === 'SOLUTION') return 'HOW';
+  return 'WHY';
+}
 
 export default function IssueTreesPage() {
   const params = useParams();
@@ -109,12 +101,12 @@ export default function IssueTreesPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTree, setNewTree] = useState<{
-    type: IssueTreeType;
+    pattern: IssueTreePattern;
     name: string;
     rootQuestion: string;
     gapItemId: string;
   }>({
-    type: 'WHY',
+    pattern: 'ISSUE_POINT',
     name: '',
     rootQuestion: '',
     gapItemId: NO_GAP,
@@ -125,8 +117,8 @@ export default function IssueTreesPage() {
 
   const howToRef = useRef<HTMLDivElement>(null);
 
-  const openCreate = useCallback((type: IssueTreeType = 'WHY') => {
-    setNewTree({ type, name: '', rootQuestion: '', gapItemId: NO_GAP });
+  const openCreate = useCallback((pattern: IssueTreePattern = 'ISSUE_POINT') => {
+    setNewTree({ pattern, name: '', rootQuestion: '', gapItemId: NO_GAP });
     setCreateError(null);
     setIsCreateOpen(true);
   }, []);
@@ -139,12 +131,12 @@ export default function IssueTreesPage() {
     },
     {
       combo: 'n',
-      handler: () => openCreate('WHY'),
+      handler: () => openCreate('ISSUE_POINT'),
     },
     {
       combo: 'mod+enter',
       whenTyping: true,
-      handler: () => openCreate('WHY'),
+      handler: () => openCreate('ISSUE_POINT'),
     },
   ]);
 
@@ -202,8 +194,9 @@ export default function IssueTreesPage() {
       const res = await fetch(`${API_URL}/api/projects/${projectId}/issue-trees`, {
         method: 'POST',
         headers,
+        // type は送らない（バックエンドが pattern から既定を決める）。
         body: JSON.stringify({
-          type: newTree.type,
+          pattern: newTree.pattern,
           name: newTree.name.trim(),
           rootQuestion: newTree.rootQuestion.trim() || undefined,
           gapItemId: newTree.gapItemId !== NO_GAP ? newTree.gapItemId : undefined,
@@ -213,7 +206,7 @@ export default function IssueTreesPage() {
         await fetchTrees();
         await fetchGapItems();
         setIsCreateOpen(false);
-        setNewTree({ type: 'WHY', name: '', rootQuestion: '', gapItemId: NO_GAP });
+        setNewTree({ pattern: 'ISSUE_POINT', name: '', rootQuestion: '', gapItemId: NO_GAP });
       } else {
         const data = await res.json().catch(() => ({}));
         setCreateError(data.message || 'ツリーの作成に失敗しました');
@@ -246,15 +239,15 @@ export default function IssueTreesPage() {
   };
 
   const filteredTrees =
-    filter === 'ALL' ? trees : trees.filter((t) => t.type === filter);
-
-  const whyCount = trees.filter((t) => t.type === 'WHY').length;
-  const solutionCount = trees.filter((t) => t.type === 'SOLUTION').length;
+    filter === 'ALL' ? trees : trees.filter((t) => patternOf(t) === filter);
 
   const filterTabs: { value: FilterType; label: string; count: number }[] = [
     { value: 'ALL', label: 'すべて', count: trees.length },
-    { value: 'WHY', label: 'なぜ型', count: whyCount },
-    { value: 'SOLUTION', label: '打ち手型', count: solutionCount },
+    ...ISSUE_TREE_PATTERNS.map((p) => ({
+      value: p as FilterType,
+      label: PATTERN_META[p].label,
+      count: trees.filter((t) => patternOf(t) === p).length,
+    })),
   ];
 
   if (loading) {
@@ -279,9 +272,9 @@ export default function IssueTreesPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold text-gray-900">課題ツリー</h1>
-              <HelpTooltip text="問題をツリー状に分解して構造化する道具です。「なぜ型」で原因を深掘りし、「打ち手型」で対策をMECEに洗い出します。GAP（課題）を起点に紐づけられます。" />
+              <HelpTooltip text="問題をツリー状に分解して構造化する道具です。論点（イシュー）・原因（Why）・対象分割（What）・打ち手（How/MECE）・KPI の6パターンから選んで作成できます。GAP（課題）を起点に紐づけられます。" />
             </div>
-            <p className="text-gray-500 mt-1">問題の構造化・原因究明・打ち手の検討</p>
+            <p className="text-gray-500 mt-1">論点・原因究明・対象分割・打ち手・KPI の構造化</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -289,10 +282,11 @@ export default function IssueTreesPage() {
             <HowToPanel
               title="課題ツリー一覧の使い方"
               steps={[
-                '「ツリー作成」で「なぜ型」または「打ち手型」を選び、ツリー名とルートの問いを入力します。',
+                '「ツリー作成」で6つのパターン（イシューツリー／Why／What／How／MECEアクション／KPI）から1つ選び、ツリー名とルートの問いを入力します。',
+                'パターンは「開始テンプレ」です。作成後はノード種別を混在させたり、後から変更できます。',
                 '必要なら GAP（課題）を起点に選ぶと、その課題にツリーが紐づきます。',
                 'カードをクリックするとマインドマップ編集画面が開きます。',
-                '上部のタブ（すべて／なぜ型／打ち手型）で一覧を絞り込めます。',
+                '上部のタブでパターン別に一覧を絞り込めます。',
               ]}
               shortcuts={[
                 { keys: 'N', desc: 'ツリー作成ダイアログを開く' },
@@ -303,7 +297,7 @@ export default function IssueTreesPage() {
           </div>
           <ManualButton feature="issue-trees" />
           <Button
-            onClick={() => openCreate('WHY')}
+            onClick={() => openCreate('ISSUE_POINT')}
             className="bg-blue-600 hover:bg-blue-700"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -312,29 +306,32 @@ export default function IssueTreesPage() {
         </div>
       </div>
 
-      {/* 型の説明 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {(['WHY', 'SOLUTION'] as IssueTreeType[]).map((t) => {
-          const meta = typeMeta[t];
-          const Icon = meta.icon;
+      {/* パターンの説明 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {ISSUE_TREE_PATTERNS.map((p) => {
+          const meta = PATTERN_META[p];
+          const Icon = PATTERN_ICON[p];
           return (
-            <div
-              key={t}
-              className={`flex items-start gap-3 p-4 rounded-lg border bg-white border-l-4 ${meta.accent}`}
+            <button
+              key={p}
+              type="button"
+              onClick={() => openCreate(p)}
+              title="このパターンでツリー作成"
+              className={`flex items-start gap-3 p-3 rounded-lg border bg-white border-l-4 text-left transition-colors hover:bg-gray-50 ${meta.accent}`}
             >
               <div
-                className={`mt-0.5 w-9 h-9 rounded-lg flex items-center justify-center border ${meta.badge}`}
+                className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center border ${meta.badge}`}
               >
-                <Icon className="h-5 w-5" />
+                <Icon className="h-4 w-4" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-gray-900">{meta.label}</span>
-                  <span className="text-xs text-gray-400">{meta.sublabel}</span>
+                  <span className="font-semibold text-sm text-gray-900">{meta.label}</span>
+                  <span className="text-[10px] text-gray-400">{meta.sublabel}</span>
                 </div>
-                <p className="text-sm text-gray-500 mt-1">{meta.description}</p>
+                <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{meta.description}</p>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -374,8 +371,9 @@ export default function IssueTreesPage() {
       {filteredTrees.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredTrees.map((tree) => {
-            const meta = typeMeta[tree.type] ?? typeMeta.WHY;
-            const Icon = meta.icon;
+            const pattern = patternOf(tree);
+            const meta = PATTERN_META[pattern];
+            const Icon = PATTERN_ICON[pattern];
             return (
               <Card
                 key={tree.id}
@@ -430,22 +428,13 @@ export default function IssueTreesPage() {
             <p className="text-gray-500 mb-2">
               {filter === 'ALL'
                 ? '課題ツリーがありません'
-                : `${filter === 'WHY' ? 'なぜ型' : '打ち手型'}のツリーがありません`}
+                : `${PATTERN_META[filter].label}のツリーがありません`}
             </p>
             <p className="text-sm text-gray-400 mb-4">
-              「なぜ型」で原因を掘り下げ、「打ち手型」で対策を検討しましょう
+              論点を分解し、原因を掘り下げ、打ち手を検討しましょう
             </p>
             <Button
-              onClick={() => {
-                setNewTree({
-                  type: filter === 'SOLUTION' ? 'SOLUTION' : 'WHY',
-                  name: '',
-                  rootQuestion: '',
-                  gapItemId: NO_GAP,
-                });
-                setCreateError(null);
-                setIsCreateOpen(true);
-              }}
+              onClick={() => openCreate(filter === 'ALL' ? 'ISSUE_POINT' : filter)}
               className="bg-blue-600 hover:bg-blue-700"
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -457,67 +446,57 @@ export default function IssueTreesPage() {
 
       {/* 作成ダイアログ */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="bg-white border-gray-200">
+        <DialogContent className="bg-white border-gray-200 sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle className="text-gray-900 flex items-center gap-2">
               <GitBranch className="h-5 w-5 text-blue-600" />
               課題ツリーを作成
             </DialogTitle>
             <DialogDescription className="text-gray-500">
-              型を選び、ツリー名とルートの問いを入力してください
+              パターンを選び、ツリー名とルートの問いを入力してください
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* 型選択 */}
+            {/* パターン選択 */}
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
-                <Label className="text-gray-700">型</Label>
-                <HelpTooltip text="なぜ型＝「なぜ？」を繰り返し原因を深掘りするツリー。打ち手型＝「どうやって？」をMECE（モレなくダブりなく）に分解し対策を洗い出すツリーです。" />
+                <Label className="text-gray-700">パターン（開始テンプレ）</Label>
+                <HelpTooltip text="目的に合うテンプレを選びます。種別は混在可・配置は強制されません（後から変更可）。イシューツリー＝論点を疑問形で分解し仮説検証、Why＝原因の深掘り、What＝対象を構成要素に分割、How＝打ち手の発散、MECEアクション＝行動の網羅、KPI＝指標の分解。" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {(['WHY', 'SOLUTION'] as IssueTreeType[]).map((t) => {
-                  const meta = typeMeta[t];
-                  const Icon = meta.icon;
-                  const selected = newTree.type === t;
+              <div className="grid grid-cols-2 gap-2">
+                {ISSUE_TREE_PATTERNS.map((p) => {
+                  const meta = PATTERN_META[p];
+                  const Icon = PATTERN_ICON[p];
+                  const selected = newTree.pattern === p;
                   return (
                     <button
-                      key={t}
+                      key={p}
                       type="button"
-                      onClick={() => setNewTree({ ...newTree, type: t })}
-                      className={`text-left p-3 rounded-lg border transition-colors ${
+                      onClick={() => setNewTree({ ...newTree, pattern: p })}
+                      className={`text-left p-2.5 rounded-lg border transition-colors ${
                         selected
-                          ? `${meta.badge} ring-2 ring-offset-1 ${
-                              t === 'WHY' ? 'ring-blue-300' : 'ring-emerald-300'
-                            }`
+                          ? `${meta.badge} ring-2 ring-offset-1 ${meta.ring}`
                           : 'bg-white border-gray-200 hover:bg-gray-50'
                       }`}
                     >
                       <div className="flex items-center gap-2">
                         <Icon
-                          className={`h-4 w-4 ${
-                            selected
-                              ? t === 'WHY'
-                                ? 'text-blue-600'
-                                : 'text-emerald-600'
-                              : 'text-gray-400'
-                          }`}
+                          className={`h-4 w-4 ${selected ? meta.iconColor : 'text-gray-400'}`}
                         />
                         <span
-                          className={`font-medium ${
-                            selected ? 'text-gray-900' : 'text-gray-700'
-                          }`}
+                          className={`font-medium text-sm ${selected ? 'text-gray-900' : 'text-gray-700'}`}
                         >
                           {meta.label}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">{meta.sublabel}</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">{meta.sublabel}</p>
                     </button>
                   );
                 })}
               </div>
               <p className="text-xs text-gray-400">
-                {typeMeta[newTree.type].description}
+                {PATTERN_META[newTree.pattern].description}
               </p>
             </div>
 
@@ -560,7 +539,7 @@ export default function IssueTreesPage() {
             <div className="space-y-2">
               <Label className="text-gray-700">ツリー名</Label>
               <Input
-                placeholder={newTree.type === 'WHY' ? '解約率が高い' : '解約率を下げる'}
+                placeholder={PATTERN_META[newTree.pattern].nameExample}
                 value={newTree.name}
                 onChange={(e) => setNewTree({ ...newTree, name: e.target.value })}
                 className="bg-white border-gray-300"
@@ -572,11 +551,7 @@ export default function IssueTreesPage() {
             <div className="space-y-2">
               <Label className="text-gray-700">ルートの問い（任意）</Label>
               <Textarea
-                placeholder={
-                  newTree.type === 'WHY'
-                    ? 'なぜ解約率が高いのか？'
-                    : 'どうすれば解約率を下げられるか？'
-                }
+                placeholder={PATTERN_META[newTree.pattern].rootExample}
                 value={newTree.rootQuestion}
                 onChange={(e) => setNewTree({ ...newTree, rootQuestion: e.target.value })}
                 className="bg-white border-gray-300"

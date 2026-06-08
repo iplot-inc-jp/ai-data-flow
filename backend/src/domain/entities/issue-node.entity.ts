@@ -27,11 +27,30 @@ export type NodeRecommendation = 'ADOPT' | 'HOLD' | 'REJECT' | 'NA';
 
 /**
  * ノードの種別
- * - ISSUE: 問い（論点）
+ * - ISSUE: 課題/ゴール/対象（汎用ルート）
  * - CAUSE: 原因（なぜ）
- * - COUNTERMEASURE: 打ち手
+ * - COUNTERMEASURE: 打ち手（互換: OPTION相当）
+ * - POINT: 論点（疑問形・再帰）
+ * - HYPOTHESIS: 仮説
+ * - VERIFICATION: 検証アクション
+ * - RESULT: 検証結果
+ * - ELEMENT: 構成要素（What）
+ * - OPTION: 解決候補（How）
+ * - ACTION: 行動（MECEアクション）
+ * - METRIC: KPI（数値）
  */
-export type IssueNodeKind = 'ISSUE' | 'CAUSE' | 'COUNTERMEASURE';
+export type IssueNodeKind =
+  | 'ISSUE'
+  | 'CAUSE'
+  | 'COUNTERMEASURE'
+  | 'POINT'
+  | 'HYPOTHESIS'
+  | 'VERIFICATION'
+  | 'RESULT'
+  | 'ELEMENT'
+  | 'OPTION'
+  | 'ACTION'
+  | 'METRIC';
 
 export interface CreateIssueNodeProps {
   treeId: string;

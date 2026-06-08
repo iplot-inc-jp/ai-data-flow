@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   IssueTreeType,
+  IssueTreePattern,
   IIssueTreeRepository,
   ISSUE_TREE_REPOSITORY,
   ProjectRepository,
@@ -17,12 +18,14 @@ export interface UpdateIssueTreeInput {
   name?: string;
   rootQuestion?: string | null;
   type?: IssueTreeType;
+  pattern?: IssueTreePattern;
 }
 
 export interface UpdateIssueTreeOutput {
   id: string;
   projectId: string;
   type: IssueTreeType;
+  pattern: IssueTreePattern;
   name: string;
   rootQuestion: string | null;
 }
@@ -73,6 +76,9 @@ export class UpdateIssueTreeUseCase {
     if (input.type !== undefined) {
       tree.changeType(input.type);
     }
+    if (input.pattern !== undefined) {
+      tree.changePattern(input.pattern);
+    }
 
     // 5. 永続化
     await this.issueTreeRepository.save(tree);
@@ -82,6 +88,7 @@ export class UpdateIssueTreeUseCase {
       id: tree.id,
       projectId: tree.projectId,
       type: tree.type,
+      pattern: tree.pattern,
       name: tree.name,
       rootQuestion: tree.rootQuestion,
     };

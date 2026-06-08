@@ -63,6 +63,10 @@ import {
   Unlink,
   Spline,
   Waypoints,
+  ClipboardCheck,
+  Boxes,
+  BarChart3,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   parseIssueMarkdown,
@@ -89,7 +93,23 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 // 型
 // ===========================================
 
-type IssueNodeKind = 'ISSUE' | 'CAUSE' | 'COUNTERMEASURE';
+import {
+  KIND_CONFIG,
+  PATTERN_META,
+  ISSUE_NODE_KINDS,
+  ROOT_PRIMARY_KIND,
+  rootKindForPattern,
+  patternFromLegacyType,
+  legacyTreeTypeForPattern,
+  emptyRollupCounts,
+  addVerificationToCounts,
+  rollupStatus,
+  type IssueNodeKind,
+  type IssueTreePattern,
+  type ChildAddButton,
+  type RollupStatus,
+  type RollupVerification,
+} from '@/lib/issue-tree-patterns';
 
 type BackendNode = {
   id: string;
@@ -109,10 +129,21 @@ type BackendNode = {
 type IssueTree = {
   id: string;
   projectId: string;
-  type: 'WHY' | 'SOLUTION';
+  pattern?: IssueTreePattern;
+  type?: 'WHY' | 'SOLUTION';
   name: string;
   rootQuestion: string | null;
   nodes: BackendNode[];
+};
+
+/** 配下 RESULT の集約判定（収束ロールアップ）。 */
+type Rollup = {
+  total: number;
+  confirmed: number;
+  rejected: number;
+  unknown: number;
+  /** 全体の状態: 'confirmed'(全○) / 'rejected'(×あり) / 'partial'(△等あり) / 'none'(集計対象なし) */
+  status: RollupStatus;
 };
 
 // React Flow ノードに載せるデータ
@@ -120,12 +151,13 @@ type MindNodeData = {
   node: BackendNode | null; // null = ルートの問い（仮想ノード）
   isRoot: boolean;
   rootQuestion: string;
-  treeType: 'WHY' | 'SOLUTION';
+  pattern: IssueTreePattern;
   selected: boolean;
   taskCount: number;
+  /** verification 集約バッジ（POINT/ISSUE 等の収束表示用。無ければ null） */
+  rollup: Rollup | null;
   onSelect: (id: string | null) => void;
-  onAddCause: (parentId: string | null) => void;
-  onAddCountermeasure: (parentId: string | null) => void;
+  onAddChild: (parentId: string | null, kind: IssueNodeKind, label: string) => void;
   onIdeate: (id: string | null) => void;
   onDelete: (id: string) => void;
 };
@@ -136,47 +168,43 @@ const ROOT_ID = '__root__';
 // kind / verification / recommendation の表示メタ
 // ===========================================
 
-const KIND_LABEL: Record<IssueNodeKind, string> = {
-  ISSUE: '問い',
-  CAUSE: '原因',
-  COUNTERMEASURE: '打ち手',
-};
-
-// 「なぜ → 打ち手 → 調査/実行」の流れを 分けながら 見せるためのタスク観点メタ。
-// CAUSE（なぜ）は深掘り → 確かめる「調査タスク」、COUNTERMEASURE（打ち手）は「実行タスク」に落とす。
-const KIND_FLOW_LABEL: Record<IssueNodeKind, string> = {
-  ISSUE: '問い（出発点）',
-  CAUSE: 'なぜ（原因の深掘り）',
-  COUNTERMEASURE: '打ち手（対策）',
-};
-
 type TaskFlavor = { verb: string; titlePrefix: string; chip: string; icon: typeof Search };
 
-// CAUSE → 調査タスク（amber）、COUNTERMEASURE → 実行タスク（blue）。lib/tasks の issueNodeKindLabels と整合。
+// タスク化できる種別の「タスク観点」メタ。
+// CAUSE（なぜ）/VERIFICATION → 調査タスク（amber）、ACTION/COUNTERMEASURE/OPTION → 実行タスク（blue）。
+const INVESTIGATE_FLAVOR: TaskFlavor = {
+  verb: '調査タスクを作成',
+  titlePrefix: '調査',
+  chip: 'bg-amber-50 text-amber-700 border-amber-200',
+  icon: Search,
+};
+const EXECUTE_FLAVOR: TaskFlavor = {
+  verb: '実行タスクを作成',
+  titlePrefix: '実行',
+  chip: 'bg-blue-50 text-blue-700 border-blue-200',
+  icon: ListChecks,
+};
 const KIND_TASK_FLAVOR: Partial<Record<IssueNodeKind, TaskFlavor>> = {
-  CAUSE: {
-    verb: '調査タスクを作成',
-    titlePrefix: '調査',
-    chip: 'bg-amber-50 text-amber-700 border-amber-200',
-    icon: Search,
-  },
-  COUNTERMEASURE: {
-    verb: '実行タスクを作成',
-    titlePrefix: '実行',
-    chip: 'bg-blue-50 text-blue-700 border-blue-200',
-    icon: ListChecks,
-  },
+  CAUSE: INVESTIGATE_FLAVOR,
+  VERIFICATION: INVESTIGATE_FLAVOR,
+  COUNTERMEASURE: EXECUTE_FLAVOR,
+  OPTION: EXECUTE_FLAVOR,
+  ACTION: EXECUTE_FLAVOR,
 };
 
-// 種別ごとのカード配色（白基調 iplot テーマ）
-const KIND_STYLE: Record<IssueNodeKind, { border: string; bar: string; chip: string }> = {
-  ISSUE: { border: 'border-slate-300', bar: 'bg-slate-700', chip: 'bg-slate-100 text-slate-700' },
-  CAUSE: { border: 'border-blue-300', bar: 'bg-blue-600', chip: 'bg-blue-50 text-blue-700' },
-  COUNTERMEASURE: {
-    border: 'border-emerald-300',
-    bar: 'bg-emerald-600',
-    chip: 'bg-emerald-50 text-emerald-700',
-  },
+// 種別ごとのアイコン。
+const KIND_ICON: Record<IssueNodeKind, typeof HelpCircle> = {
+  ISSUE: HelpCircle,
+  POINT: Search,
+  HYPOTHESIS: Lightbulb,
+  VERIFICATION: ListChecks,
+  RESULT: ClipboardCheck,
+  CAUSE: Lightbulb,
+  COUNTERMEASURE: Target,
+  ELEMENT: Boxes,
+  OPTION: Lightbulb,
+  ACTION: ListChecks,
+  METRIC: BarChart3,
 };
 
 const VERIFY_META: Record<Verification, { label: string; cls: string }> = {
@@ -202,13 +230,8 @@ const VERIFY_OPTIONS: Verification[] = [
   'NA',
 ];
 const RECO_OPTIONS: Recommendation[] = ['ADOPT', 'HOLD', 'REJECT', 'NA'];
-const KIND_OPTIONS: IssueNodeKind[] = ['ISSUE', 'CAUSE', 'COUNTERMEASURE'];
-
-const KIND_ICON: Record<IssueNodeKind, typeof HelpCircle> = {
-  ISSUE: HelpCircle,
-  CAUSE: Lightbulb,
-  COUNTERMEASURE: Target,
-};
+// 種別変更セレクト: 全 kind（取り違え救済）。配置の強制バリデーションはしない。
+const KIND_OPTIONS: IssueNodeKind[] = ISSUE_NODE_KINDS;
 
 // ===========================================
 // レイアウト計算（外部依存なし・決定的 左→右 ツリー）
@@ -258,14 +281,90 @@ function computeLayout(
 }
 
 // ===========================================
+// 発散→収束ロールアップ（spec C, イシューツリー）
+// ===========================================
+//
+// 配下の RESULT（検証結果ノード）の verification(○×△) を上位ノードへ集約して
+// バッジを作る。RESULT 自身の verification を「葉の判定」とし、子のロールアップを
+// 足し上げる（多重ネスト・論点の再帰に対応）。クライアント集計のみ・永続化しない。
+//   status: rejected(×あり) > partial(△/?あり) > confirmed(残り全て○・1件以上) > none(集計対象なし)
+
+function computeRollups(
+  backendNodes: BackendNode[],
+  childrenMap: Map<string, string[]>,
+  nodeById: Map<string, BackendNode>,
+): Map<string, Rollup> {
+  const memo = new Map<string, Rollup>();
+
+  const walk = (id: string): Rollup => {
+    if (memo.has(id)) return memo.get(id)!;
+    let acc = emptyRollupCounts();
+    const node = id === ROOT_ID ? null : nodeById.get(id);
+
+    // 自身が RESULT なら、自身の verification を 1 件としてカウント。
+    if (node && node.kind === 'RESULT') {
+      acc = addVerificationToCounts(acc, (node.verification ?? 'NA') as RollupVerification);
+    }
+
+    for (const childId of childrenMap.get(id) ?? []) {
+      const cr = walk(childId);
+      acc.total += cr.total;
+      acc.confirmed += cr.confirmed;
+      acc.rejected += cr.rejected;
+      acc.unknown += cr.unknown;
+    }
+
+    const result: Rollup = { ...acc, status: rollupStatus(acc) };
+    memo.set(id, result);
+    return result;
+  };
+
+  // 全ノード（と仮想ルート）を確実に埋める。
+  walk(ROOT_ID);
+  for (const n of backendNodes) walk(n.id);
+  return memo;
+}
+
+// ===========================================
 // カスタムノード
 // ===========================================
 
+/**
+ * ノード kind と pattern から「種別連動の追加ボタン」を決める（spec D）。
+ * ISSUE ルートはパターンに合う主要 kind を上位に出しつつ全種別を提供。
+ * それ以外は KIND_CONFIG.childAddButtons（種別連動・再帰）をそのまま使う。
+ */
+function addButtonsFor(kind: IssueNodeKind, pattern: IssueTreePattern): ChildAddButton[] {
+  if (kind !== 'ISSUE') return KIND_CONFIG[kind].childAddButtons;
+  const base = KIND_CONFIG.ISSUE.childAddButtons;
+  const primary = ROOT_PRIMARY_KIND[pattern];
+  // primary 指定の順に並べ替え、残りを後ろに。
+  const rank = (k: IssueNodeKind) => {
+    const i = primary.indexOf(k);
+    return i === -1 ? primary.length + 1 : i;
+  };
+  return [...base].sort((a, b) => rank(a.childKind) - rank(b.childKind));
+}
+
+/** 収束ロールアップの集約バッジ表示メタ。 */
+const ROLLUP_META: Record<
+  Rollup['status'],
+  { label: string; cls: string } | null
+> = {
+  confirmed: { label: '✓ 検証済', cls: 'border-green-300 bg-green-50 text-green-700' },
+  rejected: { label: '× 要再検討', cls: 'border-red-300 bg-red-50 text-red-700' },
+  partial: { label: '△ 検証中', cls: 'border-amber-300 bg-amber-50 text-amber-700' },
+  none: null,
+};
+
 const MindNode = memo(function MindNode({ data }: NodeProps) {
   const d = data as unknown as MindNodeData;
-  const { node, isRoot, treeType, selected } = d;
+  const { node, isRoot, pattern, selected } = d;
 
   if (isRoot) {
+    const rootKind = rootKindForPattern(pattern);
+    const buttons = addButtonsFor(rootKind, pattern);
+    const rollupMeta = d.rollup ? ROLLUP_META[d.rollup.status] : null;
     return (
       <div
         onClick={(e) => {
@@ -277,26 +376,39 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
         }`}
       >
         <Handle type="source" position={Position.Right} className="!bg-indigo-400" />
-        <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-indigo-600">
-          <HelpCircle className="h-3 w-3" />
-          ルートの問い
+        <div className="mb-1 flex items-center justify-between gap-1">
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-600">
+            <HelpCircle className="h-3 w-3" />
+            ルートの問い
+          </span>
+          {rollupMeta && (
+            <span
+              className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${rollupMeta.cls}`}
+              title={`配下の検証結果 ${d.rollup!.confirmed}/${d.rollup!.total} ○`}
+            >
+              {rollupMeta.label}
+            </span>
+          )}
         </div>
         <div className="text-sm font-bold leading-snug text-gray-900 break-words">
           {d.rootQuestion || '（問い未設定）'}
         </div>
-        <div className="mt-2 flex gap-1">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (treeType === 'WHY') d.onAddCause(null);
-              else d.onAddCountermeasure(null);
-            }}
-            className="inline-flex items-center gap-0.5 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100"
-          >
-            <Plus className="h-3 w-3" />
-            {treeType === 'WHY' ? '原因(なぜ)' : '打ち手'}
-          </button>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {buttons.slice(0, 3).map((b) => (
+            <button
+              key={b.childKind + b.label}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                d.onAddChild(null, b.childKind, b.defaultLabel);
+              }}
+              className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] hover:brightness-95 ${KIND_CONFIG[b.childKind].chip} border-transparent`}
+              title={b.label}
+            >
+              <Plus className="h-3 w-3" />
+              {b.label}
+            </button>
+          ))}
           <button
             type="button"
             onClick={(e) => {
@@ -307,7 +419,7 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
             title="発想法で子ノードに分解"
           >
             <Sparkles className="h-3 w-3" />
-            発想法で分解
+            発想法
           </button>
         </div>
       </div>
@@ -316,13 +428,20 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
 
   if (!node) return null;
 
-  const kind = node.kind ?? 'ISSUE';
-  const style = KIND_STYLE[kind];
+  const kind: IssueNodeKind = node.kind ?? 'ISSUE';
+  const cfg = KIND_CONFIG[kind];
   const Icon = KIND_ICON[kind];
-  const showVerify = kind === 'CAUSE';
-  const showReco = kind === 'COUNTERMEASURE';
+  const showVerify = cfg.affordance === 'verification';
+  const showReco = cfg.affordance === 'recommendation';
+  const showMetric =
+    cfg.affordance === 'metric' &&
+    node.metadata != null &&
+    node.metadata.value != null &&
+    `${node.metadata.value}`.trim() !== '';
   const flavor = KIND_TASK_FLAVOR[kind];
   const TaskIcon = flavor?.icon ?? ListChecks;
+  const buttons = addButtonsFor(kind, pattern);
+  const rollupMeta = d.rollup ? ROLLUP_META[d.rollup.status] : null;
 
   return (
     <div
@@ -331,19 +450,19 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
         d.onSelect(node.id);
       }}
       className={`relative w-[220px] cursor-pointer rounded-lg border-2 bg-white shadow-sm transition ${
-        selected ? 'border-indigo-500 ring-2 ring-indigo-200' : style.border
+        selected ? 'border-indigo-500 ring-2 ring-indigo-200' : cfg.border
       }`}
     >
       <Handle type="target" position={Position.Left} className="!bg-gray-300" />
       <Handle type="source" position={Position.Right} className="!bg-gray-300" />
-      <div className={`h-1.5 w-full rounded-t-md ${style.bar}`} />
+      <div className={`h-1.5 w-full rounded-t-md ${cfg.bar}`} />
       <div className="px-3 py-2">
         <div className="mb-1 flex items-center justify-between gap-1">
           <span
-            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold ${style.chip}`}
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold ${cfg.chip}`}
           >
             <Icon className="h-3 w-3" />
-            {KIND_LABEL[kind]}
+            {cfg.label}
           </span>
           {showVerify && (
             <span
@@ -359,12 +478,27 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
               {RECO_META[node.recommendation ?? 'NA'].label}
             </span>
           )}
+          {showMetric && (
+            <span className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-blue-700">
+              {`${node.metadata!.value}`}
+            </span>
+          )}
         </div>
         <div className="text-sm font-medium leading-snug text-gray-900 break-words">
           {node.label || <span className="text-gray-300">（空）</span>}
         </div>
         {node.evidence && (
           <p className="mt-1 line-clamp-2 text-[11px] text-gray-400">根拠: {node.evidence}</p>
+        )}
+        {/* 収束ロールアップ: 配下 RESULT の集約（POINT/ISSUE など、自身が RESULT でない時のみ） */}
+        {rollupMeta && kind !== 'RESULT' && (
+          <div
+            className={`mt-1.5 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${rollupMeta.cls}`}
+            title={`配下の検証結果 ${d.rollup!.confirmed}/${d.rollup!.total} ○・${d.rollup!.rejected} ×`}
+          >
+            <CheckCircle2 className="h-3 w-3" />
+            {rollupMeta.label}（{d.rollup!.confirmed}/{d.rollup!.total}）
+          </div>
         )}
         {d.taskCount > 0 && flavor && (
           <div
@@ -376,28 +510,21 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
           </div>
         )}
         <div className="mt-2 flex flex-wrap gap-1">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              d.onAddCause(node.id);
-            }}
-            className="inline-flex items-center gap-0.5 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
-          >
-            <Plus className="h-3 w-3" />
-            原因
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              d.onAddCountermeasure(node.id);
-            }}
-            className="inline-flex items-center gap-0.5 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-100"
-          >
-            <Plus className="h-3 w-3" />
-            打ち手
-          </button>
+          {buttons.slice(0, 3).map((b) => (
+            <button
+              key={b.childKind + b.label}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                d.onAddChild(node.id, b.childKind, b.defaultLabel);
+              }}
+              className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] hover:brightness-95 ${KIND_CONFIG[b.childKind].chip} border-transparent`}
+              title={b.label}
+            >
+              <Plus className="h-3 w-3" />
+              {b.label}
+            </button>
+          ))}
           <button
             type="button"
             onClick={(e) => {
@@ -684,6 +811,9 @@ function IssueTreeMindMap() {
     if (treeId) fetchTree();
   }, [treeId, fetchTree]);
 
+  // パターン（旧 type しか無い既存ツリーはフォールバック）。種別連動ボタン・ルート kind に使う。
+  const pattern: IssueTreePattern = tree?.pattern ?? patternFromLegacyType(tree?.type);
+
   // ===========================================
   // ノードに紐づくタスク（調査 / 実行）
   // ===========================================
@@ -779,18 +909,19 @@ function IssueTreeMindMap() {
     [tree, treeId, getHeaders, fetchTree],
   );
 
-  const addCause = useCallback(
-    (parentId: string | null) => addNode(parentId, 'CAUSE', '新しい原因'),
+  // 種別連動の追加（カードの＋ボタン / ルート）。kind と既定ラベルは KIND_CONFIG 駆動。
+  const addChild = useCallback(
+    (parentId: string | null, kind: IssueNodeKind, label: string) => addNode(parentId, kind, label),
     [addNode],
   );
-  const addCountermeasure = useCallback(
-    (parentId: string | null) => addNode(parentId, 'COUNTERMEASURE', '新しい打ち手'),
-    [addNode],
-  );
-  const addIssue = useCallback(
-    (parentId: string | null) => addNode(parentId, 'ISSUE', '新しい論点'),
-    [addNode],
-  );
+  // ルート直下に「最初の子」を追加（N ショートカット / ヘッダーボタン用）。
+  // パターンに合う主役 kind を使う（ISSUE_POINT/WHY→論点/原因、How→打ち手候補 等）。
+  const addRootChild = useCallback(() => {
+    const rootKind = rootKindForPattern(pattern);
+    const buttons = addButtonsFor(rootKind, pattern);
+    const first = buttons[0] ?? { childKind: 'POINT' as IssueNodeKind, defaultLabel: '新しい論点' };
+    addNode(null, first.childKind, first.defaultLabel);
+  }, [addNode, pattern]);
 
   // 発想法アシスト: チェック済み候補を子ノードとして一括追加（既存の add-node API を再利用）
   const addNodesBulk = useCallback(
@@ -968,8 +1099,9 @@ function IssueTreeMindMap() {
       for (let i = 0; i < flat.length; i++) {
         const { node, order, parentIndex } = flat[i];
         const parentId = parentIndex !== null ? createdIds[parentIndex] : null;
+        const legacyType = legacyTreeTypeForPattern(pattern);
         const kind =
-          tree.type === 'SOLUTION'
+          legacyType === 'SOLUTION'
             ? verifyToKind(node.verification, node.recommendation)
             : node.recommendation !== 'NA'
               ? 'COUNTERMEASURE'
@@ -1015,7 +1147,7 @@ function IssueTreeMindMap() {
     } finally {
       setImporting(false);
     }
-  }, [tree, treeId, importText, getHeaders, fetchTree]);
+  }, [tree, treeId, importText, getHeaders, fetchTree, pattern]);
 
   // ===========================================
   // React Flow ノード / エッジ生成
@@ -1042,12 +1174,16 @@ function IssueTreeMindMap() {
 
     const layout = computeLayout(ROOT_ID, childrenMap);
 
+    // 発散→収束（spec C）: 配下の RESULT/検証結果(○×△) を各ノードへロールアップ集約。
+    // RESULT ノード自身の verification を種に、子の集約を足し上げてバッジを作る。
+    const nodeById = new Map(backendNodes.map((n) => [n.id, n]));
+    const rollupByNode = computeRollups(backendNodes, childrenMap, nodeById);
+
     const baseData = {
-      treeType: tree.type,
+      pattern,
       rootQuestion,
       onSelect: setSelectedId,
-      onAddCause: addCause,
-      onAddCountermeasure: addCountermeasure,
+      onAddChild: addChild,
       onIdeate: openIdeate,
       onDelete: deleteNode,
     };
@@ -1063,6 +1199,7 @@ function IssueTreeMindMap() {
         isRoot: true,
         selected: selectedId === null && false, // ルートは明示選択しないと反転させない
         taskCount: 0,
+        rollup: rollupByNode.get(ROOT_ID) ?? null,
       } as unknown as Record<string, unknown>,
       draggable: false,
     });
@@ -1078,6 +1215,7 @@ function IssueTreeMindMap() {
           isRoot: false,
           selected: selectedId === n.id,
           taskCount: tasksByNode[n.id]?.length ?? 0,
+          rollup: rollupByNode.get(n.id) ?? null,
         } as unknown as Record<string, unknown>,
         draggable: false,
       });
@@ -1107,12 +1245,12 @@ function IssueTreeMindMap() {
     return { rfNodes: nodes, rfEdges: edges };
   }, [
     tree,
+    pattern,
     selectedId,
     selectedEdgeId,
     edgeShape,
     tasksByNode,
-    addCause,
-    addCountermeasure,
+    addChild,
     openIdeate,
     deleteNode,
     detachNode,
@@ -1148,7 +1286,7 @@ function IssueTreeMindMap() {
     {
       combo: 'n',
       handler: () => {
-        if (!busy) addIssue(null);
+        if (!busy) addRootChild();
       },
     },
     {
@@ -1198,10 +1336,7 @@ function IssueTreeMindMap() {
     );
   }
 
-  const typeBadge =
-    tree.type === 'WHY'
-      ? { label: 'WHY（なぜ型）', color: 'text-blue-700 bg-blue-50 border-blue-200' }
-      : { label: 'SOLUTION（打ち手型）', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+  const patternMeta = PATTERN_META[pattern];
 
   return (
     <div className="flex h-[calc(100vh-120px)] min-h-[520px] flex-col gap-3">
@@ -1238,13 +1373,15 @@ function IssueTreeMindMap() {
               </button>
             )}
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className={`rounded border px-2 py-0.5 text-xs font-medium ${typeBadge.color}`}>
-                {typeBadge.label}
+              <span className={`rounded border px-2 py-0.5 text-xs font-medium ${patternMeta.badge}`}>
+                {patternMeta.label}
               </span>
               <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
-                GAP起点: なぜ → 打ち手
+                {patternMeta.sublabel}
               </span>
-              <HelpTooltip text="WHY（なぜ型）は原因を深掘りするツリー、SOLUTION（打ち手型）は対策をMECEに洗い出すツリーです。GAP（課題）を起点に、なぜ→打ち手の順で検討します。" />
+              <HelpTooltip
+                text={`${patternMeta.description} パターンは開始テンプレで、ノード種別は混在可・配置は強制されません（後から変更可）。`}
+              />
             </div>
           </div>
         </div>
@@ -1290,9 +1427,9 @@ function IssueTreeMindMap() {
             <FileText className="mr-1 h-4 w-4" />
             テキストから取り込み
           </Button>
-          <Button size="sm" onClick={() => addIssue(null)} className="bg-blue-600 hover:bg-blue-700">
+          <Button size="sm" onClick={addRootChild} className="bg-blue-600 hover:bg-blue-700">
             <Plus className="mr-1 h-4 w-4" />
-            論点
+            {addButtonsFor(rootKindForPattern(pattern), pattern)[0]?.label ?? '追加'}
           </Button>
         </div>
       </div>
@@ -1370,7 +1507,6 @@ function IssueTreeMindMap() {
           <NodeEditPanel
             key={selectedNode.id}
             node={selectedNode}
-            treeType={tree.type}
             busy={busy}
             linkedTasks={tasksByNode[selectedNode.id] ?? []}
             creatingTask={creatingTaskNodeId === selectedNode.id}
@@ -1440,7 +1576,7 @@ function IssueTreeMindMap() {
             ? tree.rootQuestion ?? ''
             : (tree.nodes ?? []).find((n) => n.id === ideateParentId)?.label ?? ''
         }
-        treeType={tree.type}
+        treeType={legacyTreeTypeForPattern(pattern)}
         onAdd={addNodesBulk}
       />
     </div>
@@ -1453,7 +1589,6 @@ function IssueTreeMindMap() {
 
 function NodeEditPanel({
   node,
-  treeType,
   busy,
   linkedTasks,
   creatingTask,
@@ -1466,7 +1601,6 @@ function NodeEditPanel({
   onDelete,
 }: {
   node: BackendNode;
-  treeType: 'WHY' | 'SOLUTION';
   busy: boolean;
   linkedTasks: Task[];
   creatingTask: boolean;
@@ -1480,13 +1614,23 @@ function NodeEditPanel({
 }) {
   const [label, setLabel] = useState(node.label);
   const [evidence, setEvidence] = useState(node.evidence ?? '');
-  const kind = node.kind ?? 'ISSUE';
+  const kind: IssueNodeKind = node.kind ?? 'ISSUE';
+  const cfg = KIND_CONFIG[kind];
   const flavor = KIND_TASK_FLAVOR[kind];
+
+  // METRIC の数値（metadata.value に保持）。
+  const initialMetric =
+    node.metadata?.value != null ? `${node.metadata.value}` : '';
+  const [metricValue, setMetricValue] = useState(initialMetric);
 
   // パネルを開いた（=ノードを選択した）ら、そのノードの紐づくタスクを取得する。
   useEffect(() => {
     onLoadTasks(node.id);
   }, [node.id, onLoadTasks]);
+
+  const showVerify = cfg.affordance === 'verification';
+  const showReco = cfg.affordance === 'recommendation';
+  const showMetric = cfg.affordance === 'metric';
 
   return (
     <Card className="absolute inset-y-0 right-0 z-30 w-full overflow-y-auto border-gray-200 bg-white shadow-xl sm:static sm:z-auto sm:w-80 sm:shrink-0 sm:shadow-none">
@@ -1502,18 +1646,22 @@ function NodeEditPanel({
           </button>
         </div>
 
-        {/* 種別 */}
+        {/* 種別（全 kind・取り違え救済。配置の強制バリデーションはしない） */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-500">種別</label>
-          <div
-            className={`mb-1.5 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${KIND_STYLE[kind].chip}`}
-          >
-            {KIND_FLOW_LABEL[kind]}
+          <div className="mb-1 flex items-center gap-1.5">
+            <label className="block text-xs font-medium text-gray-500">種別</label>
+            <HelpTooltip text="ノードの種別です。パターンに合わせた既定が入りますが、混在可・後から変更できます（配置は強制されません）。" />
           </div>
-          <div className="flex gap-1">
+          <div
+            className={`mb-1.5 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${cfg.chip} border-transparent`}
+          >
+            {cfg.flowLabel}
+          </div>
+          <div className="grid grid-cols-3 gap-1">
             {KIND_OPTIONS.map((k) => {
               const active = k === kind;
               const Icon = KIND_ICON[k];
+              const kc = KIND_CONFIG[k];
               return (
                 <button
                   key={k}
@@ -1522,14 +1670,15 @@ function NodeEditPanel({
                   onClick={() => {
                     if (k !== kind) onPatch(node.id, { kind: k });
                   }}
-                  className={`flex flex-1 items-center justify-center gap-1 rounded border px-2 py-1.5 text-[11px] font-medium transition ${
+                  title={kc.flowLabel}
+                  className={`flex items-center justify-center gap-1 rounded border px-1 py-1.5 text-[10px] font-medium transition ${
                     active
-                      ? `${KIND_STYLE[k].chip} border-transparent ring-1 ring-inset ring-gray-300`
+                      ? `${kc.chip} border-transparent ring-1 ring-inset ring-gray-300`
                       : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
                   }`}
                 >
-                  <Icon className="h-3 w-3" />
-                  {KIND_LABEL[k]}
+                  <Icon className="h-3 w-3 shrink-0" />
+                  {kc.label}
                 </button>
               );
             })}
@@ -1552,12 +1701,12 @@ function NodeEditPanel({
           />
         </div>
 
-        {/* 検証状態（CAUSE） */}
-        {kind === 'CAUSE' && (
+        {/* 検証状態（仕掛け: CAUSE/POINT/HYPOTHESIS/VERIFICATION/RESULT。強制しない） */}
+        {showVerify && (
           <div>
             <div className="mb-1 flex items-center gap-1.5">
               <label className="block text-xs font-medium text-gray-500">検証状態</label>
-              <HelpTooltip text="その原因がどれだけ確からしいかの記録です。○確定＝裏付けあり／×否定＝原因でない／△未確認／?要ヒアリング。確定した原因を打ち手につなげます。" />
+              <HelpTooltip text="どれだけ確からしいかの記録です。○確定＝裏付けあり／×否定／△未確認／?要ヒアリング。検証結果(RESULT)は上位の論点へ集約されます。" />
             </div>
             <div className="grid grid-cols-2 gap-1">
               {VERIFY_OPTIONS.map((v) => {
@@ -1582,12 +1731,12 @@ function NodeEditPanel({
           </div>
         )}
 
-        {/* 推奨（COUNTERMEASURE） */}
-        {kind === 'COUNTERMEASURE' && (
+        {/* 推奨（仕掛け: OPTION/COUNTERMEASURE。強制しない） */}
+        {showReco && (
           <div>
             <div className="mb-1 flex items-center gap-1.5">
               <label className="block text-xs font-medium text-gray-500">推奨</label>
-              <HelpTooltip text="打ち手を採用するかの判断です。採用＝実行する／保留＝判断待ち／不採用＝見送り。効果とコストを踏まえて取捨選択します。" />
+              <HelpTooltip text="打ち手候補を採用するかの判断です。採用＝実行する／保留＝判断待ち／不採用＝見送り。効果とコストを踏まえて取捨選択します。" />
             </div>
             <div className="grid grid-cols-2 gap-1">
               {RECO_OPTIONS.map((r) => {
@@ -1609,6 +1758,29 @@ function NodeEditPanel({
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* 数値（仕掛け: METRIC。metadata.value に保持） */}
+        {showMetric && (
+          <div>
+            <div className="mb-1 flex items-center gap-1.5">
+              <label className="block text-xs font-medium text-gray-500">数値（目標/実績）</label>
+              <HelpTooltip text="このKPIの数値です（例: 12%, 1.2億円, 350件）。metadata に保持され、ノード上に表示されます。" />
+            </div>
+            <Input
+              value={metricValue}
+              onChange={(e) => setMetricValue(e.target.value)}
+              onBlur={() => {
+                const v = metricValue.trim();
+                if (v !== initialMetric) {
+                  const nextMeta = { ...(node.metadata ?? {}), value: v || null };
+                  onPatch(node.id, { metadata: nextMeta });
+                }
+              }}
+              placeholder="例: 12% / 1.2億円 / 350件"
+              className="text-sm"
+            />
           </div>
         )}
 

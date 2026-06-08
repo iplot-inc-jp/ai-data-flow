@@ -10,18 +10,35 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   NodeVerificationDto,
   NodeRecommendationDto,
+  IssueTreePatternDto,
 } from './create-issue-tree.dto';
 
 /**
  * ノード種別DTO
- * - ISSUE: 課題（論点）
+ * - ISSUE: 課題/ゴール/対象（汎用ルート）
  * - CAUSE: 原因（なぜ型の掘り下げ）
- * - COUNTERMEASURE: 打ち手（対策）
+ * - COUNTERMEASURE: 打ち手（互換: OPTION相当）
+ * - POINT: 論点（疑問形・再帰）
+ * - HYPOTHESIS: 仮説
+ * - VERIFICATION: 検証アクション
+ * - RESULT: 検証結果（○×△）
+ * - ELEMENT: 構成要素（What）
+ * - OPTION: 解決候補（How）
+ * - ACTION: 行動（MECEアクション）
+ * - METRIC: KPI（数値）
  */
 export enum IssueNodeKindDto {
   ISSUE = 'ISSUE',
   CAUSE = 'CAUSE',
   COUNTERMEASURE = 'COUNTERMEASURE',
+  POINT = 'POINT',
+  HYPOTHESIS = 'HYPOTHESIS',
+  VERIFICATION = 'VERIFICATION',
+  RESULT = 'RESULT',
+  ELEMENT = 'ELEMENT',
+  OPTION = 'OPTION',
+  ACTION = 'ACTION',
+  METRIC = 'METRIC',
 }
 
 /**
@@ -245,6 +262,9 @@ export class IssueTreeWithNodesResponseDto {
 
   @ApiProperty({ example: 'WHY' })
   type: string;
+
+  @ApiProperty({ enum: IssueTreePatternDto, example: 'ISSUE_POINT' })
+  pattern: IssueTreePatternDto;
 
   @ApiProperty({ example: '解約率が高い' })
   name: string;

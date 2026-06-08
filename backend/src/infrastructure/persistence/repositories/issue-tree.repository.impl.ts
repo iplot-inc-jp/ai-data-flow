@@ -3,10 +3,14 @@ import { randomUUID } from 'crypto';
 import {
   IssueTree,
   IssueTreeType,
+  IssueTreePattern,
   IIssueTreeRepository,
 } from '../../../domain';
 import { PrismaService } from '../prisma/prisma.service';
-import { IssueTreeType as PrismaIssueTreeType } from '@prisma/client';
+import {
+  IssueTreeType as PrismaIssueTreeType,
+  IssueTreePattern as PrismaIssueTreePattern,
+} from '@prisma/client';
 
 /**
  * イシューツリーリポジトリ実装
@@ -26,6 +30,7 @@ export class IssueTreeRepositoryImpl implements IIssueTreeRepository {
       id: data.id,
       projectId: data.projectId,
       type: data.type as IssueTreeType,
+      pattern: data.pattern as IssueTreePattern,
       name: data.name,
       rootQuestion: data.rootQuestion,
       createdAt: data.createdAt,
@@ -50,6 +55,7 @@ export class IssueTreeRepositoryImpl implements IIssueTreeRepository {
         id: t.id,
         projectId: t.projectId,
         type: t.type as IssueTreeType,
+        pattern: t.pattern as IssueTreePattern,
         name: t.name,
         rootQuestion: t.rootQuestion,
         createdAt: t.createdAt,
@@ -65,6 +71,7 @@ export class IssueTreeRepositoryImpl implements IIssueTreeRepository {
         id: tree.id,
         projectId: tree.projectId,
         type: tree.type as PrismaIssueTreeType,
+        pattern: tree.pattern as PrismaIssueTreePattern,
         name: tree.name,
         rootQuestion: tree.rootQuestion,
         createdAt: tree.createdAt,
@@ -72,6 +79,7 @@ export class IssueTreeRepositoryImpl implements IIssueTreeRepository {
       },
       update: {
         type: tree.type as PrismaIssueTreeType,
+        pattern: tree.pattern as PrismaIssueTreePattern,
         name: tree.name,
         rootQuestion: tree.rootQuestion,
         updatedAt: tree.updatedAt,

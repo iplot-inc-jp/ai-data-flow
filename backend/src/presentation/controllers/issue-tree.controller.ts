@@ -35,6 +35,7 @@ import {
   CreateIssueTreeRequestDto,
   IssueTreeResponseDto,
   IssueTreeTypeDto,
+  IssueTreePatternDto,
   IssueNodeKindDto,
   NodeVerificationDto,
   NodeRecommendationDto,
@@ -92,6 +93,7 @@ export class IssueTreeController {
     return result.map((tree) => ({
       ...tree,
       type: tree.type as IssueTreeTypeDto,
+      pattern: tree.pattern as IssueTreePatternDto,
     }));
   }
 
@@ -142,7 +144,8 @@ export class IssueTreeController {
     const result = await this.createIssueTreeUseCase.execute({
       userId: user.id,
       projectId,
-      type: dto.type,
+      type: dto.type ?? IssueTreeTypeDto.WHY,
+      pattern: dto.pattern ?? IssueTreePatternDto.ISSUE_POINT,
       name: dto.name,
       rootQuestion: dto.rootQuestion,
       gapItemId: dto.gapItemId,
@@ -150,6 +153,7 @@ export class IssueTreeController {
     return {
       ...result,
       type: result.type as IssueTreeTypeDto,
+      pattern: result.pattern as IssueTreePatternDto,
     };
   }
 
@@ -170,6 +174,7 @@ export class IssueTreeController {
     return {
       ...result,
       type: result.type as IssueTreeTypeDto,
+      pattern: result.pattern as IssueTreePatternDto,
       nodes: result.nodes.map((node) => ({
         ...node,
         kind: node.kind as IssueNodeKindDto,
@@ -201,6 +206,7 @@ export class IssueTreeController {
     return {
       ...result,
       type: result.type as IssueTreeTypeDto,
+      pattern: result.pattern as IssueTreePatternDto,
     };
   }
 

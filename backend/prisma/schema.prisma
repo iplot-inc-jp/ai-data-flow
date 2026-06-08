@@ -683,13 +683,16 @@ enum PhaseStatus {
 // ===========================================
 
 model IssueTree {
-  id           String        @id @default(uuid())
-  projectId    String        @map("project_id")
+  id           String           @id @default(uuid())
+  projectId    String           @map("project_id")
+  // 旧: ツリー型（WHY/SOLUTION）。互換のため残置。新規は pattern を使う。
   type         IssueTreeType
+  // 新: ツリーパターン（作成時に選ぶテンプレ）
+  pattern      IssueTreePattern @default(ISSUE_POINT)
   name         String
-  rootQuestion String?       @map("root_question") @db.Text
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+  rootQuestion String?          @map("root_question") @db.Text
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
 
   project  Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   nodes    IssueNode[]
@@ -702,6 +705,15 @@ model IssueTree {
 enum IssueTreeType {
   WHY // なぜ型（調査・原因究明）
   SOLUTION // 打ち手型（How・MECEアクション）
+}
+
+enum IssueTreePattern {
+  ISSUE_POINT // イシューツリー（論点・調査）
+  WHY // Whyツリー（原因究明）
+  WHAT // Whatツリー（対象分割）
+  HOW // Howツリー（打ち手・発散）
+  MECE_ACTION // MECEアクションツリー（打ち手・網羅）
+  KPI // KPIツリー
 }
 
 model IssueNode {
@@ -994,6 +1006,14 @@ enum IssueNodeKind {
   ISSUE
   CAUSE
   COUNTERMEASURE
+  POINT
+  HYPOTHESIS
+  VERIFICATION
+  RESULT
+  ELEMENT
+  OPTION
+  ACTION
+  METRIC
 }
 
 // ===========================================
