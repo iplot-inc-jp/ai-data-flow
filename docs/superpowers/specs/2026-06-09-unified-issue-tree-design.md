@@ -79,3 +79,13 @@
 
 - backend tsc 0 / frontend tsc 0 / vitest 維持。
 - ライブ smoke: 各パターンで作成 201（ルート自動生成）、論点→サブ論点→仮説→検証→結果(○×△)追加、Why の CAUSE 追加、How の OPTION+採用、種別変更、いずれも per-node API 200。既存ツリーが開ける。
+
+## Ph2: ヘルプ波（ガイド＋生成AI＋GAP例）— 合意済み・本体実装後に着手
+
+方法論ツリーを「わかりやすく・AI補助・例付き」で使えるようにする追加波。本体（パターン/種別/発散収束）の後に同じ issue-tree ファイル群へ実装。
+
+1. **使い方ガイド（パターン別）**: 既存 `@/components/ui/how-to-panel`（操作方法）＋ノード横の `?`(HelpTooltip) を活用。各パターンに「何に使う／ルール／例」を表示。文面ソース＝教材 `~/iplot-hp/shanai_kyoiku/イシューツリー/編集用/02_チートシート.md` と `03_ツリーパターン早見表.md`。
+2. **生成AIヘルプ（Claude）**: 選択ノード＋課題/GAP文脈から候補生成（論点候補／なぜ候補／打ち手候補／検証候補）→ そのまま子ノードに採用。既存 `ClaudeService` + 発想アシスト(lib/ideation-methods + ideation-assist-dialog)基盤を拡張。Anthropic 鍵は会社/ユーザー/env で解決（鍵なし時は手動ガイドのみ・ボタン無効化）。
+3. **GAP具体例**: GAP起点ツリーは GapItem の記述（businessArea/gapDescription 等）を種としてルート/論点に提示。さらに教材の例ツリー（例: 営業利益率の論点分解、売上-10%のWhy、在庫予測のHow/調査）を「テンプレ例」として挿入できるプリセットに。
+
+検証: frontend tsc 0 / vitest 維持。AI は鍵設定時に live で候補生成→採用が動く。鍵なしでもガイド/例は動く。
