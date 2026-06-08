@@ -229,12 +229,39 @@ class NodePositionItemDto {
   order?: number;
 }
 
+class EdgeHandleItemDto {
+  @IsString()
+  id: string;
+
+  @ApiProperty({ description: '接続元ノードのハンドル（接続辺）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  sourceHandle?: string | null;
+
+  @ApiProperty({ description: '接続先ノードのハンドル（接続辺）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  targetHandle?: string | null;
+}
+
 class UpdateNodePositionsDto {
   @ApiProperty({ type: [NodePositionItemDto] })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => NodePositionItemDto)
   positions: NodePositionItemDto[];
+
+  @ApiProperty({
+    type: [EdgeHandleItemDto],
+    required: false,
+    description:
+      '整形が算出した各エッジの最近接サイド接続ハンドル（任意）。指定があれば同一リクエストで sourceHandle/targetHandle を更新する。',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EdgeHandleItemDto)
+  edges?: EdgeHandleItemDto[];
 }
 
 class CreateFlowEdgeDto {
@@ -712,6 +739,26 @@ export class BusinessFlowController {
           where: { id: pos.id },
           data: { order: pos.order },
         });
+      }
+    }
+
+    // 整形が算出した最近接サイド接続ハンドル（任意）。同一リクエストで反映する。
+    // このフローに属さない / 存在しないエッジはスキップする。
+    const edgePatches = dto.edges ?? [];
+    for (const patch of edgePatches) {
+      const edge = await this.prisma.flowEdge.findUnique({
+        where: { id: patch.id },
+        select: { id: true, flowId: true },
+      });
+      if (!edge || edge.flowId !== flowId) {
+        continue;
+      }
+      const data: { sourceHandle?: string | null; targetHandle?: string | null } =
+        {};
+      if (patch.sourceHandle !== undefined) data.sourceHandle = patch.sourceHandle;
+      if (patch.targetHandle !== undefined) data.targetHandle = patch.targetHandle;
+      if (Object.keys(data).length > 0) {
+        await this.prisma.flowEdge.update({ where: { id: patch.id }, data });
       }
     }
 

@@ -152,20 +152,25 @@ describe('computeFlowLayout', () => {
 describe('computeFlowLayout (horizontal)', () => {
   const opt = { orientation: 'horizontal' as const };
 
-  it('同一ロールの線形フローは同じレーン中心Yで order 昇順に右へ進む', () => {
+  it('同一ロールの線形フロー（A→B→C）は同じレーン中心Yで列が増えて右へ進む', () => {
     const nodes: LayoutInputNode[] = [
       { id: 'a', type: 'START', roleId: 'r-customer', order: 0 },
       { id: 'b', type: 'PROCESS', roleId: 'r-customer', order: 1 },
       { id: 'c', type: 'END', roleId: 'r-customer', order: 2 },
     ];
-    const layout = computeFlowLayout(nodes, [], roles, opt);
+    // 時間軸はエッジの前後関係で駆動される（A→B→C）
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'c' },
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, opt);
     const [a, b, c] = ['a', 'b', 'c'].map(
       (id) => layout.nodes.find((n) => n.id === id)!,
     );
     // 同じレーン → 同じ中心Y
     expect(a.y).toBe(b.y);
     expect(b.y).toBe(c.y);
-    // order 昇順で右へ進む（時間=x）
+    // エッジの前後で右へ進む（時間=x, 列が厳密に増加）
     expect(a.x).toBeLessThan(b.x);
     expect(b.x).toBeLessThan(c.x);
     // レーン中心Yに一致
@@ -173,16 +178,20 @@ describe('computeFlowLayout (horizontal)', () => {
     expect(a.y).toBe(customerLane.centerY);
   });
 
-  it('時間軸は order の昇順で駆動される（入力順や roleId に依らない）', () => {
-    // 入力順は降順だが order が時間を決める
+  it('時間軸はエッジの前後関係で駆動される（入力順や roleId に依らない）', () => {
+    // 入力順は降順だがエッジ a→b→c が時間を決める
     const nodes: LayoutInputNode[] = [
       { id: 'c', roleId: 'r-system', order: 30 },
       { id: 'a', roleId: 'r-customer', order: 10 },
       { id: 'b', roleId: 'r-approver', order: 20 },
     ];
-    const layout = computeFlowLayout(nodes, [], roles, opt);
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'c' },
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, opt);
     const byId = (id: string) => layout.nodes.find((n) => n.id === id)!;
-    // order 昇順 = x 昇順
+    // エッジ前後 = x 昇順
     expect(byId('a').x).toBeLessThan(byId('b').x);
     expect(byId('b').x).toBeLessThan(byId('c').x);
   });
@@ -247,20 +256,24 @@ describe('computeFlowLayout (horizontal)', () => {
 describe('computeFlowLayout (vertical)', () => {
   const opt = { orientation: 'vertical' as const };
 
-  it('同一ロールの線形フローは同じレーン中心Xで order 昇順に下へ進む', () => {
+  it('同一ロールの線形フロー（A→B→C）は同じレーン中心Xで行が増えて下へ進む', () => {
     const nodes: LayoutInputNode[] = [
       { id: 'a', type: 'START', roleId: 'r-customer', order: 0 },
       { id: 'b', type: 'PROCESS', roleId: 'r-customer', order: 1 },
       { id: 'c', type: 'END', roleId: 'r-customer', order: 2 },
     ];
-    const layout = computeFlowLayout(nodes, [], roles, opt);
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'c' },
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, opt);
     const [a, b, c] = ['a', 'b', 'c'].map(
       (id) => layout.nodes.find((n) => n.id === id)!,
     );
     // 同じレーン → 同じ中心X
     expect(a.x).toBe(b.x);
     expect(b.x).toBe(c.x);
-    // order 昇順で下へ進む（時間=y）
+    // エッジの前後で下へ進む（時間=y, 行が厳密に増加）
     expect(a.y).toBeLessThan(b.y);
     expect(b.y).toBeLessThan(c.y);
     // レーン中心Xに一致
@@ -268,13 +281,17 @@ describe('computeFlowLayout (vertical)', () => {
     expect(a.x).toBe(customerLane.centerX);
   });
 
-  it('時間軸は order の昇順で駆動される（時間=y）', () => {
+  it('時間軸はエッジの前後関係で駆動される（時間=y）', () => {
     const nodes: LayoutInputNode[] = [
       { id: 'c', roleId: 'r-system', order: 30 },
       { id: 'a', roleId: 'r-customer', order: 10 },
       { id: 'b', roleId: 'r-approver', order: 20 },
     ];
-    const layout = computeFlowLayout(nodes, [], roles, opt);
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'c' },
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, opt);
     const byId = (id: string) => layout.nodes.find((n) => n.id === id)!;
     expect(byId('a').y).toBeLessThan(byId('b').y);
     expect(byId('b').y).toBeLessThan(byId('c').y);
@@ -344,10 +361,15 @@ describe('computeFlowLayout (orientation swap)', () => {
     { id: 'p', roleId: 'r-approver', order: 0 },
     { id: 'q', roleId: 'r-approver', order: 1 },
   ];
+  // 時間軸はエッジの前後関係で駆動される（a→b, p→q）
+  const edges: LayoutInputEdge[] = [
+    { id: 'e1', source: 'a', target: 'b' },
+    { id: 'e2', source: 'p', target: 'q' },
+  ];
 
   it('horizontal と vertical で時間/レーン軸が入れ替わる', () => {
-    const h = computeFlowLayout(nodes, [], roles, { orientation: 'horizontal' });
-    const v = computeFlowLayout(nodes, [], roles, { orientation: 'vertical' });
+    const h = computeFlowLayout(nodes, edges, roles, { orientation: 'horizontal' });
+    const v = computeFlowLayout(nodes, edges, roles, { orientation: 'vertical' });
 
     const hById = (id: string) => h.nodes.find((n) => n.id === id)!;
     const vById = (id: string) => v.nodes.find((n) => n.id === id)!;
@@ -381,6 +403,162 @@ describe('computeFlowLayout (orientation swap)', () => {
     expect(h.height).toBeGreaterThan(0);
     expect(v.width).toBeGreaterThan(0);
     expect(v.height).toBeGreaterThan(0);
+  });
+});
+
+// ===========================================
+// computeFlowLayout — タイムライン軸 = エッジ前後関係（最長経路レイヤリング）
+// ===========================================
+describe('computeFlowLayout (edge-precedence timeline)', () => {
+  it('線形チェーン A→B→C は列が厳密に 0,1,2 と増える（horizontal）', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-customer', order: 0 },
+      { id: 'c', roleId: 'r-customer', order: 0 },
+    ];
+    // 全ノード同 order でも、エッジ前後関係が列を決める
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'c' },
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+    });
+    const byId = (id: string) => layout.nodes.find((n) => n.id === id)!;
+    // 列幅（columnWidth）は一定なので、x の差は列差に比例
+    const cw = DEFAULT_LAYOUT_OPTIONS.columnWidth;
+    expect(byId('b').x - byId('a').x).toBeCloseTo(cw);
+    expect(byId('c').x - byId('b').x).toBeCloseTo(cw);
+  });
+
+  it('合流は最長経路を採用する（a→b→d と a→d で d は 2 列右）', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-customer', order: 0 },
+      { id: 'd', roleId: 'r-customer', order: 0 },
+    ];
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'd' },
+      { id: 'e3', source: 'a', target: 'd' }, // 短絡（長さ1）
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+    });
+    const byId = (id: string) => layout.nodes.find((n) => n.id === id)!;
+    const cw = DEFAULT_LAYOUT_OPTIONS.columnWidth;
+    // 最長経路 a(0)→b(1)→d(2): d は a より 2 列右
+    expect(byId('d').x - byId('a').x).toBeCloseTo(cw * 2);
+    expect(byId('b').x - byId('a').x).toBeCloseTo(cw);
+  });
+
+  it('同 order の UNCONNECTED ノードは同じ列を共有して積み上がる（horizontal）', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'n1', roleId: 'r-customer', order: 0 },
+      { id: 'n2', roleId: 'r-customer', order: 0 },
+      { id: 'n3', roleId: 'r-customer', order: 0 },
+    ];
+    // エッジ無し → 全ノード layer 0 → 同じ列（x が一致）
+    const layout = computeFlowLayout(nodes, [], roles, {
+      orientation: 'horizontal',
+    });
+    const xs = ['n1', 'n2', 'n3'].map(
+      (id) => layout.nodes.find((n) => n.id === id)!.x,
+    );
+    expect(new Set(xs).size).toBe(1);
+  });
+
+  it('2ノード循環は別々の列へ展開され（左端 1 列に潰れない）、循環で例外も投げない', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'n1', roleId: 'r-customer', order: 0 },
+      { id: 'n2', roleId: 'r-customer', order: 0 },
+    ];
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'n1', target: 'n2' },
+      { id: 'e2', source: 'n2', target: 'n1' }, // バックエッジ（循環）
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+    });
+    const byId = (id: string) => layout.nodes.find((n) => n.id === id)!;
+    // n1→n2 が前向き、n2→n1 はバックエッジで除外 → n1=列0, n2=列1
+    expect(byId('n1').x).toBeLessThan(byId('n2').x);
+  });
+});
+
+// ===========================================
+// computeFlowLayout — 最近接サイド接続ハンドル（edges 返り値）
+// ===========================================
+describe('computeFlowLayout (nearest-side edge handles)', () => {
+  it('ターゲットが右にある水平エッジは source=right / target=left', () => {
+    // a→b（同レーン・チェーン）→ b は a の右
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-customer', order: 0 },
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+    });
+    expect(layout.edges).toHaveLength(1);
+    const e = layout.edges.find((x) => x.id === 'e1')!;
+    expect(e.sourceHandle).toBe('right');
+    expect(e.targetHandle).toBe('left');
+  });
+
+  it('ターゲットが下にある垂直エッジは source=bottom / target=top', () => {
+    // 別ロール間のエッジで、vertical では x が分離・チェーンで y が下に進む。
+    // a(customer)→b(customer) を vertical で並べると b は a の真下。
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-customer', order: 0 },
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'vertical',
+    });
+    const e = layout.edges.find((x) => x.id === 'e1')!;
+    expect(e.sourceHandle).toBe('bottom');
+    expect(e.targetHandle).toBe('top');
+  });
+
+  it('source と target で必ず反対辺になる（top↔bottom / left↔right）', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-approver', order: 0 },
+      { id: 'c', roleId: 'r-system', order: 0 },
+    ];
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'c' },
+    ];
+    const opposite: Record<string, string> = {
+      top: 'bottom',
+      bottom: 'top',
+      left: 'right',
+      right: 'left',
+    };
+    for (const orientation of ['horizontal', 'vertical'] as const) {
+      const layout = computeFlowLayout(nodes, edges, roles, { orientation });
+      for (const e of layout.edges) {
+        expect(opposite[e.sourceHandle]).toBe(e.targetHandle);
+      }
+    }
+  });
+
+  it('端点欠落エッジは edges に含めない', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-customer', order: 0 },
+    ];
+    const edges: LayoutInputEdge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'a', target: 'ghost' }, // 欠落端点
+    ];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+    });
+    expect(layout.edges.map((e) => e.id)).toEqual(['e1']);
   });
 });
 

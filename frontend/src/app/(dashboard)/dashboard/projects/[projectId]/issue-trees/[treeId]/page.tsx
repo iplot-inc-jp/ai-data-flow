@@ -1,6 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  memo,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -432,6 +441,14 @@ const nodeTypes = { mind: MindNode };
 //      ノードや配下のサブツリーは削除しない（“切り離し”であって“削除”ではない）。
 //   3) 線の形（角ばり smoothstep / 曲線 bezier）は親側の状態でセッション内トグル。
 //      永続化フィールドが無いためサーバ保存はしない（見た目のみ）。
+//   4) 選択中は子端（子ノード側）に先端アンカーを出す（Swimlane 67e8267 の
+//      onTargetAnchorDown をミラー）。アンカーを「何もない所」へドラッグ(=6px超移動)
+//      して離すと子ノードをデタッチ（親リンク解除＝ルート直下へ）。上記(2)と同じ
+//      既存の PUT { parentId: null } を再利用する非破壊操作で、ノード削除はしない。
+//      ※「別ノードへドロップで付け替え」は意図的に未対応。reparent API には
+//        直接の自己親チェックしか無く（子孫への付け替えで循環が作れてしまう）、
+//        任意ノードへの付け替えは循環リスクがあるため、ここでは空所デタッチのみ。
+//      ※ ルート仮想エッジ（parentId=null）は既に親が無いのでアンカーを出さない。
 
 type IssueEdgeShape = 'smoothstep' | 'bezier';
 
@@ -461,6 +478,49 @@ const IssueEdge = memo(function IssueEdge({
   const params = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
   const [edgePath, labelX, labelY] =
     d.shape === 'bezier' ? getBezierPath(params) : getSmoothStepPath(params);
+
+  // 先端ドラッグ（デタッチ）用: 開始点(screen)とカーソル位置を保持してゴースト線を描く。
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+
+  const onDetach = d.onDetach;
+  const childNodeId = d.childNodeId;
+
+  // 子端アンカーのドラッグ（Swimlane 67e8267 の onTargetAnchorDown をミラー）。
+  // 6px 超の移動で離した時、ドロップ先が「ノードでない（何もない所）」なら子をデタッチ。
+  // ※ 付け替え（別ノードへドロップ）は循環リスクのため未対応。ノード上に落ちた場合は何もしない。
+  const onAnchorDown = useCallback(
+    (e: ReactPointerEvent) => {
+      if (!onDetach) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const sx = e.clientX;
+      const sy = e.clientY;
+      let moved = false;
+      dragStartRef.current = { x: sx, y: sy };
+      setDragPos({ x: sx, y: sy });
+      const move = (ev: PointerEvent) => {
+        if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) >= 6) moved = true;
+        setDragPos({ x: ev.clientX, y: ev.clientY });
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        setDragPos(null);
+        dragStartRef.current = null;
+        if (!moved) return; // ただのクリックは無視（誤デタッチ防止）
+        const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        const nodeEl = el?.closest('.react-flow__node') as HTMLElement | null;
+        // ノードでない所（＝何もない所）に落ちたらデタッチ。ノード上は循環回避のため何もしない。
+        if (!nodeEl) onDetach?.(childNodeId);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+    [onDetach, childNodeId],
+  );
+
+  const dragging = dragPos !== null;
 
   return (
     <>
@@ -496,7 +556,61 @@ const IssueEdge = memo(function IssueEdge({
             <Unlink className="h-3 w-3" />
           </button>
         )}
+        {/* 子端（子ノード側）の先端アンカー。選択中＆デタッチ可能なエッジだけに出す。
+            ドラッグで「何もない所」へ離すと子をデタッチ（親リンク解除）。 */}
+        {selected && d.detachable && d.onDetach && (
+          <div
+            className={`nodrag nopan flex items-center justify-center ${
+              dragging ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
+            title="ドラッグして何もない所で離す: このノードを親から切り離す"
+            onPointerDown={onAnchorDown}
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${targetX}px,${targetY}px)`,
+              pointerEvents: 'all',
+              width: 22,
+              height: 22,
+            }}
+          >
+            <span
+              className={`block rounded-full ring-2 transition-all ${
+                dragging
+                  ? 'h-3.5 w-3.5 bg-indigo-500 ring-indigo-300'
+                  : 'h-3 w-3 bg-indigo-500/80 ring-indigo-200'
+              }`}
+            />
+          </div>
+        )}
       </EdgeLabelRenderer>
+      {/* ドラッグ中のゴースト線（デタッチ操作の視覚フィードバック）。最前面・イベント透過。 */}
+      {dragging &&
+        dragStartRef.current &&
+        dragPos &&
+        createPortal(
+          <svg
+            style={{
+              position: 'fixed',
+              inset: 0,
+              width: '100vw',
+              height: '100vh',
+              pointerEvents: 'none',
+              zIndex: 9999,
+            }}
+          >
+            <line
+              x1={dragStartRef.current.x}
+              y1={dragStartRef.current.y}
+              x2={dragPos.x}
+              y2={dragPos.y}
+              stroke="#6366f1"
+              strokeWidth={2}
+              strokeDasharray="5 4"
+            />
+            <circle cx={dragPos.x} cy={dragPos.y} r={5} fill="#6366f1" />
+          </svg>,
+          document.body,
+        )}
     </>
   );
 });

@@ -948,6 +948,12 @@ export default function ProjectFlowDetailPage() {
         positionY: number;
         roleId?: string | null;
         order?: number;
+      }>,
+      // 整形が算出した最近接サイド接続ハンドル（任意）。位置保存と同一リクエストで送る。
+      edges?: Array<{
+        id: string;
+        sourceHandle?: string | null;
+        targetHandle?: string | null;
       }>
     ) => {
       if (!flowData) return;
@@ -958,7 +964,9 @@ export default function ProjectFlowDetailPage() {
           {
             method: 'PUT',
             headers,
-            body: JSON.stringify({ positions }),
+            body: JSON.stringify(
+              edges && edges.length > 0 ? { positions, edges } : { positions }
+            ),
           }
         );
         if (!res.ok) throw new Error('Failed to tidy node positions');

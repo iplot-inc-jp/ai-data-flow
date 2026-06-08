@@ -138,9 +138,25 @@ export interface Lane {
   centerX: number;
 }
 
+/** ノードの 4 辺いずれかを指す接続ハンドル側。 */
+export type HandleSide = 'top' | 'right' | 'bottom' | 'left';
+
+/**
+ * 整形後のノード幾何から導いた「各エッジの最近接サイド接続」。
+ * 2 ノードの中心ベクトルから source/target のハンドル辺を一意に決める
+ * （向きに依存しない: 実ジオメトリで縦横どちらでも正しい）。
+ */
+export interface PositionedEdge {
+  id: string;
+  sourceHandle: HandleSide;
+  targetHandle: HandleSide;
+}
+
 export interface FlowLayout {
   nodes: PositionedNode[];
   lanes: Lane[];
+  /** 整形後の各エッジの最近接サイド接続ハンドル（source/target の辺）。 */
+  edges: PositionedEdge[];
   width: number;
   height: number;
   orientation: FlowOrientation;
@@ -246,18 +262,22 @@ function normalizeType(t?: string): LayoutNodeType {
 }
 
 /**
- * 各ノード id → タイムライン列インデックス（0始まり, 連続整数）への写像を作る。
+ * 各ノード id → タイムライン列インデックス（0始まり整数）への写像を作る。
  *
- * 主軸は order（昇順）。ただし「同じ order を持つノードどうしがエッジで繋がっている」
- * 場合は、それらを同一列に積み上げず、エッジの向き（依存関係）に沿って別々の列へ
- * 展開する。これにより n1→n2→n1 のような小さな連鎖（循環含む）が、左端の 1 列に
- * 重なって潰れる（screenshot のバグ）のを防ぎ、時間軸方向に展開される。
+ * 時間軸は「矢印の前後関係（エッジの依存）」で駆動される: source→target は
+ * 「時間が進む（source は target より前の列）」を意味する。列インデックスは
+ * エッジ DAG 上の **最長経路（longest-path layering）** で決まる。これにより
+ * 線形チェーン A→B→C は 0,1,2 と厳密に増える列を得る。
  *
- * 一方で「同じ order を持つがエッジで繋がっていない」ノード群（例: 同一セルに意図的に
- * 積みたいノード）は同じ列のままにして、従来どおりクロス軸へ積み上げる。
+ * 循環の扱い: DFS でバックエッジ（現在 DFS スタック上にあるノードへ戻るエッジ）を
+ * 除外して残りを DAG にする。除外したバックエッジは列計算に使わないので、
+ * n1→n2→n1 のような小さな循環も n1=0, n2=1 と時間軸方向に展開され、左端 1 列に
+ * 潰れない（screenshot のバグ）。エッジに一切繋がっていないノード（孤立ノード・
+ * 自己ループのみ）は layer 0（先頭列）に置かれ、同列のものはクロス軸に積み上がる
+ * （従来どおりの「同 order 非連結ノードは同列で積む」挙動）。
  *
- * 安定性: order が無いノードは 0 として扱い、同値・非連結のタイブレークは入力順。
- * 循環があっても例外を投げず決定的に列を割り当てる。
+ * 決定性: DFS の根/探索順は (order, inputIndex) 昇順で安定化する。order が無い
+ * ノードは 0 として扱う。循環があっても例外を投げない。
  */
 function buildTimelineIndex(
   inputNodes: LayoutInputNode[],
@@ -265,75 +285,103 @@ function buildTimelineIndex(
 ): Map<string, number> {
   const idIndex = new Map<string, number>();
   inputNodes.forEach((n, i) => idIndex.set(n.id, i));
+  const idSet = new Set(inputNodes.map((n) => n.id));
   const orderOf = (n: LayoutInputNode) =>
     typeof n.order === 'number' && Number.isFinite(n.order) ? n.order : 0;
+  const orderById = new Map<string, number>();
+  for (const n of inputNodes) orderById.set(n.id, orderOf(n));
 
-  // order 値ごとにノードをグループ化する（グループ内は入力順を保持）。
-  // 各グループ内で、エッジ source→target を「左→右（時間が進む）」とみなして
-  // ノードを別々の列へ直列化する。同一 order でも連鎖は時間軸へ展開される。
-  const groups = new Map<number, LayoutInputNode[]>();
-  for (const n of inputNodes) {
-    const o = orderOf(n);
-    if (!groups.has(o)) groups.set(o, []);
-    groups.get(o)!.push(n);
+  // (order, inputIndex) 昇順の決定的タイブレーク比較。
+  const cmp = (a: string, b: string) => {
+    const oa = orderById.get(a) ?? 0;
+    const ob = orderById.get(b) ?? 0;
+    if (oa !== ob) return oa - ob;
+    return (idIndex.get(a) ?? 0) - (idIndex.get(b) ?? 0);
+  };
+
+  // --- 隣接リスト source→target（自己ループ・端点欠落・重複を除去） ---
+  const adjacency = new Map<string, string[]>();
+  for (const n of inputNodes) adjacency.set(n.id, []);
+  const seenEdge = new Set<string>();
+  for (const e of edges) {
+    if (e.source === e.target) continue;
+    if (!idSet.has(e.source) || !idSet.has(e.target)) continue;
+    const k = `${e.source}->${e.target}`;
+    if (seenEdge.has(k)) continue;
+    seenEdge.add(k);
+    adjacency.get(e.source)!.push(e.target);
+  }
+  // 隣接リストは (order, inputIndex) 昇順で安定化する。
+  for (const list of Array.from(adjacency.values())) list.sort(cmp);
+
+  // --- DFS で循環を切る: スタック上のノードへ戻るエッジ（バックエッジ）を除外し、
+  //     残りを DAG とみなす。探索順は (order, inputIndex) 昇順で決定的。 ---
+  const order = [...inputNodes.map((n) => n.id)].sort(cmp);
+  const dagAdj = new Map<string, string[]>();
+  for (const id of order) dagAdj.set(id, []);
+  const state = new Map<string, 0 | 1 | 2>(); // 0=未訪問 1=スタック上 2=完了
+  for (const id of order) state.set(id, 0);
+
+  // 再帰だと深いグラフでスタック溢れし得るため明示スタックの反復 DFS。
+  for (const root of order) {
+    if (state.get(root) !== 0) continue;
+    const stack: Array<{ id: string; childIdx: number }> = [
+      { id: root, childIdx: 0 },
+    ];
+    state.set(root, 1);
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const children = adjacency.get(frame.id)!;
+      if (frame.childIdx >= children.length) {
+        state.set(frame.id, 2);
+        stack.pop();
+        continue;
+      }
+      const next = children[frame.childIdx++];
+      const st = state.get(next);
+      if (st === 1) {
+        // バックエッジ（循環）: DAG から除外する。
+        continue;
+      }
+      // 前向き/交差エッジは DAG エッジとして採用する。
+      dagAdj.get(frame.id)!.push(next);
+      if (st === 0) {
+        state.set(next, 1);
+        stack.push({ id: next, childIdx: 0 });
+      }
+    }
   }
 
-  const timelineIndexOf = new Map<string, number>();
-  let nextColumn = 0;
-  const orderedKeys = Array.from(groups.keys()).sort((a, b) => a - b);
-  for (const o of orderedKeys) {
-    const members = groups.get(o)!;
-    const memberIds = new Set(members.map((m) => m.id));
+  // --- DAG 上の最長経路で layer を割り当てる ---
+  // layer[v] = DAG 入辺が無ければ 0、あれば max(layer[u]+1)。孤立ノードは 0。
+  const dagIndegree = new Map<string, number>();
+  for (const id of order) dagIndegree.set(id, 0);
+  for (const id of order) {
+    for (const v of dagAdj.get(id)!) {
+      dagIndegree.set(v, (dagIndegree.get(v) ?? 0) + 1);
+    }
+  }
+  const layer = new Map<string, number>();
+  for (const id of order) layer.set(id, 0);
 
-    // グループ内に閉じた（source/target が両方このグループ内の）エッジだけ採用。
-    // 自己ループ・重複は無視。隣接リストは入力順で安定化する。
-    const adjacency = new Map<string, string[]>();
-    for (const m of members) adjacency.set(m.id, []);
-    const seenEdge = new Set<string>();
-    for (const e of edges) {
-      if (e.source === e.target) continue;
-      if (!memberIds.has(e.source) || !memberIds.has(e.target)) continue;
-      const k = `${e.source}->${e.target}`;
-      if (seenEdge.has(k)) continue;
-      seenEdge.add(k);
-      adjacency.get(e.source)!.push(e.target);
+  // Kahn のトポロジカル順（DAG なので必ず全ノードを処理できる）。
+  // キューは (order, inputIndex) 昇順を保つよう挿入後にソートはせず、根集合を
+  // 事前ソート済み order から拾うことで決定性を担保する。
+  const remaining = new Map(dagIndegree);
+  const queue: string[] = order.filter((id) => (remaining.get(id) ?? 0) === 0);
+  let qi = 0;
+  while (qi < queue.length) {
+    const u = queue[qi++];
+    const lu = layer.get(u)!;
+    for (const v of dagAdj.get(u)!) {
+      if (layer.get(v)! < lu + 1) layer.set(v, lu + 1);
+      const d = (remaining.get(v) ?? 0) - 1;
+      remaining.set(v, d);
+      if (d === 0) queue.push(v);
     }
-    for (const list of Array.from(adjacency.values())) {
-      list.sort((a, b) => idIndex.get(a)! - idIndex.get(b)!);
-    }
-
-    // DFS でグループ内を「source→target = 時間が進む」順に直列化する。
-    // すでに列を割ったノードへ戻るエッジ（= 循環のバックエッジ）は無視して
-    // 列を確定するので、n1→n2→n1 のような循環も n1, n2 と右へ展開され、
-    // 左端 1 列に潰れない（screenshot のバグ）。エッジで繋がっていない同 order
-    // ノードは同じ列のまま（クロス軸に積み上げ → 従来挙動を維持）。
-    let col = nextColumn;
-    const assign = (id: string) => {
-      timelineIndexOf.set(id, col);
-      for (const next of adjacency.get(id) ?? []) {
-        if (!timelineIndexOf.has(next)) {
-          col += 1;
-          assign(next);
-        }
-      }
-    };
-    // 入力順で未割当ノードを起点に直列化（決定的）。連結成分ごとに
-    // nextColumn から開始するので、非連結ノードは同列で積み上がる。
-    for (const m of members) {
-      if (!timelineIndexOf.has(m.id)) {
-        col = nextColumn;
-        assign(m.id);
-      }
-    }
-    // 次の order グループは、このグループが使った最大列の右隣から始める。
-    let maxCol = nextColumn;
-    for (const m of members) {
-      maxCol = Math.max(maxCol, timelineIndexOf.get(m.id) ?? nextColumn);
-    }
-    nextColumn = maxCol + 1;
   }
 
-  return timelineIndexOf;
+  return layer;
 }
 
 /**
@@ -341,19 +389,22 @@ function buildTimelineIndex(
  *
  * - レーン = ロール（roles の並び順）。roleId 不明/未指定のノードは末尾の
  *   「未割当」レーンへ集約する。
- * - タイムライン軸 = ノードの order を昇順に並べた列/行インデックス。
- *   order が同値ならタイブレークは入力順。
- * - 同一 (order, ロール) セルに複数ノードがある場合はクロス軸方向に
+ * - タイムライン軸 = 矢印の前後関係（エッジ DAG の最長経路）で決まる列/行インデックス。
+ *   source→target は時間が進む向き。order + inputIndex は同一 (layer, lane) セル内の
+ *   クロス軸積み上げ順のタイブレークに使う。
+ * - 同一 (timeline, ロール) セルに複数ノードがある場合はクロス軸方向に
  *   並べ、必要に応じてそのレーンの厚みを自動拡張する。
  * - lanes / nodes / width / height は全て同一の laneOffsets から導出され、
  *   描画側（背景・ヘッダー・ノード）が常に一致する。
+ * - edges = 整形後のノード幾何から導いた各エッジの「最近接サイド接続」。
+ *   2 ノード中心ベクトルの主軸（|dx|>=|dy| なら水平）で source/target の辺を決める。
  *
  * horizontal: 時間=x（左→右）, レーン=横帯（上→下に積層, centerY）。
  * vertical:   時間=y（上→下）, レーン=縦列（左→右に並置, centerX）。
  */
 export function computeFlowLayout(
   inputNodes: LayoutInputNode[],
-  _inputEdges: LayoutInputEdge[],
+  inputEdges: LayoutInputEdge[],
   inputRoles: LayoutRole[],
   options: Partial<LayoutOptions> = {},
 ): FlowLayout {
@@ -386,7 +437,7 @@ export function computeFlowLayout(
     roleId && knownRoleIds.has(roleId) ? roleId : opt.unassignedLaneId;
 
   // --- タイムライン軸（order 昇順 + エッジによる同 order 連鎖の展開）を算出 ---
-  const timelineIndexOf = buildTimelineIndex(inputNodes, _inputEdges);
+  const timelineIndexOf = buildTimelineIndex(inputNodes, inputEdges);
 
   // --- (timeline, レーン) セルへグルーピング ---
   type Cell = LayoutInputNode & {
@@ -526,12 +577,48 @@ export function computeFlowLayout(
   const orderIndex = new Map(inputNodes.map((n, i) => [n.id, i] as const));
   positioned.sort((a, b) => orderIndex.get(a.id)! - orderIndex.get(b.id)!);
 
+  // --- 各エッジの最近接サイド接続ハンドルを、確定したノード中心から導く ---
+  // 主軸 = |dx| >= |dy| なら水平。水平なら source = dx>0 ? 'right' : 'left'、
+  // target はその反対側。垂直なら source = dy>0 ? 'bottom' : 'top'、target は反対側。
+  // ジオメトリ実値から決めるので向き（縦横）に依らず正しい。
+  const centerById = new Map<string, { x: number; y: number }>();
+  for (const p of positioned) centerById.set(p.id, { x: p.x, y: p.y });
+  const opposite: Record<HandleSide, HandleSide> = {
+    top: 'bottom',
+    bottom: 'top',
+    left: 'right',
+    right: 'left',
+  };
+  const seenEdgeOut = new Set<string>();
+  const edges: PositionedEdge[] = [];
+  for (const e of inputEdges) {
+    if (seenEdgeOut.has(e.id)) continue;
+    const s = centerById.get(e.source);
+    const t = centerById.get(e.target);
+    if (!s || !t) continue; // 端点欠落エッジはスキップ
+    seenEdgeOut.add(e.id);
+    const dx = t.x - s.x;
+    const dy = t.y - s.y;
+    let sourceHandle: HandleSide;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      sourceHandle = dx > 0 ? 'right' : 'left';
+    } else {
+      sourceHandle = dy > 0 ? 'bottom' : 'top';
+    }
+    edges.push({
+      id: e.id,
+      sourceHandle,
+      targetHandle: opposite[sourceHandle],
+    });
+  }
+
   const timeExtent =
     opt.marginX * 2 + maxTimeline * opt.columnWidth + opt.nodeWidth;
 
   return {
     nodes: positioned,
     lanes,
+    edges,
     width: isHorizontal ? timeExtent : crossTotal,
     height: isHorizontal ? crossTotal : timeExtent,
     orientation,

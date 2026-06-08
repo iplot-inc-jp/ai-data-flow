@@ -126,6 +126,16 @@ export interface NodePositionPatch {
   order?: number;
 }
 
+/**
+ * 整形が算出した 1 エッジ分の最近接サイド接続ハンドル。
+ * `PUT /:flowId/nodes/positions` の edges[] に対応（位置保存と同一リクエストで送る）。
+ */
+export interface EdgeHandlePatch {
+  id: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
 /** ノードの入出力リンク取得結果（双方向）。 */
 export interface NodeLinksResult {
   nodeId: string;
@@ -241,8 +251,13 @@ export interface SwimlaneCanvasProps {
   /**
    * 「整形」: 全ノードの位置/ロール/順序を一括保存する（`PUT /:flowId/nodes/positions`）。
    * computeFlowLayout で算出した綺麗な座標を渡し、呼び出し側が永続化→再取得する。
+   * edges には整形後の最近接サイド接続ハンドル（任意）を渡し、同一リクエストで
+   * 各エッジの sourceHandle/targetHandle も更新する。
    */
-  onTidyNodes?: (positions: NodePositionPatch[]) => Promise<void> | void;
+  onTidyNodes?: (
+    positions: NodePositionPatch[],
+    edges?: EdgeHandlePatch[],
+  ) => Promise<void> | void;
   /**
    * スイムレーン（ロール）の手動リサイズ後の高さを永続化する。
    * レーン背景の下端ハンドルをドラッグすると呼ばれる（roleId, 新しい厚み）。
@@ -284,9 +299,18 @@ interface PositionedNodeGeom {
   order?: number;
 }
 
+/** 整形後の各エッジの最近接サイド接続ハンドル（source/target の辺）。 */
+interface PositionedEdgeGeom {
+  id: string;
+  sourceHandle: string;
+  targetHandle: string;
+}
+
 interface FlowLayoutView {
   nodes: PositionedNodeGeom[];
   lanes: LaneGeom[];
+  /** 整形後の各エッジの最近接サイド接続ハンドル。整形時に sourceHandle/targetHandle 永続化に使う。 */
+  edges: PositionedEdgeGeom[];
   width: number;
   height: number;
   orientation?: FlowOrientation;
@@ -849,15 +873,18 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   useEffect(() => {
     setOrientation(readStoredOrientation(flowData.id));
   }, [flowData.id]);
-  const toggleOrientation = useCallback(() => {
-    setOrientation((prev) => {
-      const next: FlowOrientation = prev === 'horizontal' ? 'vertical' : 'horizontal';
+  // 低レベル: 向きを state へ反映しつつ localStorage に永続化する。
+  // 実際の「トグル + 新しい向きでの再レイアウト保存」は tidyLayout 定義後の
+  // toggleOrientation（後段）で行う。
+  const applyOrientation = useCallback(
+    (next: FlowOrientation) => {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('flow-orientation-' + flowData.id, next);
       }
-      return next;
-    });
-  }, [flowData.id]);
+      setOrientation(next);
+    },
+    [flowData.id],
+  );
 
   const isVertical = orientation === 'vertical';
 
@@ -888,31 +915,41 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     [flowData.laneHeights, localLaneHeights],
   );
 
+  // computeFlowLayout への入力（ノード/エッジ）。整形・向きトグル再レイアウトで共有する。
+  const layoutInputNodes = useMemo<LayoutInputNode[]>(
+    () =>
+      flowData.nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        roleId: n.roleId ?? n.role?.id ?? null,
+        order: n.order,
+      })),
+    [flowData.nodes],
+  );
+  const layoutInputEdges = useMemo<LayoutInputEdge[]>(
+    () =>
+      flowData.edges.map((e) => ({
+        id: e.id,
+        source: e.sourceNodeId,
+        target: e.targetNodeId,
+      })),
+    [flowData.edges],
+  );
+
   // --- 整形エンジン（computeFlowLayout）: 綺麗な決定的座標 ---
   // 用途は 2 つ:
   //  1) 未配置ノード（positionX/Y が 0,0）のシード位置（原点スタックを防ぐ）
   //  2) 「整形」ボタンが永続化する綺麗なレイアウト
   // ノードの roleId が変わったり向きが変わると再計算される。
   const tidyLayout = useMemo<FlowLayoutView>(() => {
-    const inputNodes: LayoutInputNode[] = flowData.nodes.map((n) => ({
-      id: n.id,
-      type: n.type,
-      roleId: n.roleId ?? n.role?.id ?? null,
-      order: n.order,
-    }));
-    const inputEdges: LayoutInputEdge[] = flowData.edges.map((e) => ({
-      id: e.id,
-      source: e.sourceNodeId,
-      target: e.targetNodeId,
-    }));
     // 整形が算出するレーン厚を背景レーン帯（computeLaneBands）と完全一致させるため、
     // 同一の laneHeightOverrides を渡す。これにより整形後にノード中心が必ず
     // 自レーン帯内に収まり、帯の外へはみ出さない。
-    return computeFlowLayout(inputNodes, inputEdges, laneRoles, {
+    return computeFlowLayout(layoutInputNodes, layoutInputEdges, laneRoles, {
       orientation,
       laneHeightOverrides,
     } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
-  }, [flowData.nodes, flowData.edges, laneRoles, orientation, laneHeightOverrides]);
+  }, [layoutInputNodes, layoutInputEdges, laneRoles, orientation, laneHeightOverrides]);
 
   // --- 各ノードの実効位置（左上座標） ---
   // 保存済み positionX/Y があればそれを使い、未配置なら tidyLayout のシード座標を使う。
@@ -1316,21 +1353,58 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     [bands, isVertical, roles, flowData.nodes, props],
   );
 
+  // 与えられたレイアウト（computeFlowLayout の結果）を一括保存ペイロードへ変換する。
+  // ノード位置（中心→左上）と、最近接サイド接続ハンドル（edges）を同一リクエストで送る。
+  const persistLayout = useCallback(
+    (layout: FlowLayoutView) => {
+      const positions: NodePositionPatch[] = layout.nodes.map((pn) => ({
+        id: pn.id,
+        // computeFlowLayout は中心座標 → サーバ保存は左上基準
+        positionX: pn.x - pn.width / 2,
+        positionY: pn.y - pn.height / 2,
+        // 未割当レーンの roleId はノードへ書き戻さない（null のまま）
+        roleId: roles.some((r) => r.id === pn.roleId) ? pn.roleId : null,
+        order: typeof pn.order === 'number' ? pn.order : undefined,
+      }));
+      const edges: EdgeHandlePatch[] = layout.edges.map((e) => ({
+        id: e.id,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      }));
+      void props.onTidyNodes?.(positions, edges);
+    },
+    [roles, props],
+  );
+
   // --- 「整形」: computeFlowLayout で綺麗な座標を作り、一括保存して再取得 ---
-  // ぐちゃぐちゃになった自由配置を、ロール×order の決定的レイアウトへ戻す安全網。
+  // ぐちゃぐちゃになった自由配置を、ロール×前後関係の決定的レイアウトへ戻す安全網。
   const handleTidy = useCallback(() => {
     setMenu(null);
-    const positions: NodePositionPatch[] = tidyLayout.nodes.map((pn) => ({
-      id: pn.id,
-      // computeFlowLayout は中心座標 → サーバ保存は左上基準
-      positionX: pn.x - pn.width / 2,
-      positionY: pn.y - pn.height / 2,
-      // 未割当レーンの roleId はノードへ書き戻さない（null のまま）
-      roleId: roles.some((r) => r.id === pn.roleId) ? pn.roleId : null,
-      order: typeof pn.order === 'number' ? pn.order : undefined,
-    }));
-    void props.onTidyNodes?.(positions);
-  }, [tidyLayout, roles, props]);
+    persistLayout(tidyLayout);
+  }, [tidyLayout, persistLayout]);
+
+  // --- 向きトグル: 反転後、新しい向きで再レイアウトして一括保存する ---
+  // 向きを切り替えるだけでは旧向きの自由配置座標が残り、レーン/前後関係が崩れる。
+  // 反転後の向きで computeFlowLayout を回し、ノード位置 + 最近接サイド接続ハンドルを
+  // onTidyNodes で永続化することで、新しい向きにレーン × 前後関係で再配置する。
+  // localStorage 永続化は applyOrientation が担う。
+  const toggleOrientation = useCallback(() => {
+    const next: FlowOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
+    applyOrientation(next);
+    const relaid = computeFlowLayout(layoutInputNodes, layoutInputEdges, laneRoles, {
+      orientation: next,
+      laneHeightOverrides,
+    } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
+    persistLayout(relaid);
+  }, [
+    orientation,
+    applyOrientation,
+    layoutInputNodes,
+    layoutInputEdges,
+    laneRoles,
+    laneHeightOverrides,
+    persistLayout,
+  ]);
 
   return (
     <div ref={wrapperRef} className="relative w-full h-full bg-white">

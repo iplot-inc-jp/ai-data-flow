@@ -17,6 +17,8 @@ export {
 export type {
   FlowLayout,
   PositionedNode,
+  PositionedEdge,
+  HandleSide,
   Lane,
   LayoutInputNode,
   LayoutInputEdge,
