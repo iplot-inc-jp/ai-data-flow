@@ -40,7 +40,7 @@ import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/S
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
-import { dfdApi, informationTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type InformationType } from '@/lib/dfd';
+import { dfdApi, informationTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type InformationType, type InformationCategory } from '@/lib/dfd';
 import type {
   FlowData,
   FlowLinkDirection,
@@ -1367,6 +1367,21 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
+  // 情報種別マスタにその場で新規追加（ノード/矢印パネルから）。作成後に一覧を再取得して各セレクトへ反映。
+  const handleCreateInformationType = useCallback(
+    async (input: { name: string; category: InformationCategory }) => {
+      try {
+        const created = await informationTypeApi.create(projectId, input);
+        setInformationTypes(await informationTypeApi.list(projectId));
+        return created;
+      } catch (err) {
+        console.error('Failed to create information type:', err);
+        return null;
+      }
+    },
+    [projectId]
+  );
+
   // ===========================================
   // 表示ロール選択（フローごと localStorage 永続化）
   // ===========================================
@@ -1784,6 +1799,7 @@ export default function ProjectFlowDetailPage() {
           otherFlows={otherFlows}
           informationTypes={informationTypes}
           onSaveNodeInformationLinks={handleSaveNodeInformationLinks}
+          onCreateInformationType={handleCreateInformationType}
           onBack={flowHistory.length > 1 ? handleBack : undefined}
           onUpdateFlow={handleFlowUpdate}
           onCreateNode={handleNodeCreate}

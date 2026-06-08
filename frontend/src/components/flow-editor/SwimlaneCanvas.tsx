@@ -86,6 +86,7 @@ import type {
 } from './flow-types';
 import {
   INFORMATION_CATEGORY_LABELS,
+  INFORMATION_CATEGORY_OPTIONS,
   type InformationCategory,
   type InformationType,
 } from '@/lib/dfd';
@@ -212,6 +213,15 @@ export interface SwimlaneCanvasProps {
     nodeId: string,
     links: Array<{ informationTypeId: string; direction: FlowLinkDirection; order?: number }>,
   ) => Promise<void> | void;
+  /**
+   * 情報種別マスタにその場で新規追加する（INPUT/OUTPUT 多選択・矢印が運ぶ情報の選択肢用）。
+   * マスタが空でも操作を止めないため、各パネルから直接登録できる。成功で作成された情報種別を返す。
+   * 呼び出し側（ページ）が informationTypeApi.create + 一覧再取得で informationTypes を更新する。
+   */
+  onCreateInformationType?: (input: {
+    name: string;
+    category: InformationCategory;
+  }) => Promise<InformationType | null>;
   /**
    * ノードのプロパティ保存 / ドラッグでの自由配置保存・レーン移動で呼ばれる。
    * - 右サイドバー保存: { label?, type?, roleId?, metadata? }
@@ -1248,6 +1258,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onFetchFlowNodes={props.onFetchFlowNodes}
           informationTypes={props.informationTypes ?? []}
           onSaveNodeInformationLinks={props.onSaveNodeInformationLinks}
+          onCreateInformationType={props.onCreateInformationType}
         />
       )}
 
@@ -1260,10 +1271,19 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             key={selectedEdgeId}
             edge={edge}
             informationTypes={props.informationTypes ?? []}
+            nodes={flowData.nodes
+              .filter((n) => n.type !== 'lane')
+              .map((n) => ({ id: n.id, label: n.label }))}
             sourceLabel={flowData.nodes.find((n) => n.id === edge.sourceNodeId)?.label}
             targetLabel={flowData.nodes.find((n) => n.id === edge.targetNodeId)?.label}
             onClose={() => setSelectedEdgeId(null)}
             onUpdateEdge={props.onUpdateEdge}
+            onCreateInformationType={props.onCreateInformationType}
+            onRepoint={
+              props.onReconnectEdge
+                ? (next) => props.onReconnectEdge?.(edge.id, next)
+                : undefined
+            }
             onReverse={
               props.onReconnectEdge
                 ? () =>
@@ -1716,6 +1736,68 @@ const CATEGORY_BADGE_STYLE: Record<InformationCategory, string> = {
   DOCUMENT: 'bg-emerald-50 text-emerald-700 border-emerald-200',
 };
 
+// マスタが空でも各パネルからその場で情報種別を登録できる小フォーム。
+// 追加後は呼び出し側が informationTypes を再取得するため、各セレクトに即反映される。
+function InlineInformationTypeCreate({
+  onCreate,
+}: {
+  onCreate?: (input: { name: string; category: InformationCategory }) => Promise<InformationType | null>;
+}) {
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState<InformationCategory>('INFORMATION');
+  const [busy, setBusy] = useState(false);
+  if (!onCreate) return null;
+  const add = async () => {
+    const n = name.trim();
+    if (!n || busy) return;
+    setBusy(true);
+    try {
+      await onCreate({ name: n, category });
+      setName('');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="rounded border border-dashed border-gray-300 bg-gray-50/60 p-2 space-y-1.5">
+      <div className="text-[11px] font-medium text-gray-500">情報種別を新規追加</div>
+      <div className="flex items-center gap-1.5">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void add();
+            }
+          }}
+          placeholder="例: 注文データ"
+          className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value as InformationCategory)}
+          className="shrink-0 rounded border border-gray-300 bg-white px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+        >
+          {INFORMATION_CATEGORY_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => void add()}
+          disabled={busy || !name.trim()}
+          className="shrink-0 rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          追加
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InformationTypeMultiSelect({
   title,
   informationTypes,
@@ -1789,14 +1871,19 @@ function InformationTypeMultiSelect({
 function EdgePropertyPanel({
   edge,
   informationTypes,
+  nodes,
   sourceLabel,
   targetLabel,
   onClose,
   onUpdateEdge,
+  onRepoint,
   onReverse,
+  onCreateInformationType,
 }: {
   edge: FlowDataEdge;
   informationTypes: InformationType[];
+  /** 付け替え先候補（このフローの処理ノード）。接続元/接続先のセレクトに出す。 */
+  nodes: Array<{ id: string; label: string }>;
   sourceLabel?: string;
   targetLabel?: string;
   onClose: () => void;
@@ -1804,7 +1891,18 @@ function EdgePropertyPanel({
     edgeId: string,
     patch: { informationTypeId?: string | null; label?: string },
   ) => Promise<void> | void;
+  /** 矢印の接続元/接続先ノードを付け替える（ドラッグに頼らず select で確実に編集）。 */
+  onRepoint?: (next: {
+    sourceNodeId: string;
+    targetNodeId: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  }) => void;
   onReverse?: () => void;
+  onCreateInformationType?: (input: {
+    name: string;
+    category: InformationCategory;
+  }) => Promise<InformationType | null>;
 }) {
   const [informationTypeId, setInformationTypeId] = useState<string>(
     edge.informationTypeId ?? '',
@@ -1841,21 +1939,74 @@ function EdgePropertyPanel({
       </div>
 
       <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
-        {/* 向き（source → target）の表示 */}
-        <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-          <div className="flex items-center gap-1.5">
-            <span className="max-w-[100px] truncate font-medium text-gray-800" title={sourceLabel}>
-              {sourceLabel ?? '?'}
-            </span>
-            <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" />
-            <span className="max-w-[100px] truncate font-medium text-gray-800" title={targetLabel}>
-              {targetLabel ?? '?'}
-            </span>
+        {/* 接続元 → 接続先（select で付け替え可能。ドラッグに頼らない確実な編集）。 */}
+        {onRepoint ? (
+          <div className="space-y-2 rounded border border-gray-200 bg-gray-50 px-3 py-2">
+            <div>
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">接続元（起点）</label>
+              <select
+                value={edge.sourceNodeId}
+                onChange={(e) =>
+                  onRepoint({
+                    sourceNodeId: e.target.value,
+                    targetNodeId: edge.targetNodeId,
+                    sourceHandle: edge.sourceHandle ?? null,
+                    targetHandle: edge.targetHandle ?? null,
+                  })
+                }
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                {nodes.map((n) => (
+                  <option key={n.id} value={n.id} disabled={n.id === edge.targetNodeId}>
+                    {n.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-center">
+              <ArrowRight className="h-3.5 w-3.5 rotate-90 text-gray-400" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">接続先（終点・矢印の先）</label>
+              <select
+                value={edge.targetNodeId}
+                onChange={(e) =>
+                  onRepoint({
+                    sourceNodeId: edge.sourceNodeId,
+                    targetNodeId: e.target.value,
+                    sourceHandle: edge.sourceHandle ?? null,
+                    targetHandle: edge.targetHandle ?? null,
+                  })
+                }
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              >
+                {nodes.map((n) => (
+                  <option key={n.id} value={n.id} disabled={n.id === edge.sourceNodeId}>
+                    {n.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-[10px] text-gray-400">
+              運ぶ情報は、起点ノードの OUTPUT・終点ノードの INPUT になります。
+            </p>
           </div>
-          <p className="mt-1 text-[10px] text-gray-400">
-            運ぶ情報は、起点ノードの OUTPUT・終点ノードの INPUT になります。
-          </p>
-        </div>
+        ) : (
+          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+            <div className="flex items-center gap-1.5">
+              <span className="max-w-[100px] truncate font-medium text-gray-800" title={sourceLabel}>
+                {sourceLabel ?? '?'}
+              </span>
+              <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" />
+              <span className="max-w-[100px] truncate font-medium text-gray-800" title={targetLabel}>
+                {targetLabel ?? '?'}
+              </span>
+            </div>
+            <p className="mt-1 text-[10px] text-gray-400">
+              運ぶ情報は、起点ノードの OUTPUT・終点ノードの INPUT になります。
+            </p>
+          </div>
+        )}
 
         <div>
           <label className="block text-[11px] font-medium text-gray-500 mb-1">
@@ -1874,11 +2025,9 @@ function EdgePropertyPanel({
               </option>
             ))}
           </select>
-          {informationTypes.length === 0 && (
-            <p className="mt-1 text-[11px] text-gray-400">
-              情報種別マスタが空です。参考マスタで情報種別を登録してください。
-            </p>
-          )}
+          <div className="mt-1.5">
+            <InlineInformationTypeCreate onCreate={onCreateInformationType} />
+          </div>
         </div>
 
         <div>
@@ -1936,6 +2085,7 @@ function NodePropertyPanel({
   onClose,
   onUpdateNode,
   onSaveNodeInformationLinks,
+  onCreateInformationType,
   onFetchNodeLinks,
   onCreateNodeLink,
   onDeleteNodeLink,
@@ -1952,6 +2102,10 @@ function NodePropertyPanel({
     nodeId: string,
     links: Array<{ informationTypeId: string; direction: FlowLinkDirection; order?: number }>,
   ) => Promise<void> | void;
+  onCreateInformationType?: (input: {
+    name: string;
+    category: InformationCategory;
+  }) => Promise<InformationType | null>;
   onFetchNodeLinks?: (nodeId: string) => Promise<NodeLinksResult>;
   onCreateNodeLink?: (
     nodeId: string,
@@ -2107,6 +2261,8 @@ function NodePropertyPanel({
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
         </div>
+
+        <InlineInformationTypeCreate onCreate={onCreateInformationType} />
 
         <InformationTypeMultiSelect
           title="INPUT（受け取る情報）"
