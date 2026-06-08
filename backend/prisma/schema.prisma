@@ -107,6 +107,9 @@ model Project {
   stakeholders      Stakeholder[]
   meetings          Meeting[]
   risks             Risk[]
+  suppliers         Supplier[]
+  products          Product[]
+  demandData        DemandData[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1263,4 +1266,72 @@ model Risk {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("risks")
+}
+
+// ===========================================
+// 仕入先マスタ
+// ===========================================
+
+model Supplier {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  code         String? // 仕入先コード
+  name         String // 仕入先名
+  salesRep     String?  @map("sales_rep") // 担当営業
+  tel          String? // 電話番号
+  email        String? // メールアドレス
+  leadTimeDays Int?     @map("lead_time_days") // リードタイム（日）
+  note         String?  @db.Text // 備考
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@map("suppliers")
+}
+
+// ===========================================
+// 商品マスタ（仕入先・最小ロット・単価）
+// ===========================================
+
+model Product {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  code         String? // 商品コード
+  name         String // 商品名
+  supplierId   String?  @map("supplier_id") // 仕入先FK
+  supplierName String?  @map("supplier_name") // 仕入先（フリーテキストfallback）
+  minLot       Int?     @map("min_lot") // 最小ロット（個）
+  unitPrice    Int?     @map("unit_price") // 単価（円）
+  note         String?  @db.Text // 備考
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@map("products")
+}
+
+// ===========================================
+// 過去需要データ（商品×期間ごとに1行）
+// ===========================================
+
+model DemandData {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  productName String?  @map("product_name") // 商品
+  period      String? // 月 / 年月
+  quantity    Int? // 需要数
+  note        String?  @db.Text // 備考
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("demand_data")
 }

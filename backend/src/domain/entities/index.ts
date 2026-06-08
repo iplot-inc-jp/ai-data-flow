@@ -25,3 +25,6 @@ export * from './report-type.entity';
 export * from './stakeholder.entity';
 export * from './meeting.entity';
 export * from './risk.entity';
+export * from './supplier.entity';
+export * from './product.entity';
+export * from './demand-data.entity';

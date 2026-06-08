@@ -16,4 +16,7 @@ export * from './report-type';
 export * from './stakeholder';
 export * from './meeting';
 export * from './risk';
+export * from './supplier';
+export * from './product';
+export * from './demand-data';
 

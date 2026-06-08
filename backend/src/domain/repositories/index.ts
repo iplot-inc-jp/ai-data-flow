@@ -21,3 +21,6 @@ export * from './report-type.repository';
 export * from './stakeholder.repository';
 export * from './meeting.repository';
 export * from './risk.repository';
+export * from './supplier.repository';
+export * from './product.repository';
+export * from './demand-data.repository';

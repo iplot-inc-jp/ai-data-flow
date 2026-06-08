@@ -29,6 +29,9 @@ import {
   STAKEHOLDER_REPOSITORY,
   MEETING_REPOSITORY,
   RISK_REPOSITORY,
+  SUPPLIER_REPOSITORY,
+  PRODUCT_REPOSITORY,
+  DEMAND_DATA_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -136,6 +139,21 @@ import {
   GetRisksUseCase,
   UpdateRiskUseCase,
   DeleteRiskUseCase,
+  // Supplier
+  CreateSupplierUseCase,
+  GetSuppliersUseCase,
+  UpdateSupplierUseCase,
+  DeleteSupplierUseCase,
+  // Product
+  CreateProductUseCase,
+  GetProductsUseCase,
+  UpdateProductUseCase,
+  DeleteProductUseCase,
+  // DemandData
+  CreateDemandDataUseCase,
+  GetDemandDataUseCase,
+  UpdateDemandDataUseCase,
+  DeleteDemandDataUseCase,
 } from './application';
 
 // Infrastructure
@@ -164,6 +182,9 @@ import {
   StakeholderRepositoryImpl,
   MeetingRepositoryImpl,
   RiskRepositoryImpl,
+  SupplierRepositoryImpl,
+  ProductRepositoryImpl,
+  DemandDataRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -196,6 +217,12 @@ import {
   MeetingByIdController,
   RiskController,
   RiskByIdController,
+  SupplierController,
+  SupplierByIdController,
+  ProductController,
+  ProductByIdController,
+  DemandDataController,
+  DemandDataByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -279,6 +306,12 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     MeetingByIdController,
     RiskController,
     RiskByIdController,
+    SupplierController,
+    SupplierByIdController,
+    ProductController,
+    ProductByIdController,
+    DemandDataController,
+    DemandDataByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -384,6 +417,18 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       provide: RISK_REPOSITORY,
       useClass: RiskRepositoryImpl,
     },
+    {
+      provide: SUPPLIER_REPOSITORY,
+      useClass: SupplierRepositoryImpl,
+    },
+    {
+      provide: PRODUCT_REPOSITORY,
+      useClass: ProductRepositoryImpl,
+    },
+    {
+      provide: DEMAND_DATA_REPOSITORY,
+      useClass: DemandDataRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -487,6 +532,21 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetRisksUseCase,
     UpdateRiskUseCase,
     DeleteRiskUseCase,
+    // Supplier
+    CreateSupplierUseCase,
+    GetSuppliersUseCase,
+    UpdateSupplierUseCase,
+    DeleteSupplierUseCase,
+    // Product
+    CreateProductUseCase,
+    GetProductsUseCase,
+    UpdateProductUseCase,
+    DeleteProductUseCase,
+    // DemandData
+    CreateDemandDataUseCase,
+    GetDemandDataUseCase,
+    UpdateDemandDataUseCase,
+    DeleteDemandDataUseCase,
 
     // ========== Services ==========
     ClaudeService,
