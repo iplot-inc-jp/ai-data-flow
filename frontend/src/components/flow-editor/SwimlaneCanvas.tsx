@@ -46,6 +46,8 @@ import {
   type Edge,
   type EdgeProps,
   type Connection,
+  type ConnectionLineComponentProps,
+  type OnConnectStartParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { createPortal } from 'react-dom';
@@ -162,6 +164,22 @@ export interface SwimlaneCanvasProps {
     targetNodeId: string,
     handles?: { sourceHandle?: string | null; targetHandle?: string | null },
   ) => void;
+  /**
+   * ハンドルから空き場所（pane）にドロップしたとき、新ノードを生成して
+   * 開始ノード → 新ノード を接続する（Whimsical風）。
+   * - position: ドロップ先の flow 座標（ノード左上として保存される）
+   * - roleId: 開始ノードと同じロール（レーン）
+   * - sourceHandle/targetHandle: 開始ハンドル側 → その反対側で接続
+   * 呼び出し側（ページ）は POST /:flowId/nodes（位置・ロール指定）→ POST /:flowId/edges
+   * を順に叩いて生成＋接続する。schema/endpoint は不変。
+   */
+  onCreateConnectedNode?: (input: {
+    sourceNodeId: string;
+    sourceHandle: string;
+    targetHandle: string;
+    position: { x: number; y: number };
+    roleId?: string;
+  }) => void;
   onDeleteNode?: (nodeId: string) => void;
   onDeleteEdge?: (edgeId: string) => void;
   /**
@@ -405,6 +423,9 @@ function ContentNode({ data, selected }: { data: ContentNodeData; selected?: boo
   );
 }
 
+/** リサイズハンドルが掴むレーン境界。横帯=上端/下端、縦列=左端/右端。 */
+type LaneResizeEdge = 'top' | 'bottom' | 'left' | 'right';
+
 type LaneNodeData = {
   name: string;
   color?: string;
@@ -412,40 +433,61 @@ type LaneNodeData = {
   roleId: string;
   /** リサイズ可能か（実ロールのみ。未割当レーンは不可）。 */
   resizable?: boolean;
-  /** リサイズハンドルの pointerDown。canvas 側がドラッグを引き受ける。 */
-  onResizeStart?: (roleId: string, e: ReactPointerEvent) => void;
+  /**
+   * リサイズハンドルの pointerDown。canvas 側がドラッグを引き受ける。
+   * edge はドラッグした境界（横帯=top|bottom、縦列=left|right）。
+   * 上端/左端は下端/右端と逆方向のデルタで厚みを更新する。
+   */
+  onResizeStart?: (roleId: string, edge: LaneResizeEdge, e: ReactPointerEvent) => void;
 };
 
 function LaneNode({ data }: { data: LaneNodeData }) {
   const color = data.color ?? '#94a3b8';
   const isVertical = data.orientation === 'vertical';
 
-  // レーン境界のリサイズハンドル。横帯=下端、縦列=右端。
+  // レーン境界のリサイズハンドルを両端に出す。横帯=上端と下端、縦列=左端と右端。
   // 親（lane 背景）は pointer-events-none なので、ハンドルだけ pointer-events-auto。
-  const handle = data.resizable && data.onResizeStart && (
+  const makeHandle = (edge: LaneResizeEdge) => (
     <div
+      key={edge}
       role="separator"
       aria-orientation={isVertical ? 'vertical' : 'horizontal'}
       title="ドラッグでレーンの幅を調整"
       onPointerDown={(e) => {
         e.stopPropagation();
         e.preventDefault();
-        data.onResizeStart?.(data.roleId, e);
+        data.onResizeStart?.(data.roleId, edge, e);
       }}
       className={`nodrag nopan pointer-events-auto absolute z-10 group ${
-        isVertical
-          ? 'top-0 right-0 h-full w-2 cursor-col-resize'
-          : 'left-0 bottom-0 w-full h-2 cursor-row-resize'
+        edge === 'top'
+          ? 'left-0 top-0 w-full h-2 cursor-row-resize'
+          : edge === 'bottom'
+          ? 'left-0 bottom-0 w-full h-2 cursor-row-resize'
+          : edge === 'left'
+          ? 'left-0 top-0 h-full w-2 cursor-col-resize'
+          : 'top-0 right-0 h-full w-2 cursor-col-resize'
       }`}
     >
       <div
         className={`opacity-0 group-hover:opacity-100 transition-opacity ${
-          isVertical ? 'absolute right-0 top-0 h-full w-1' : 'absolute bottom-0 left-0 w-full h-1'
+          edge === 'top'
+            ? 'absolute top-0 left-0 w-full h-1'
+            : edge === 'bottom'
+            ? 'absolute bottom-0 left-0 w-full h-1'
+            : edge === 'left'
+            ? 'absolute left-0 top-0 h-full w-1'
+            : 'absolute right-0 top-0 h-full w-1'
         }`}
         style={{ backgroundColor: color }}
       />
     </div>
   );
+  const handles =
+    data.resizable && data.onResizeStart
+      ? isVertical
+        ? [makeHandle('left'), makeHandle('right')]
+        : [makeHandle('top'), makeHandle('bottom')]
+      : null;
 
   if (isVertical) {
     // 縦列: ラベルは列の上端、帯は右境界に縦線
@@ -465,7 +507,7 @@ function LaneNode({ data }: { data: LaneNodeData }) {
         >
           <span className="line-clamp-3">{data.name}</span>
         </div>
-        {handle}
+        {handles}
       </div>
     );
   }
@@ -481,7 +523,7 @@ function LaneNode({ data }: { data: LaneNodeData }) {
       >
         <span className="line-clamp-3">{data.name}</span>
       </div>
-      {handle}
+      {handles}
     </div>
   );
 }
@@ -817,8 +859,223 @@ function EditableEdge({
   );
 }
 
+// コンテンツノードの描画サイズ（自由配置のシード/整形と一致させる。
+// flow-layout の DEFAULT_LAYOUT_OPTIONS.nodeWidth/nodeHeight と揃える）。
+const NODE_W = 156;
+const NODE_H = 52;
+
+/**
+ * 接続ドラッグ中のカスタム接続線（Whimsical風）。
+ * 線に加えて、カーソル位置に「これから生成されるノード」の半透明矩形ゴーストを描く。
+ * ハンドルから空きへドロップ → ノード自動生成、という挙動を視覚的に予告する。
+ * ConnectionLineComponentProps の toX/toY がカーソルの flow 座標。
+ */
+function GhostConnectionLine({
+  fromX,
+  fromY,
+  toX,
+  toY,
+  connectionStatus,
+}: ConnectionLineComponentProps) {
+  // ノード/ハンドル上(valid/invalid)では既存ノードへの接続なので線だけ。
+  // 空き pane (connectionStatus===null) の時だけ「これから生成されるノード」ゴーストを出す。
+  const overEmpty = connectionStatus == null;
+  return (
+    <g>
+      <path
+        d={`M${fromX},${fromY} L${toX},${toY}`}
+        fill="none"
+        stroke="#3b82f6"
+        strokeWidth={2}
+        strokeDasharray="5 4"
+      />
+      {overEmpty && (
+        <>
+          {/* これから生成されるノードのゴースト（カーソル位置を中心に） */}
+          <rect
+            x={toX - NODE_W / 2}
+            y={toY - NODE_H / 2}
+            width={NODE_W}
+            height={NODE_H}
+            rx={8}
+            ry={8}
+            fill="#bfdbfe"
+            fillOpacity={0.35}
+            stroke="#3b82f6"
+            strokeOpacity={0.6}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+          />
+          <circle cx={toX} cy={toY} r={3} fill="#3b82f6" />
+        </>
+      )}
+    </g>
+  );
+}
+
 const nodeTypes = { content: ContentNode, lane: LaneNode };
 const edgeTypes = { editable: EditableEdge };
+
+// カテゴリ → バッジ配色（情報/物体/帳票）。
+const INFO_CATEGORY_BADGE: Record<InformationCategory, string> = {
+  INFORMATION: 'bg-sky-100 text-sky-700 border-sky-200',
+  OBJECT: 'bg-amber-100 text-amber-700 border-amber-200',
+  DOCUMENT: 'bg-violet-100 text-violet-700 border-violet-200',
+};
+
+/**
+ * 左サイドの INPUT/OUTPUT 候補パネル（④）。
+ * プロジェクトの InformationType マスタ（DFD と共通の1テーブル）を一覧表示する。
+ * 「ノードの INPUT/OUTPUT 候補 ＝ DFD と同じ1テーブル」を常に見える形にするのが目的。
+ * 選択自体は既存のノードプロパティのマルチセレクトのまま（ここは閲覧＋新規追加のみ）。
+ * 折りたたみ可。新規追加は onCreateInformationType（= informationTypeApi.create）を流用。
+ */
+function InformationTypeSidePanel({
+  informationTypes,
+  onCreateInformationType,
+}: {
+  informationTypes: InformationType[];
+  onCreateInformationType?: SwimlaneCanvasProps['onCreateInformationType'];
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState<InformationCategory>('INFORMATION');
+  const [busy, setBusy] = useState(false);
+
+  const commitAdd = useCallback(async () => {
+    const trimmed = name.trim();
+    if (!trimmed || !onCreateInformationType) return;
+    setBusy(true);
+    try {
+      const created = await onCreateInformationType({ name: trimmed, category });
+      if (created) {
+        setName('');
+        setCategory('INFORMATION');
+        setAdding(false);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [name, category, onCreateInformationType]);
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setCollapsed(false)}
+        title="INPUT/OUTPUT 候補（情報種別マスタ）を開く"
+        className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-2 text-[11px] font-medium text-gray-600 shadow-sm hover:bg-gray-50"
+      >
+        <Database className="h-4 w-4 text-indigo-500" />
+        <span className="[writing-mode:vertical-rl]">INPUT/OUTPUT候補</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex max-h-[70%] w-56 flex-col rounded-lg border border-gray-200 bg-white shadow-md">
+      <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <Database className="h-4 w-4 text-indigo-500" />
+          <span className="text-[12px] font-semibold text-gray-700">INPUT/OUTPUT 候補</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCollapsed(true)}
+          title="折りたたむ"
+          className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+      </div>
+      <p className="px-3 pt-2 text-[10px] leading-snug text-gray-400">
+        DFD と共通の情報種別マスタ。各ノードの INPUT/OUTPUT はノードのプロパティから選びます。
+      </p>
+      <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
+        {informationTypes.length === 0 ? (
+          <p className="px-1 py-2 text-[11px] text-gray-400">まだ情報種別がありません。</p>
+        ) : (
+          <ul className="space-y-1">
+            {informationTypes.map((it) => (
+              <li
+                key={it.id}
+                className="flex items-center justify-between gap-1.5 rounded border border-gray-100 px-2 py-1"
+              >
+                <span className="min-w-0 flex-1 truncate text-[12px] text-gray-700" title={it.name}>
+                  {it.name}
+                </span>
+                <span
+                  className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${INFO_CATEGORY_BADGE[it.category]}`}
+                >
+                  {INFORMATION_CATEGORY_LABELS[it.category]}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {onCreateInformationType && (
+        <div className="border-t border-gray-100 px-2 py-2">
+          {adding ? (
+            <div className="space-y-1.5">
+              <input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitAdd();
+                  if (e.key === 'Escape') { setAdding(false); setName(''); }
+                }}
+                placeholder="名称（例: 注文書）"
+                className="w-full rounded border border-gray-300 px-2 py-1 text-[12px]"
+              />
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as InformationCategory)}
+                className="w-full rounded border border-gray-300 px-2 py-1 text-[12px]"
+              >
+                {INFORMATION_CATEGORY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  onClick={() => void commitAdd()}
+                  disabled={busy || !name.trim()}
+                  className="h-7 flex-1 text-[12px]"
+                >
+                  {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : '追加'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setAdding(false); setName(''); }}
+                  disabled={busy}
+                  className="h-7 text-[12px] text-gray-500"
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="flex w-full items-center justify-center gap-1 rounded border border-dashed border-indigo-300 px-2 py-1.5 text-[11px] text-indigo-600 hover:bg-indigo-50"
+            >
+              <Plus className="h-3 w-3" />
+              新規追加
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ===========================================
 // 種別の選択肢（右サイドバー）
@@ -844,11 +1101,6 @@ type ContextMenuState =
   | { kind: 'pane'; x: number; y: number }
   | null;
 
-// コンテンツノードの描画サイズ（自由配置のシード/整形と一致させる。
-// flow-layout の DEFAULT_LAYOUT_OPTIONS.nodeWidth/nodeHeight と揃える）。
-const NODE_W = 156;
-const NODE_H = 52;
-
 /** ノードが「未配置（座標が保存されていない）」か判定。 */
 function isUnpositioned(n: FlowDataNode): boolean {
   return (n.positionX ?? 0) === 0 && (n.positionY ?? 0) === 0;
@@ -862,7 +1114,7 @@ function readStoredOrientation(flowId: string): FlowOrientation {
 
 function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const { flowData, roles } = props;
-  const { fitView, getViewport } = useReactFlow();
+  const { fitView, getViewport, screenToFlowPosition } = useReactFlow();
   const [menu, setMenu] = useState<ContextMenuState>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
@@ -996,22 +1248,25 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   }, [flowData.nodes, effectivePositions, laneRoles, orientation, laneHeightOverrides]);
 
   // --- レーン境界ハンドルのドラッグ: レーン厚を手動リサイズ ---
-  // 横帯=下端を下げると高さ↑ / 縦列=右端を右へ動かすと幅↑。
+  // 横帯=下端を下げる/上端を上げると高さ↑ / 縦列=右端を右へ・左端を左へ動かすと幅↑。
+  // 上端/左端ハンドルは下端/右端と逆方向のデルタ（上へ＝広がる）で厚みを更新する。
   // 画面ピクセル差をズームで割って flow 座標の差に変換し、ローカル先取り表示。
   // pointerup でサーバ永続化（onUpdateLaneHeight）。
   const handleLaneResizeStart = useCallback(
-    (roleId: string, e: ReactPointerEvent) => {
+    (roleId: string, edge: 'top' | 'bottom' | 'left' | 'right', e: ReactPointerEvent) => {
       const lane = bands.lanes.find((l) => l.roleId === roleId);
       if (!lane) return;
       const MIN_LANE_THICKNESS = 60;
       const startThickness = isVertical ? lane.width ?? 0 : lane.height;
       const startClient = isVertical ? e.clientX : e.clientY;
       const zoom = getViewport().zoom || 1;
+      // 上端/左端は境界が手前側にあるため、ドラッグ方向と厚みの増減が逆。
+      const sign = edge === 'top' || edge === 'left' ? -1 : 1;
 
       const computeNext = (client: number) =>
         Math.max(
           MIN_LANE_THICKNESS,
-          Math.round(startThickness + (client - startClient) / zoom),
+          Math.round(startThickness + (sign * (client - startClient)) / zoom),
         );
 
       const onMove = (ev: PointerEvent) => {
@@ -1213,12 +1468,17 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedEdgeId, onDeleteEdge]);
 
-  // 接続ドラッグを開始したノードを覚えておく（向きの正規化に使う）。
-  const connectStartNodeRef = useRef<string | null>(null);
+  // 接続ドラッグを開始したノード/ハンドルを覚えておく。
+  // - 向きの正規化（開始ノード → ドロップ先）に使う。
+  // - 空き場所にドロップした時の「ノード自動生成＋接続」（②）で開始ハンドルを使う。
+  const connectStartRef = useRef<{ nodeId: string; handleId: string | null } | null>(null);
+  // onConnect（有効ノードに繋がった）が発火したかを onConnectEnd で判定するためのフラグ。
+  const connectedToNodeRef = useRef(false);
 
   const onConnect = useCallback(
     (c: Connection) => {
       if (!c.source || !c.target || c.source === c.target) return;
+      connectedToNodeRef.current = true;
       let source = c.source;
       let target = c.target;
       let sourceHandle = c.sourceHandle ?? null;
@@ -1226,7 +1486,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       // 矢印は「ドラッグを始めたノード → ドロップしたノード」に固定する。
       // ConnectionMode.Loose では各辺に source/target ハンドルが重なっており、
       // React Flow が向きを逆に割り当てることがあるため、開始ノードを起点に正規化する。
-      const start = connectStartNodeRef.current;
+      const start = connectStartRef.current?.nodeId ?? null;
       if (start && start === c.target) {
         source = c.target;
         target = c.source;
@@ -1236,6 +1496,71 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       props.onConnectNodes?.(source, target, { sourceHandle, targetHandle });
     },
     [props],
+  );
+
+  // --- ハンドルから空き場所(pane)へドロップ → ノード自動生成＋接続（Whimsical風） ② ---
+  // onConnectStart で開始ノード/ハンドルを記録し、onConnect が呼ばれなかった
+  // （= 有効なノード/ハンドルに繋がらなかった）場合のみ、ドロップ座標に新ノードを生成する。
+  const onConnectStart = useCallback(
+    (_e: unknown, params: OnConnectStartParams) => {
+      connectStartRef.current = params.nodeId
+        ? { nodeId: params.nodeId, handleId: params.handleId ?? null }
+        : null;
+      connectedToNodeRef.current = false;
+    },
+    [],
+  );
+
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      const start = connectStartRef.current;
+      connectStartRef.current = null;
+      // 有効なノード/ハンドルに繋がった（onConnect 発火済み）なら何もしない。
+      if (connectedToNodeRef.current) {
+        connectedToNodeRef.current = false;
+        return;
+      }
+      if (!start || !props.onCreateConnectedNode) return;
+
+      // ドロップ先がノード/ハンドルでない（空き pane など）か判定する。
+      // event.target が .react-flow__node / __handle 配下なら有効な接続なので無視。
+      const targetEl = event.target as HTMLElement | null;
+      const droppedOnNode = !!targetEl?.closest('.react-flow__node');
+      const droppedOnHandle = !!targetEl?.closest('.react-flow__handle');
+      if (droppedOnNode || droppedOnHandle) return;
+
+      // ドロップ座標（flow 座標）。touch/mouse の両対応で clientX/Y を取り出す。
+      const point =
+        'changedTouches' in event && event.changedTouches.length > 0
+          ? { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY }
+          : { x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY };
+      const flowPos = screenToFlowPosition(point);
+
+      // 開始ハンドル → その反対側で接続（①と同じ最近接サイド規約）。
+      const opposite: Record<string, string> = {
+        top: 'bottom',
+        bottom: 'top',
+        left: 'right',
+        right: 'left',
+      };
+      const sourceHandle = start.handleId ?? (isVertical ? 'bottom' : 'right');
+      const targetHandle = opposite[sourceHandle] ?? (isVertical ? 'top' : 'left');
+
+      // 新ノードのロールは開始ノードと同じ（同一レーン）。
+      const srcNode = flowData.nodes.find((n) => n.id === start.nodeId);
+      const roleId = srcNode?.roleId ?? srcNode?.role?.id;
+
+      // ほぼクリック（動かさず離す）でも空き扱いになるため、生成位置はドロップ座標を
+      // ノード中心とみなして左上基準へ補正する。
+      props.onCreateConnectedNode({
+        sourceNodeId: start.nodeId,
+        sourceHandle,
+        targetHandle,
+        position: { x: flowPos.x - NODE_W / 2, y: flowPos.y - NODE_H / 2 },
+        roleId,
+      });
+    },
+    [props, screenToFlowPosition, isVertical, flowData.nodes],
   );
 
   // --- エッジ端点ドラッグで付け替え（再ルーティング） ---
@@ -1414,9 +1739,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onConnect={onConnect}
-        onConnectStart={(_, params) => {
-          connectStartNodeRef.current = params.nodeId ?? null;
-        }}
+        onConnectStart={onConnectStart}
+        onConnectEnd={onConnectEnd}
         onReconnect={onReconnect}
         onNodesChange={onNodesChange}
         deleteKeyCode={null}
@@ -1424,6 +1748,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         nodesConnectable
         elementsSelectable
         connectionMode={ConnectionMode.Loose}
+        connectionLineComponent={GhostConnectionLine}
         minZoom={0.2}
         maxZoom={2}
         fitView
@@ -1539,6 +1864,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           </div>
         </Panel>
       </ReactFlow>
+
+      {/* 左サイド: INPUT/OUTPUT 候補（DFD と共通の情報種別マスタ一覧。折りたたみ可） ④ */}
+      <InformationTypeSidePanel
+        informationTypes={props.informationTypes ?? []}
+        onCreateInformationType={props.onCreateInformationType}
+      />
 
       {/* コンテキストメニュー */}
       {menu && (

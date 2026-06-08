@@ -1056,6 +1056,59 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
+  // ハンドルから空き場所にドロップ → ノード自動生成＋接続（Whimsical風） ②
+  // 既存エンドポイントのみ再利用: POST /:flowId/nodes（位置・ロール指定）で新ノードを作り、
+  // POST /:flowId/edges（最近接サイドハンドル付き）で 開始ノード → 新ノード を接続する。
+  // schema/endpoint は不変。
+  const handleCreateConnectedNode = useCallback(
+    async (input: {
+      sourceNodeId: string;
+      sourceHandle: string;
+      targetHandle: string;
+      position: { x: number; y: number };
+      roleId?: string;
+    }) => {
+      if (!flowData) return;
+      try {
+        const headers = getHeaders();
+        // 1) 新ノード（PROCESS）をドロップ座標・開始ノードと同じロールで生成
+        const createRes = await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            type: 'PROCESS',
+            label: '新規処理',
+            positionX: input.position.x,
+            positionY: input.position.y,
+            ...(input.roleId ? { roleId: input.roleId } : {}),
+          }),
+        });
+        if (!createRes.ok) throw new Error('Failed to create node');
+        const created = await createRes.json();
+        const newNodeId: string | undefined = created?.id;
+        if (!newNodeId) throw new Error('Created node has no id');
+
+        // 2) 開始ノード → 新ノード を接続（ドラッグで使った開始ハンドル側を保存）
+        const edgeRes = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            sourceNodeId: input.sourceNodeId,
+            targetNodeId: newNodeId,
+            sourceHandle: input.sourceHandle,
+            targetHandle: input.targetHandle,
+          }),
+        });
+        if (!edgeRes.ok) throw new Error('Failed to connect to new node');
+
+        fetchFlowData(flowData.id);
+      } catch (err) {
+        console.error('Failed to create connected node:', err);
+      }
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
   // エッジ再ルーティング（端点ドラッグで source/target ノード・接続側を付け替え）
   // PATCH /api/business-flows/:flowId/edges/:edgeId で sourceNodeId/targetNodeId/
   // sourceHandle/targetHandle を更新 → 再取得。
@@ -1144,9 +1197,52 @@ export default function ProjectFlowDetailPage() {
         const targetOrder = target.order ?? sourceOrder + 2;
         const midOrder = (sourceOrder + targetOrder) / 2;
 
-        // 位置の中点（自由配置の左上座標基準）
-        const midX = ((source.positionX ?? 0) + (target.positionX ?? 0)) / 2;
-        const midY = ((source.positionY ?? 0) + (target.positionY ?? 0)) / 2;
+        // 各ノードの中心座標（左上座標 + 半サイズ）。最近接サイド判定に使う。
+        // NODE_W/NODE_H は SwimlaneCanvas の描画サイズと揃える（156×52）。
+        const NODE_W = 156;
+        const NODE_H = 52;
+        const centerOf = (n: { positionX?: number; positionY?: number }) => ({
+          x: (n.positionX ?? 0) + NODE_W / 2,
+          y: (n.positionY ?? 0) + NODE_H / 2,
+        });
+        const sCenter = centerOf(source);
+        const tCenter = centerOf(target);
+        // 新ノード N の中心は A,B 中心の中間（同じレーン/行に収まるよう中点に置く）。
+        const nCenter = {
+          x: (sCenter.x + tCenter.x) / 2,
+          y: (sCenter.y + tCenter.y) / 2,
+        };
+        // 新ノードの保存座標（左上基準）。
+        const midX = nCenter.x - NODE_W / 2;
+        const midY = nCenter.y - NODE_H / 2;
+
+        // 2 ノード中心から最近接サイドのハンドルを決める（computeFlowLayout と同等）。
+        // |dx|>=|dy| なら横優先 source=右(dx>0)/左、target はその逆。
+        // それ以外は縦優先 source=下(dy>0)/上、target は逆。
+        const opposite: Record<string, string> = {
+          top: 'bottom',
+          bottom: 'top',
+          left: 'right',
+          right: 'left',
+        };
+        const nearestHandles = (
+          a: { x: number; y: number },
+          b: { x: number; y: number },
+        ): { sourceHandle: string; targetHandle: string } => {
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const sourceHandle =
+            Math.abs(dx) >= Math.abs(dy)
+              ? dx > 0
+                ? 'right'
+                : 'left'
+              : dy > 0
+              ? 'bottom'
+              : 'top';
+          return { sourceHandle, targetHandle: opposite[sourceHandle] };
+        };
+        const h1 = nearestHandles(sCenter, nCenter); // A → N
+        const h2 = nearestHandles(nCenter, tCenter); // N → B
 
         // 1) 新しい PROCESS ノードを作成（roleId は source を引き継ぐ）
         const roleId = source.roleId ?? source.role?.id;
@@ -1177,19 +1273,29 @@ export default function ProjectFlowDetailPage() {
         );
         if (!orderRes.ok) throw new Error('Failed to set new node order');
 
-        // 3) source → 新ノード を接続
+        // 3) source → 新ノード を接続（最近接サイドのハンドル付き）
         const e1 = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ sourceNodeId: source.id, targetNodeId: newNodeId }),
+          body: JSON.stringify({
+            sourceNodeId: source.id,
+            targetNodeId: newNodeId,
+            sourceHandle: h1.sourceHandle,
+            targetHandle: h1.targetHandle,
+          }),
         });
         if (!e1.ok) throw new Error('Failed to connect source to new node');
 
-        // 4) 新ノード → target を接続
+        // 4) 新ノード → target を接続（最近接サイドのハンドル付き）
         const e2 = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ sourceNodeId: newNodeId, targetNodeId: target.id }),
+          body: JSON.stringify({
+            sourceNodeId: newNodeId,
+            targetNodeId: target.id,
+            sourceHandle: h2.sourceHandle,
+            targetHandle: h2.targetHandle,
+          }),
         });
         if (!e2.ok) throw new Error('Failed to connect new node to target');
 
@@ -1818,6 +1924,7 @@ export default function ProjectFlowDetailPage() {
           onUpdateFlow={handleFlowUpdate}
           onCreateNode={handleNodeCreate}
           onConnectNodes={handleEdgeCreate}
+          onCreateConnectedNode={handleCreateConnectedNode}
           onDeleteNode={handleNodeDelete}
           onDeleteEdge={handleEdgeDelete}
           onReconnectEdge={handleReconnectEdge}
