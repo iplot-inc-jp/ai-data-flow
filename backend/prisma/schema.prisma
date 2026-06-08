@@ -99,7 +99,6 @@ model Project {
   subProjects       SubProject[]
   attachments       Attachment[]
   databaseConnections DatabaseConnection[]
-  recordSheets      RecordSheet[]
   flowFolders       FlowFolder[]
   tasks             Task[]
   dfdDiagrams       DfdDiagram[]
@@ -1014,21 +1013,6 @@ model DatabaseConnection {
 // ===========================================
 // 記録シート（教材の配布物テンプレ＝表形式の記録）
 // ===========================================
-
-model RecordSheet {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
-  templateKey String   @map("template_key") // registry のテンプレ識別子（配布物由来）
-  title       String?
-  rows        Json     @default("[]") // 行データ（{列key: 値} の配列）
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, templateKey])
-  @@map("record_sheets")
-}
 
 // ===========================================
 // タスク（Backlog相当：親タスク・依存関係対応）

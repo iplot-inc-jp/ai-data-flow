@@ -21,7 +21,7 @@ import {
   GitCompareArrows,
   Filter as FunnelIcon,
 } from 'lucide-react';
-import { createGapItem } from '../_lib/use-record-sheet';
+import { createGapItem } from '@/lib/gap-items';
 import { useAnalysisSheet } from '../_lib/use-analysis-sheet';
 import { SheetToolbar } from './sheet-toolbar';
 
