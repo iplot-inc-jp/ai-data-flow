@@ -29,25 +29,40 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine, BookMarked, Truck, Package, BarChart3, type LucideIcon } from 'lucide-react';
-import { RECORD_TEMPLATES, type RecordTemplate } from '@/lib/record-templates';
-import { RecordSheetTable } from '@/components/records/record-sheet-table';
+import {
+  SupplierTable,
+  ProductTable,
+  DemandDataTable,
+} from '@/components/records/catalog-master-tables';
+import type { Supplier } from '@/lib/catalog-masters';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
 // 現状把握「発注計画ツール」由来の参考マスタ（destination=catalog）。
-// 既存 RECORD_TEMPLATES の定義（列）をそのまま再利用し、RecordSheet に構造保存する。
-const REFERENCE_MASTER_DEFS: { key: string; icon: LucideIcon }[] = [
-  { key: 'supplier-master', icon: Truck },
-  { key: 'product-min-lot', icon: Package },
-  { key: 'demand-history', icon: BarChart3 },
+// JSON 保存の RecordSheet を廃し、Supplier / Product / DemandData の専用テーブル
+// （de-JSON 化 No.3）を直接読み書きする 3 つの表エディタに置き換えた。
+type ReferenceMasterKey = 'suppliers' | 'products' | 'demand-data';
+
+const REFERENCE_MASTERS: { key: ReferenceMasterKey; label: string; description: string; icon: LucideIcon }[] = [
+  {
+    key: 'suppliers',
+    label: '仕入先',
+    description: '仕入先（サプライヤー）の一覧。担当営業・リードタイムなどを記録します。',
+    icon: Truck,
+  },
+  {
+    key: 'products',
+    label: '商品',
+    description: '商品ごとの最小ロット・単価・仕入先（仕入先マスタから選択 or 手入力）を記録します。',
+    icon: Package,
+  },
+  {
+    key: 'demand-data',
+    label: '過去需要',
+    description: '商品×期間の過去需要数。発注量計算のINPUTとして参照します。',
+    icon: BarChart3,
+  },
 ];
-
-type ReferenceMaster = { key: string; icon: LucideIcon; template: RecordTemplate };
-
-const REFERENCE_MASTERS: ReferenceMaster[] = REFERENCE_MASTER_DEFS.flatMap((def) => {
-  const template = RECORD_TEMPLATES.find((t) => t.key === def.key);
-  return template ? [{ ...def, template }] : [];
-});
 
 type TableData = {
   id: string;
@@ -83,7 +98,11 @@ export default function ProjectCatalogPage() {
 
   // データカタログ本体 / 参考マスタ の切替
   const [topTab, setTopTab] = useState<'catalog' | 'reference'>('catalog');
-  const [activeMaster, setActiveMaster] = useState<string>(REFERENCE_MASTERS[0]?.key ?? '');
+  const [activeMaster, setActiveMaster] = useState<ReferenceMasterKey>(
+    REFERENCE_MASTERS[0]?.key ?? 'suppliers',
+  );
+  // 商品エディタの仕入先 SELECT 用に仕入先一覧を共有する
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   const [tables, setTables] = useState<TableData[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1056,59 +1075,53 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
       )}
       </div>
 
-      {/* ── 参考マスタ（現状把握「発注計画ツール」由来の参照データ）── */}
+      {/* ── 参考マスタ（仕入先 / 商品 / 過去需要：専用テーブルAPI）── */}
       <div className={topTab === 'reference' ? 'space-y-6' : 'hidden'}>
         <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <BookMarked className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
           <p className="text-sm text-amber-800">
-            現状把握（発注計画ツール）で扱う参照マスタです。仕入先・商品×最小ロット・過去需要データを表として記録し、ASIS/TOBE業務フローや発注量計算のINPUTとして参照します。各表ごとに「保存」を押してください。
+            現状把握（発注計画ツール）で扱う参照マスタです。仕入先・商品（最小ロット/単価）・過去需要データを表として記録し、ASIS/TOBE業務フローや発注量計算のINPUTとして参照します。各行は「保存」アイコンで個別に保存されます。
           </p>
         </div>
 
-        {REFERENCE_MASTERS.length === 0 ? (
-          <Card className="bg-white border-gray-200">
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <AlertCircle className="h-8 w-8 text-amber-500 mb-3" />
-              <p className="text-gray-700">参考マスタのテンプレが見つかりませんでした。</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            {/* 参考マスタ内タブ */}
-            <div className="flex flex-wrap gap-1 border-b border-gray-200">
-              {REFERENCE_MASTERS.map((m) => {
-                const Icon = m.icon;
-                const isActive = activeMaster === m.key;
-                return (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => setActiveMaster(m.key)}
-                    className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'border-amber-500 text-amber-700 bg-amber-50'
-                        : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {m.template.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* 各参考マスタ表（未保存の編集を保持するため全タブをマウントし表示のみ切替） */}
-            {REFERENCE_MASTERS.map((m) => (
-              <div
+        {/* 参考マスタ内タブ */}
+        <div className="flex flex-wrap gap-1 border-b border-gray-200">
+          {REFERENCE_MASTERS.map((m) => {
+            const Icon = m.icon;
+            const isActive = activeMaster === m.key;
+            return (
+              <button
                 key={m.key}
-                className={activeMaster === m.key ? 'space-y-2' : 'hidden'}
+                type="button"
+                onClick={() => setActiveMaster(m.key)}
+                className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'border-amber-500 text-amber-700 bg-amber-50'
+                    : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                }`}
               >
-                <p className="text-sm text-gray-500">{m.template.description}</p>
-                <RecordSheetTable projectId={projectId} template={m.template} />
-              </div>
-            ))}
-          </>
-        )}
+                <Icon className="h-4 w-4" />
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {REFERENCE_MASTERS.map((m) => (
+          <div
+            key={m.key}
+            className={activeMaster === m.key ? 'space-y-2' : 'hidden'}
+          >
+            <p className="text-sm text-gray-500">{m.description}</p>
+            {m.key === 'suppliers' && (
+              <SupplierTable projectId={projectId} onSuppliersChange={setSuppliers} />
+            )}
+            {m.key === 'products' && (
+              <ProductTable projectId={projectId} suppliers={suppliers} />
+            )}
+            {m.key === 'demand-data' && <DemandDataTable projectId={projectId} />}
+          </div>
+        ))}
       </div>
     </div>
   );
