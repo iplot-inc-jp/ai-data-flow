@@ -72,6 +72,9 @@ export class RoleController {
       type: dto.type,
       description: dto.description,
       color: dto.color,
+      responsibility: dto.responsibility,
+      decisionScope: dto.decisionScope,
+      kpi: dto.kpi,
     });
     return {
       ...result,
