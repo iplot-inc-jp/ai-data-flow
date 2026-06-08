@@ -25,6 +25,7 @@ import {
   MarkerType,
   getSmoothStepPath,
   getBezierPath,
+  useNodesState,
   type Node,
   type Edge,
   type NodeProps,
@@ -63,6 +64,7 @@ import {
   Unlink,
   Spline,
   Waypoints,
+  LayoutGrid,
   ClipboardCheck,
   Boxes,
   BarChart3,
@@ -1504,10 +1506,19 @@ function IssueTreeMindMap() {
     });
 
     for (const n of backendNodes) {
+      // 位置 = 保存済み(metadata.x/y が数値)優先、無ければ computeLayout の座標。
+      // ドラッグ確定で metadata.x/y を保存するので、再フェッチ後もここで一致し戻らない。
+      const computed = layout.get(n.id) ?? { x: n.depth * X_GAP, y: 0 };
+      const savedX = n.metadata?.x;
+      const savedY = n.metadata?.y;
+      const position =
+        typeof savedX === 'number' && typeof savedY === 'number'
+          ? { x: savedX, y: savedY }
+          : computed;
       nodes.push({
         id: n.id,
         type: 'mind',
-        position: layout.get(n.id) ?? { x: n.depth * X_GAP, y: 0 },
+        position,
         data: {
           ...baseData,
           node: n,
@@ -1516,7 +1527,8 @@ function IssueTreeMindMap() {
           taskCount: tasksByNode[n.id]?.length ?? 0,
           rollup: rollupByNode.get(n.id) ?? null,
         } as unknown as Record<string, unknown>,
-        draggable: false,
+        // 実ノードはマウスでドラッグ移動可（仮想ルートは draggable:false のまま）。
+        draggable: true,
       });
     }
 
@@ -1556,6 +1568,62 @@ function IssueTreeMindMap() {
     deleteNode,
     detachNode,
   ]);
+
+  // 自由配置: 制御モードの React Flow はドラッグで位置を動かすのに onNodesChange が要る。
+  // 決定的レイアウト(rfNodes)を初期値にした内部 state を持ち、ドラッグ中の位置変更を反映する。
+  // rfNodes が再計算されたら(再フェッチ・選択変更など)正規位置へ同期し直す。
+  const [dragNodes, setDragNodes, onNodesChange] = useNodesState(rfNodes);
+  useEffect(() => {
+    setDragNodes(rfNodes);
+  }, [rfNodes, setDragNodes]);
+
+  // ドラッグ確定で位置を保存。実ノードのみ metadata に { ...既存, x, y } を merge して
+  // 既存の per-node PUT(patchNode) で保存する。仮想ルートや非実ノードは無視。
+  const handleNodeDragStop = useCallback(
+    (_evt: unknown, node: Node) => {
+      if (node.id === ROOT_ID) return;
+      const src = (tree?.nodes ?? []).find((n) => n.id === node.id);
+      if (!src) return;
+      const nextMeta = {
+        ...(src.metadata ?? {}),
+        x: node.position.x,
+        y: node.position.y,
+      };
+      patchNode(node.id, { metadata: nextMeta });
+    },
+    [tree, patchNode],
+  );
+
+  // 「整形」: 全実ノードの metadata から x/y を消して保存し、computeLayout レイアウトに戻す。
+  // 次の rfNodes 再計算で metadata.x/y が無いノードは computeLayout 座標を使う(初期値ロジック)。
+  const tidyLayout = useCallback(async () => {
+    const nodes = tree?.nodes ?? [];
+    const targets = nodes.filter(
+      (n) => typeof n.metadata?.x === 'number' || typeof n.metadata?.y === 'number',
+    );
+    if (targets.length === 0) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const headers = getHeaders();
+      for (const n of targets) {
+        const rest = { ...(n.metadata ?? {}) };
+        delete rest.x;
+        delete rest.y;
+        const res = await fetch(`${API_URL}/api/issue-trees/${treeId}/nodes/${n.id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ metadata: rest }),
+        });
+        if (!res.ok) throw new Error('整形（位置リセット）に失敗しました');
+      }
+      await fetchTree();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '整形に失敗しました');
+    } finally {
+      setBusy(false);
+    }
+  }, [tree, treeId, getHeaders, fetchTree]);
 
   const selectedNode = useMemo(
     () => (selectedId ? (tree?.nodes ?? []).find((n) => n.id === selectedId) ?? null : null),
@@ -1722,6 +1790,17 @@ function IssueTreeMindMap() {
           <Button
             variant="outline"
             size="sm"
+            onClick={tidyLayout}
+            disabled={busy}
+            className="text-gray-600"
+            title="ノードの手動配置をリセットして自動レイアウトに戻す"
+          >
+            <LayoutGrid className="mr-1 h-4 w-4" />
+            整形
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               setImportError(null);
               setImportOpen(true);
@@ -1768,8 +1847,10 @@ function IssueTreeMindMap() {
         <Card className="flex-1 overflow-hidden border-gray-200 bg-white">
           <CardContent className="h-full p-0">
             <ReactFlow
-              nodes={rfNodes}
+              nodes={dragNodes}
               edges={rfEdges}
+              onNodesChange={onNodesChange}
+              onNodeDragStop={handleNodeDragStop}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onPaneClick={() => {
@@ -1782,7 +1863,7 @@ function IssueTreeMindMap() {
               minZoom={0.2}
               maxZoom={1.5}
               proOptions={{ hideAttribution: true }}
-              nodesDraggable={false}
+              nodesDraggable
               nodesConnectable={false}
               elementsSelectable
               // 標準の Delete はノードまで巻き込むため無効化し、矢印の切り離しは自前で扱う。
