@@ -45,6 +45,7 @@ import {
   type Connection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { createPortal } from 'react-dom';
 import { toPng } from 'html-to-image';
 import {
   ChevronLeft,
@@ -460,11 +461,42 @@ function EditableEdge({
     onInsertNode?: (id: string) => void;
     /** この矢印が運ぶ情報種別名（チップ表示用）。未設定なら表示しない。 */
     informationTypeName?: string | null;
+    /** 矢印の先端（終点）をドラッグして別ノードへ付け替える。ドロップ先ノードIDを渡す。 */
+    onReconnectTarget?: (edgeId: string, newTargetNodeId: string) => void;
   };
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState((label as string) || '');
   const inputRef = useRef<HTMLInputElement>(null);
+  // 先端ドラッグ（付け替え）用: 開始点(screen)とカーソル位置を保持してゴースト線を描く。
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const onReconnectTarget = data?.onReconnectTarget;
+  const onTargetAnchorDown = useCallback(
+    (e: ReactPointerEvent) => {
+      if (!onReconnectTarget) return;
+      e.stopPropagation();
+      e.preventDefault();
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+      setDragPos({ x: e.clientX, y: e.clientY });
+      const move = (ev: PointerEvent) => setDragPos({ x: ev.clientX, y: ev.clientY });
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        setDragPos(null);
+        dragStartRef.current = null;
+        // ドロップ地点の真下にあるノードを探して付け替える。
+        const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        const nodeEl = el?.closest('.react-flow__node') as HTMLElement | null;
+        const newId = nodeEl?.getAttribute('data-id');
+        if (newId) onReconnectTarget(id, newId);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+    [onReconnectTarget, id],
+  );
+  const dragging = dragPos !== null;
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
   });
@@ -565,7 +597,62 @@ function EditableEdge({
             )
           )}
         </div>
+        {/* 矢印の先端（終点）をドラッグして接続先ノードを付け替えるアンカー。
+            選択中の矢印だけに出す（未選択ノードの接続ハンドルを塞がないため）。
+            掴んで別ノードへドロップすると再接続される。 */}
+        {onReconnectTarget && (selected || dragging) && (
+          <div
+            className={`nodrag nopan flex items-center justify-center ${
+              dragging ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
+            title="ドラッグして矢印の接続先（先端）を変更"
+            onPointerDown={onTargetAnchorDown}
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${targetX}px,${targetY}px)`,
+              pointerEvents: 'all',
+              width: 22,
+              height: 22,
+            }}
+          >
+            <span
+              className={`block rounded-full ring-2 transition-all ${
+                dragging
+                  ? 'h-3.5 w-3.5 bg-blue-500 ring-blue-300'
+                  : 'h-3 w-3 bg-blue-500/80 ring-blue-200'
+              }`}
+            />
+          </div>
+        )}
       </EdgeLabelRenderer>
+      {/* ドラッグ中のゴースト線（接続先選択の視覚フィードバック）。最前面・イベント透過。 */}
+      {dragging &&
+        dragStartRef.current &&
+        dragPos &&
+        createPortal(
+          <svg
+            style={{
+              position: 'fixed',
+              inset: 0,
+              width: '100vw',
+              height: '100vh',
+              pointerEvents: 'none',
+              zIndex: 9999,
+            }}
+          >
+            <line
+              x1={dragStartRef.current.x}
+              y1={dragStartRef.current.y}
+              x2={dragPos.x}
+              y2={dragPos.y}
+              stroke="#3b82f6"
+              strokeWidth={2}
+              strokeDasharray="5 4"
+            />
+            <circle cx={dragPos.x} cy={dragPos.y} r={5} fill="#3b82f6" />
+          </svg>,
+          document.body,
+        )}
     </>
   );
 }
@@ -880,6 +967,19 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onLabelUpdate: props.onUpdateEdgeLabel,
           onInsertNode: props.onInsertNodeOnEdge,
           informationTypeName: e.informationType?.name ?? null,
+          // 先端ドラッグでの付け替え（ドロップ先ノードへ target を変更）。
+          onReconnectTarget: props.onReconnectEdge
+            ? (edgeId: string, newTargetNodeId: string) => {
+                const cur = flowData.edges.find((x) => x.id === edgeId);
+                if (!cur || newTargetNodeId === cur.sourceNodeId) return;
+                props.onReconnectEdge?.(edgeId, {
+                  sourceNodeId: cur.sourceNodeId,
+                  targetNodeId: newTargetNodeId,
+                  sourceHandle: cur.sourceHandle ?? null,
+                  targetHandle: cur.targetHandle ?? null,
+                });
+              }
+            : undefined,
         },
       })),
     [
@@ -896,15 +996,27 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return () => clearTimeout(t);
   }, [fitView, flowData.id, orientation]);
 
+  // 接続ドラッグを開始したノードを覚えておく（向きの正規化に使う）。
+  const connectStartNodeRef = useRef<string | null>(null);
+
   const onConnect = useCallback(
     (c: Connection) => {
-      if (c.source && c.target && c.source !== c.target) {
-        // ドラッグで使った辺（ハンドル）を保存する。
-        props.onConnectNodes?.(c.source, c.target, {
-          sourceHandle: c.sourceHandle ?? null,
-          targetHandle: c.targetHandle ?? null,
-        });
+      if (!c.source || !c.target || c.source === c.target) return;
+      let source = c.source;
+      let target = c.target;
+      let sourceHandle = c.sourceHandle ?? null;
+      let targetHandle = c.targetHandle ?? null;
+      // 矢印は「ドラッグを始めたノード → ドロップしたノード」に固定する。
+      // ConnectionMode.Loose では各辺に source/target ハンドルが重なっており、
+      // React Flow が向きを逆に割り当てることがあるため、開始ノードを起点に正規化する。
+      const start = connectStartNodeRef.current;
+      if (start && start === c.target) {
+        source = c.target;
+        target = c.source;
+        sourceHandle = c.targetHandle ?? null;
+        targetHandle = c.sourceHandle ?? null;
       }
+      props.onConnectNodes?.(source, target, { sourceHandle, targetHandle });
     },
     [props],
   );
@@ -1048,6 +1160,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onConnect={onConnect}
+        onConnectStart={(_, params) => {
+          connectStartNodeRef.current = params.nodeId ?? null;
+        }}
         onReconnect={onReconnect}
         onNodesChange={onNodesChange}
         nodesDraggable
