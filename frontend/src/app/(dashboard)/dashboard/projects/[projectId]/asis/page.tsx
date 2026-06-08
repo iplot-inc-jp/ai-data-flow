@@ -28,8 +28,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
-import { RecordSheetTable } from '@/components/records/record-sheet-table';
-import type { RecordTemplate } from '@/lib/record-templates';
+import { EditableMemoBoard } from '@/components/records/editable-memo-board';
+import {
+  asisMemoApi,
+  type AsisMemo,
+  type AsisMemoInput,
+} from '@/lib/asis-tobe';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -189,26 +193,6 @@ export default function AsisManagementPage() {
       setCreating(false);
     }
   };
-
-  // 現状メモ（状態）テンプレ
-  const overviewTemplate = useMemo<RecordTemplate>(
-    () => ({
-      key: 'asis-overview',
-      label: '現状メモ（状態）',
-      group: '現状把握',
-      course: 'asis-management',
-      description:
-        '現状（ASIS）の状態を自由に構造化メモします（このプロジェクト専用に保存）。',
-      columns: [
-        { key: 'topic', label: '項目' },
-        { key: 'current', label: '現状' },
-        { key: 'pain', label: '課題・痛み' },
-        { key: 'constraint', label: '制約' },
-        { key: 'note', label: 'メモ' },
-      ],
-    }),
-    []
-  );
 
   const openGapItems = gapItems.filter((g) => g.status === 'OPEN');
 
@@ -435,7 +419,18 @@ export default function AsisManagementPage() {
                 項目ごとに現状・課題・痛み・制約を自由に書き留めます
               </p>
             </div>
-            <RecordSheetTable projectId={projectId} template={overviewTemplate} />
+            <EditableMemoBoard<AsisMemo, AsisMemoInput>
+              projectId={projectId}
+              api={asisMemoApi}
+              entityLabel="現状メモ"
+              columns={[
+                { key: 'topic', label: '項目', kind: 'text' },
+                { key: 'currentState', label: '現状', kind: 'multiline' },
+                { key: 'pain', label: '課題・痛み', kind: 'multiline' },
+                { key: 'restriction', label: '制約', kind: 'multiline' },
+                { key: 'note', label: 'メモ', kind: 'multiline' },
+              ]}
+            />
           </section>
         </>
       )}

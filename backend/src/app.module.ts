@@ -34,6 +34,9 @@ import {
   DEMAND_DATA_REPOSITORY,
   REPORT_CALENDAR_REPOSITORY,
   INTEREST_MATRIX_ROW_REPOSITORY,
+  ASIS_MEMO_REPOSITORY,
+  TOBE_VISION_REPOSITORY,
+  TOBE_ROADMAP_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -166,6 +169,21 @@ import {
   GetInterestMatrixRowsUseCase,
   UpdateInterestMatrixRowUseCase,
   DeleteInterestMatrixRowUseCase,
+  // AsisMemo
+  CreateAsisMemoUseCase,
+  GetAsisMemosUseCase,
+  UpdateAsisMemoUseCase,
+  DeleteAsisMemoUseCase,
+  // TobeVision
+  CreateTobeVisionUseCase,
+  GetTobeVisionsUseCase,
+  UpdateTobeVisionUseCase,
+  DeleteTobeVisionUseCase,
+  // TobeRoadmap
+  CreateTobeRoadmapUseCase,
+  GetTobeRoadmapsUseCase,
+  UpdateTobeRoadmapUseCase,
+  DeleteTobeRoadmapUseCase,
 } from './application';
 
 // Infrastructure
@@ -199,6 +217,9 @@ import {
   DemandDataRepositoryImpl,
   ReportCalendarRepositoryImpl,
   InterestMatrixRowRepositoryImpl,
+  AsisMemoRepositoryImpl,
+  TobeVisionRepositoryImpl,
+  TobeRoadmapRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -241,6 +262,12 @@ import {
   ReportCalendarByIdController,
   InterestMatrixRowController,
   InterestMatrixRowByIdController,
+  AsisMemoController,
+  AsisMemoByIdController,
+  TobeVisionController,
+  TobeVisionByIdController,
+  TobeRoadmapController,
+  TobeRoadmapByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -334,6 +361,12 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     ReportCalendarByIdController,
     InterestMatrixRowController,
     InterestMatrixRowByIdController,
+    AsisMemoController,
+    AsisMemoByIdController,
+    TobeVisionController,
+    TobeVisionByIdController,
+    TobeRoadmapController,
+    TobeRoadmapByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -458,6 +491,18 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: INTEREST_MATRIX_ROW_REPOSITORY,
       useClass: InterestMatrixRowRepositoryImpl,
+    },
+    {
+      provide: ASIS_MEMO_REPOSITORY,
+      useClass: AsisMemoRepositoryImpl,
+    },
+    {
+      provide: TOBE_VISION_REPOSITORY,
+      useClass: TobeVisionRepositoryImpl,
+    },
+    {
+      provide: TOBE_ROADMAP_REPOSITORY,
+      useClass: TobeRoadmapRepositoryImpl,
     },
 
     // ========== Use Cases ==========
@@ -587,6 +632,21 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetInterestMatrixRowsUseCase,
     UpdateInterestMatrixRowUseCase,
     DeleteInterestMatrixRowUseCase,
+    // AsisMemo
+    CreateAsisMemoUseCase,
+    GetAsisMemosUseCase,
+    UpdateAsisMemoUseCase,
+    DeleteAsisMemoUseCase,
+    // TobeVision
+    CreateTobeVisionUseCase,
+    GetTobeVisionsUseCase,
+    UpdateTobeVisionUseCase,
+    DeleteTobeVisionUseCase,
+    // TobeRoadmap
+    CreateTobeRoadmapUseCase,
+    GetTobeRoadmapsUseCase,
+    UpdateTobeRoadmapUseCase,
+    DeleteTobeRoadmapUseCase,
 
     // ========== Services ==========
     ClaudeService,

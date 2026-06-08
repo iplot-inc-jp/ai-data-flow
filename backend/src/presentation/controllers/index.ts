@@ -20,3 +20,6 @@ export * from './product.controller';
 export * from './demand-data.controller';
 export * from './report-calendar.controller';
 export * from './interest-matrix-row.controller';
+export * from './asis-memo.controller';
+export * from './tobe-vision.controller';
+export * from './tobe-roadmap.controller';

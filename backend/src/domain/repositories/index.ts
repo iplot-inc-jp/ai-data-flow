@@ -26,3 +26,6 @@ export * from './product.repository';
 export * from './demand-data.repository';
 export * from './report-calendar.repository';
 export * from './interest-matrix-row.repository';
+export * from './asis-memo.repository';
+export * from './tobe-vision.repository';
+export * from './tobe-roadmap.repository';

@@ -21,4 +21,7 @@ export * from './product';
 export * from './demand-data';
 export * from './report-calendar';
 export * from './interest-matrix-row';
+export * from './asis-memo';
+export * from './tobe-vision';
+export * from './tobe-roadmap';
 

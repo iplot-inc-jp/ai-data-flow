@@ -29,8 +29,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
-import { RecordSheetTable } from '@/components/records/record-sheet-table';
-import type { RecordTemplate } from '@/lib/record-templates';
+import { EditableMemoBoard } from '@/components/records/editable-memo-board';
+import {
+  tobeVisionApi,
+  tobeRoadmapApi,
+  type TobeVision,
+  type TobeVisionInput,
+  type TobeRoadmap,
+  type TobeRoadmapInput,
+} from '@/lib/asis-tobe';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -167,46 +174,6 @@ export default function TobeManagementPage() {
       setCreating(false);
     }
   };
-
-  // あるべき姿・打ち手テンプレ
-  const visionTemplate = useMemo<RecordTemplate>(
-    () => ({
-      key: 'tobe-vision',
-      label: 'あるべき姿・打ち手',
-      group: '設計',
-      course: 'tobe-management',
-      description:
-        '領域ごとにあるべき姿と打ち手・期待効果を整理します（このプロジェクト専用に保存）。',
-      columns: [
-        { key: 'area', label: '領域' },
-        { key: 'vision', label: 'あるべき姿' },
-        { key: 'countermeasure', label: '打ち手' },
-        { key: 'effect', label: '期待効果' },
-      ],
-    }),
-    []
-  );
-
-  // 段階設計（TOBE3段階）テンプレ — kadai.json tobe_3dankai 由来
-  const roadmapTemplate = useMemo<RecordTemplate>(
-    () => ({
-      key: 'tobe-roadmap',
-      label: '段階設計（TOBE3段階）',
-      group: '設計',
-      course: 'tobe-management',
-      description:
-        '打ち手を 3ヶ月(Quick Win)/1年(Phase2)/3年(Phase3) の3段階に分け、ROI・実装コスト・回収期間・スコープ判断で評価します。',
-      columns: [
-        { key: 'phase', label: 'フェーズ(3ヶ月/1年/3年)' },
-        { key: 'measure', label: '打ち手' },
-        { key: 'roi', label: 'ROI(年・万円)' },
-        { key: 'cost', label: '実装コスト' },
-        { key: 'payback', label: '回収期間' },
-        { key: 'scope', label: 'スコープ判断' },
-      ],
-    }),
-    []
-  );
 
   return (
     <div className="space-y-8">
@@ -352,7 +319,17 @@ export default function TobeManagementPage() {
                 </Button>
               </Link>
             </div>
-            <RecordSheetTable projectId={projectId} template={visionTemplate} />
+            <EditableMemoBoard<TobeVision, TobeVisionInput>
+              projectId={projectId}
+              api={tobeVisionApi}
+              entityLabel="あるべき姿"
+              columns={[
+                { key: 'area', label: '領域', kind: 'text' },
+                { key: 'vision', label: 'あるべき姿', kind: 'multiline' },
+                { key: 'countermeasure', label: '打ち手', kind: 'multiline' },
+                { key: 'effect', label: '期待効果', kind: 'multiline' },
+              ]}
+            />
           </section>
 
           {/* ── Section: 段階設計（TOBE3段階） ───────────────── */}
@@ -366,7 +343,19 @@ export default function TobeManagementPage() {
                 打ち手を 3ヶ月(Quick Win)/1年(Phase2)/3年(Phase3) に分け、ROI÷実装コスト＝回収期間でスコープ判断する
               </p>
             </div>
-            <RecordSheetTable projectId={projectId} template={roadmapTemplate} />
+            <EditableMemoBoard<TobeRoadmap, TobeRoadmapInput>
+              projectId={projectId}
+              api={tobeRoadmapApi}
+              entityLabel="段階設計"
+              columns={[
+                { key: 'phase', label: 'フェーズ', kind: 'text' },
+                { key: 'measure', label: '打ち手', kind: 'multiline' },
+                { key: 'roi', label: 'ROI', kind: 'text' },
+                { key: 'cost', label: '実装コスト', kind: 'text' },
+                { key: 'payback', label: '回収期間', kind: 'text' },
+                { key: 'scope', label: 'スコープ判断', kind: 'multiline' },
+              ]}
+            />
           </section>
         </>
       )}

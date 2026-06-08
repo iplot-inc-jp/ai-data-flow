@@ -30,3 +30,6 @@ export * from './product.entity';
 export * from './demand-data.entity';
 export * from './report-calendar.entity';
 export * from './interest-matrix-row.entity';
+export * from './asis-memo.entity';
+export * from './tobe-vision.entity';
+export * from './tobe-roadmap.entity';

@@ -112,6 +112,9 @@ model Project {
   demandData        DemandData[]
   reportCalendars   ReportCalendar[]
   interestMatrixRows InterestMatrixRow[]
+  asisMemos         AsisMemo[]
+  tobeVisions       TobeVision[]
+  tobeRoadmaps      TobeRoadmap[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1426,4 +1429,67 @@ model InterestMatrixRow {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("interest_matrix_rows")
+}
+
+// ===========================================
+// ASIS メモ（現状把握）
+// ===========================================
+
+model AsisMemo {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  topic        String? // テーマ
+  currentState String?  @map("current_state") // 現状
+  pain         String? // 痛み・課題
+  restriction  String? // 制約
+  note         String?  @db.Text // 備考
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("asis_memos")
+}
+
+// ===========================================
+// TOBE ビジョン（あるべき姿）
+// ===========================================
+
+model TobeVision {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  area           String? // 領域
+  vision         String?  @db.Text // ビジョン・あるべき姿
+  countermeasure String?  @db.Text // 施策・対応
+  effect         String? // 効果
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("tobe_visions")
+}
+
+// ===========================================
+// TOBE ロードマップ（フェーズ別施策）
+// ===========================================
+
+model TobeRoadmap {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  phase     String? // フェーズ
+  measure   String?  @db.Text // 施策
+  roi       String? // ROI
+  cost      String? // コスト
+  payback   String? // 回収期間
+  scope     String? // 範囲
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("tobe_roadmaps")
 }
