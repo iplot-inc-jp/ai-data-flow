@@ -14,3 +14,4 @@ export * from './task-comment.controller';
 export * from './dfd.controller';
 export * from './stakeholder.controller';
 export * from './meeting.controller';
+export * from './risk.controller';

@@ -20,3 +20,4 @@ export * from './dfd.repository.impl';
 export * from './report-type.repository.impl';
 export * from './stakeholder.repository.impl';
 export * from './meeting.repository.impl';
+export * from './risk.repository.impl';

@@ -15,4 +15,5 @@ export * from './dfd';
 export * from './report-type';
 export * from './stakeholder';
 export * from './meeting';
+export * from './risk';
 

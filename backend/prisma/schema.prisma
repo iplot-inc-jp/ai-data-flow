@@ -106,6 +106,7 @@ model Project {
   reportTypes       ReportType[]
   stakeholders      Stakeholder[]
   meetings          Meeting[]
+  risks             Risk[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1232,4 +1233,34 @@ model MeetingStakeholder {
 
   @@unique([meetingId, stakeholderId])
   @@map("meeting_stakeholders")
+}
+
+// ===========================================
+// リスク・ボトルネック登録簿
+// ===========================================
+
+model Risk {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  code           String? // リスクID（表示用）
+  type           String? // リスク / ボトルネック
+  event          String?  @db.Text // 事象内容
+  causeCategory  String?  @map("cause_category") // 人 / 情報 / 決裁 / 技術 / 外部
+  probability    String? // 高 / 中 / 低
+  impact         String? // 高 / 中 / 低
+  priority       String?
+  countermeasure String?  @db.Text // 対応策（予防・軽減）
+  needsMtg       String?  @map("needs_mtg") // 要 / 不要
+  mtgDate        String?  @map("mtg_date") // MTG設定日
+  deadline       String? // 期限
+  owner          String?
+  status         String?
+  note           String?  @db.Text
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("risks")
 }

@@ -24,3 +24,4 @@ export * from './dfd-flow.entity';
 export * from './report-type.entity';
 export * from './stakeholder.entity';
 export * from './meeting.entity';
+export * from './risk.entity';

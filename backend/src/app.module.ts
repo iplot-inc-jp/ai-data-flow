@@ -28,6 +28,7 @@ import {
   REPORT_TYPE_REPOSITORY,
   STAKEHOLDER_REPOSITORY,
   MEETING_REPOSITORY,
+  RISK_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -130,6 +131,11 @@ import {
   UpdateMeetingUseCase,
   DeleteMeetingUseCase,
   SetMeetingStakeholdersUseCase,
+  // Risk
+  CreateRiskUseCase,
+  GetRisksUseCase,
+  UpdateRiskUseCase,
+  DeleteRiskUseCase,
 } from './application';
 
 // Infrastructure
@@ -157,6 +163,7 @@ import {
   ReportTypeRepositoryImpl,
   StakeholderRepositoryImpl,
   MeetingRepositoryImpl,
+  RiskRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -187,6 +194,8 @@ import {
   StakeholderByIdController,
   MeetingController,
   MeetingByIdController,
+  RiskController,
+  RiskByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -268,6 +277,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     StakeholderByIdController,
     MeetingController,
     MeetingByIdController,
+    RiskController,
+    RiskByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -369,6 +380,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       provide: MEETING_REPOSITORY,
       useClass: MeetingRepositoryImpl,
     },
+    {
+      provide: RISK_REPOSITORY,
+      useClass: RiskRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -467,6 +482,11 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     UpdateMeetingUseCase,
     DeleteMeetingUseCase,
     SetMeetingStakeholdersUseCase,
+    // Risk
+    CreateRiskUseCase,
+    GetRisksUseCase,
+    UpdateRiskUseCase,
+    DeleteRiskUseCase,
 
     // ========== Services ==========
     ClaudeService,
