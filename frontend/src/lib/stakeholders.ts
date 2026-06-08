@@ -1,0 +1,271 @@
+// ステークホルダーマネジメント（REAL tables）用の型・APIヘルパー。
+//
+// 旧来の RecordSheet（projectId × templateKey, {rows}）ではなく、
+// 専用テーブル Stakeholder / Meeting / Role を直接 CRUD する。
+// 既存の他ページと同じく API_URL + /api への raw fetch（localStorage の accessToken）を使う。
+
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+
+function getHeaders(): Record<string, string> {
+  const token =
+    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+// ---------------------------------------------------------------------------
+// 型
+// ---------------------------------------------------------------------------
+
+/** ステークホルダー（Stakeholder テーブル） */
+export interface Stakeholder {
+  id: string;
+  projectId: string;
+  name: string;
+  affiliation: string | null;
+  role: string | null;
+  interest: string | null;
+  concern: string | null;
+  influence: string | null;
+  support: string | null;
+  engagement: string | null;
+  reportFrequency: string | null;
+  contactMethod: string | null;
+  owner: string | null;
+  reportLine: string | null;
+  asisHearing: string | null;
+  tobeSparring: string | null;
+  note: string | null;
+  order: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** 作成・更新で送る入力（name 以外は任意） */
+export type StakeholderInput = Partial<
+  Omit<Stakeholder, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>
+> & { name: string };
+
+/** 会議体（Meeting テーブル） */
+export interface Meeting {
+  id: string;
+  projectId: string;
+  name: string;
+  purpose: string | null;
+  frequency: string | null;
+  dayTime: string | null;
+  requiredAttendees: string | null;
+  optionalAttendees: string | null;
+  agendaTemplate: string | null;
+  preMaterials: string | null;
+  minutesOwner: string | null;
+  decisionMaker: string | null;
+  note: string | null;
+  order: number;
+  stakeholderIds: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** 作成・更新で送る入力（name 以外は任意） */
+export type MeetingInput = Partial<
+  Omit<
+    Meeting,
+    'id' | 'projectId' | 'stakeholderIds' | 'createdAt' | 'updatedAt'
+  >
+> & { name: string };
+
+/** ロール（Role テーブル）。責務・決裁範囲・KPI を含む。 */
+export interface Role {
+  id: string;
+  projectId: string;
+  name: string;
+  type: string;
+  description: string | null;
+  color: string | null;
+  order?: number;
+  laneHeight?: number;
+  responsibility?: string | null;
+  decisionScope?: string | null;
+  kpi?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Stakeholder API
+// ---------------------------------------------------------------------------
+
+export async function listStakeholders(
+  projectId: string,
+): Promise<Stakeholder[]> {
+  const res = await fetch(`${API_URL}/api/projects/${projectId}/stakeholders`, {
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('ステークホルダーの読み込みに失敗しました');
+  return res.json();
+}
+
+export async function createStakeholder(
+  projectId: string,
+  input: StakeholderInput,
+): Promise<Stakeholder> {
+  const res = await fetch(`${API_URL}/api/projects/${projectId}/stakeholders`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error('ステークホルダーの作成に失敗しました');
+  return res.json();
+}
+
+export async function updateStakeholder(
+  id: string,
+  input: Partial<StakeholderInput>,
+): Promise<Stakeholder> {
+  const res = await fetch(`${API_URL}/api/stakeholders/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error('ステークホルダーの更新に失敗しました');
+  return res.json();
+}
+
+export async function deleteStakeholder(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/stakeholders/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('ステークホルダーの削除に失敗しました');
+}
+
+// ---------------------------------------------------------------------------
+// Meeting API
+// ---------------------------------------------------------------------------
+
+export async function listMeetings(projectId: string): Promise<Meeting[]> {
+  const res = await fetch(`${API_URL}/api/projects/${projectId}/meetings`, {
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('会議体の読み込みに失敗しました');
+  return res.json();
+}
+
+export async function createMeeting(
+  projectId: string,
+  input: MeetingInput,
+): Promise<Meeting> {
+  const res = await fetch(`${API_URL}/api/projects/${projectId}/meetings`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error('会議体の作成に失敗しました');
+  return res.json();
+}
+
+export async function updateMeeting(
+  id: string,
+  input: Partial<MeetingInput>,
+): Promise<Meeting> {
+  const res = await fetch(`${API_URL}/api/meetings/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error('会議体の更新に失敗しました');
+  return res.json();
+}
+
+export async function deleteMeeting(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/meetings/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('会議体の削除に失敗しました');
+}
+
+/** 会議体の対象ステークホルダーを置き換える（PUT /meetings/:id/stakeholders）。 */
+export async function setMeetingStakeholders(
+  id: string,
+  stakeholderIds: string[],
+): Promise<Meeting> {
+  const res = await fetch(`${API_URL}/api/meetings/${id}/stakeholders`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ stakeholderIds }),
+  });
+  if (!res.ok) throw new Error('対象ステークホルダーの更新に失敗しました');
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Role API（責務・決裁範囲・KPI の参照／更新のみここで使う）
+// ---------------------------------------------------------------------------
+
+export async function listRoles(projectId: string): Promise<Role[]> {
+  const res = await fetch(`${API_URL}/api/roles/project/${projectId}`, {
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('ロールの読み込みに失敗しました');
+  return res.json();
+}
+
+export async function updateRole(
+  id: string,
+  input: Partial<
+    Pick<Role, 'responsibility' | 'decisionScope' | 'kpi' | 'name' | 'description'>
+  >,
+): Promise<Role> {
+  const res = await fetch(`${API_URL}/api/roles/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error('ロールの更新に失敗しました');
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// 影響度 × 支持度 マトリクスの区分定義（純粋・テスト可能）
+// ---------------------------------------------------------------------------
+
+export const INFLUENCE_LEVELS = ['高', '中', '低'] as const;
+export const SUPPORT_LEVELS = ['支持', '中立', '反対'] as const;
+export type Influence = (typeof INFLUENCE_LEVELS)[number];
+export type Support = (typeof SUPPORT_LEVELS)[number];
+
+/**
+ * セル値から区分語を取り出す。完全一致のみ採用（前後空白は許容）。
+ * 区分に一致しない値（未設定・冗長表記等）は '' を返し、未配置として扱う。
+ */
+export function pickLevel<T extends string>(
+  raw: string | null | undefined,
+  levels: readonly T[],
+): T | '' {
+  const t = (raw ?? '').trim();
+  return (levels as readonly string[]).includes(t) ? (t as T) : '';
+}
+
+/**
+ * 影響度×支持度のセルキー（`影響__支持`）ごとにステークホルダーIDを束ねる。
+ * いずれかが未区分の場合は未配置として除外する。純粋関数（テスト可能）。
+ */
+export function buildInfluenceSupportGrid(
+  stakeholders: Stakeholder[],
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const s of stakeholders) {
+    const inf = pickLevel(s.influence, INFLUENCE_LEVELS);
+    const sup = pickLevel(s.support, SUPPORT_LEVELS);
+    if (!inf || !sup) continue;
+    const key = `${inf}__${sup}`;
+    const arr = map.get(key) ?? [];
+    arr.push(s.id);
+    map.set(key, arr);
+  }
+  return map;
+}

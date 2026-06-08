@@ -5,87 +5,53 @@ import { useParams } from 'next/navigation';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
-import { Card, CardContent } from '@/components/ui/card';
-import {
-  Users,
-  Grid3x3,
-  CalendarClock,
-  BookOpen,
-  Megaphone,
-  AlertTriangle,
-  type LucideIcon,
-} from 'lucide-react';
-import { RECORD_TEMPLATES, type RecordTemplate } from '@/lib/record-templates';
+import { Users, Grid3x3, CalendarClock, type LucideIcon } from 'lucide-react';
+import { RECORD_TEMPLATES } from '@/lib/record-templates';
 import { RecordSheetTable } from '@/components/records/record-sheet-table';
-import { StakeholderMapBoard } from './_components/stakeholder-map-board';
-import { MeetingListEditor } from './_components/meeting-list-editor';
+import { StakeholderTableBoard } from './_components/stakeholder-table-board';
+import { MeetingReportBoard } from './_components/meeting-report-board';
 
 /**
  * ステークホルダーマネジメント ワークスペース。
- * 教材「プロジェクト管理（ステークホルダー管理）」＋「会議・合意形成」配布物Excelの
- * 各シートを、関係者マネジメントの一分野としてタブで統合。
- * 各タブは RecordSheet（projectId × templateKey）に構造的に保存される。
+ *
+ * 関係者・関心ごと・会議/報告の3タブに集約。
+ * - ステークホルダー / 会議体は専用テーブル（Stakeholder / Meeting / Role）を直接 CRUD。
+ * - 関心ごとマトリクス・報告連絡カレンダーは当面 RecordSheet のまま。
  */
-const SM_TAB_DEFS: { key: string; tabLabel: string; icon: LucideIcon }[] = [
-  { key: 'stakeholder-map', tabLabel: 'ステークホルダー', icon: Users },
-  { key: 'interest-matrix', tabLabel: '関心ごとマトリクス', icon: Grid3x3 },
-  { key: 'meeting-list', tabLabel: '会議体一覧', icon: CalendarClock },
-  { key: 'meeting-catalog', tabLabel: 'ミーティング体カタログ', icon: BookOpen },
-  { key: 'report-calendar', tabLabel: '報告・連絡カレンダー', icon: Megaphone },
+type TabKey = 'stakeholders' | 'interests' | 'meetings';
+
+const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
+  { key: 'stakeholders', label: 'ステークホルダー', icon: Users },
+  { key: 'interests', label: '関心ごと', icon: Grid3x3 },
+  { key: 'meetings', label: '会議・報告', icon: CalendarClock },
 ];
-
-type SmTab = {
-  key: string;
-  tabLabel: string;
-  icon: LucideIcon;
-  template: RecordTemplate;
-};
-
-const SM_TABS: SmTab[] = SM_TAB_DEFS.flatMap((def) => {
-  const template = RECORD_TEMPLATES.find((t) => t.key === def.key);
-  return template ? [{ ...def, template }] : [];
-});
 
 export default function StakeholderManagementPage() {
   const params = useParams();
   const projectId = params.projectId as string;
-  const [active, setActive] = useState<string>(SM_TABS[0]?.key ?? '');
+  const [active, setActive] = useState<TabKey>('stakeholders');
 
-  if (SM_TABS.length === 0) {
-    return (
-      <div className="space-y-6">
-        <PageHeader
-          title="ステークホルダーマネジメント"
-          backHref={`/dashboard/projects/${projectId}`}
-        />
-        <Card className="bg-white border-gray-200">
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <AlertTriangle className="h-8 w-8 text-amber-500 mb-3" />
-            <p className="text-gray-700">
-              テンプレが見つかりませんでした。
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const interestTemplate =
+    RECORD_TEMPLATES.find((t) => t.key === 'interest-matrix') ?? null;
+  const reportCalendarTemplate =
+    RECORD_TEMPLATES.find((t) => t.key === 'report-calendar') ?? null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="ステークホルダーマネジメント"
-        description="関係者・会議体・報告連絡・リスクを一分野として構造的に管理します"
-        help="ステークホルダーマップ／関心ごとマトリクス／会議体／報告連絡／リスクなどのタブを切り替えて、各表に行を追加・保存します。タブを切り替えても未保存の入力は保持されますが、各タブごとに「保存」を押してください。"
+        description="関係者・関心ごと・会議/報告を一分野として構造的に管理します"
+        help="「ステークホルダー」タブで関係者を一覧・マトリクス・役割で管理し、「関心ごと」でフェーズ×ロールの関心を整理、「会議・報告」で会議体と報告連絡を設計します。"
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
           <>
             <HowToPanel
               steps={[
-                'タブで管理したい表（ステークホルダーマップ等）を選びます。',
-                '「行を追加」で行を増やし、各セルに入力します（横スクロール可）。',
-                'タブごとに「保存」を押してプロジェクトに記録します。',
-                'ステークホルダーマップは関係者の影響度・支持度・巻き込み方の管理に使います。',
+                'タブで管理したい領域（ステークホルダー／関心ごと／会議・報告）を選びます。',
+                'ステークホルダー：行をクリックして全項目を編集、影響度×支持度マトリクスでも配置できます。',
+                '会議・報告：会議体を追加し、対象ステークホルダーを複数選択します。',
+                '役割と責任は「役割」ページのロールに責任・意思決定範囲・KPIを定義します。',
               ]}
             />
             <ManualButton feature="stakeholder-management" />
@@ -95,7 +61,7 @@ export default function StakeholderManagementPage() {
 
       {/* タブ */}
       <div className="flex flex-wrap gap-1 border-b border-gray-200">
-        {SM_TABS.map((t) => {
+        {TABS.map((t) => {
           const Icon = t.icon;
           const isActive = active === t.key;
           return (
@@ -110,25 +76,43 @@ export default function StakeholderManagementPage() {
               }`}
             >
               <Icon className="h-4 w-4" />
-              {t.tabLabel}
+              {t.label}
             </button>
           );
         })}
       </div>
 
-      {/* 各タブの内容（未保存の編集を保持するため全タブをマウントし表示のみ切替） */}
-      {SM_TABS.map((t) => (
-        <div key={t.key} className={active === t.key ? 'space-y-2' : 'hidden'}>
-          <p className="text-sm text-gray-500">{t.template.description}</p>
-          {t.key === 'stakeholder-map' ? (
-            <StakeholderMapBoard projectId={projectId} template={t.template} />
-          ) : t.key === 'meeting-list' ? (
-            <MeetingListEditor projectId={projectId} template={t.template} />
-          ) : (
-            <RecordSheetTable projectId={projectId} template={t.template} />
-          )}
-        </div>
-      ))}
+      {/* ステークホルダー（テーブル + マトリクス + 役割と責任） */}
+      <div className={active === 'stakeholders' ? '' : 'hidden'}>
+        <StakeholderTableBoard projectId={projectId} />
+      </div>
+
+      {/* 関心ごと（RecordSheet 'interest-matrix'） */}
+      <div className={active === 'interests' ? 'space-y-2' : 'hidden'}>
+        {interestTemplate ? (
+          <>
+            <p className="text-sm text-gray-500">
+              {interestTemplate.description}
+            </p>
+            <RecordSheetTable
+              projectId={projectId}
+              template={interestTemplate}
+            />
+          </>
+        ) : (
+          <p className="text-sm text-gray-400">
+            関心ごとマトリクスのテンプレが見つかりませんでした。
+          </p>
+        )}
+      </div>
+
+      {/* 会議・報告（Meeting テーブル + 報告連絡カレンダー RecordSheet） */}
+      <div className={active === 'meetings' ? '' : 'hidden'}>
+        <MeetingReportBoard
+          projectId={projectId}
+          reportCalendarTemplate={reportCalendarTemplate}
+        />
+      </div>
     </div>
   );
 }
