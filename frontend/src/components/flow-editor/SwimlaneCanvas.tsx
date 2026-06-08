@@ -463,6 +463,8 @@ function EditableEdge({
     informationTypeName?: string | null;
     /** 矢印の先端（終点）をドラッグして別ノードへ付け替える。ドロップ先ノードIDを渡す。 */
     onReconnectTarget?: (edgeId: string, newTargetNodeId: string) => void;
+    /** ラベル/チップなど線以外の部分をクリックしても矢印を選択できるようにする。 */
+    onSelect?: (edgeId: string) => void;
   };
 }) {
   const [editing, setEditing] = useState(false);
@@ -514,18 +516,25 @@ function EditableEdge({
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
+        // 線が細くても掴みやすいよう、クリック判定の帯を広く取る（どこを押しても選択可能に）。
+        interactionWidth={34}
         style={{ strokeWidth: selected ? 3 : 2, stroke: selected ? '#3b82f6' : '#64748b' }}
       />
       <EdgeLabelRenderer>
-        {/* 運ぶ情報種別のチップ: ラベルの少し上に置く（source の OUTPUT → target の INPUT） */}
+        {/* 運ぶ情報種別のチップ: ラベルの少し上に置く（source の OUTPUT → target の INPUT）。
+            クリックで矢印を選択できる（線以外の部分でも選択可能にするため）。 */}
         {infoName && (
           <div
             style={{
               position: 'absolute',
               transform: `translate(-50%,-50%) translate(${labelX}px,${labelY - 16}px)`,
-              pointerEvents: 'none',
+              pointerEvents: 'all',
             }}
-            className="nodrag nopan"
+            className="nodrag nopan cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              data?.onSelect?.(id);
+            }}
           >
             <span
               className={`inline-flex items-center gap-0.5 rounded-full border bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 shadow-sm ${
@@ -578,9 +587,10 @@ function EditableEdge({
             />
           ) : label ? (
             <div
+              onClick={(e) => { e.stopPropagation(); data?.onSelect?.(id); }}
               onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
               className={`px-2 py-0.5 text-xs bg-white border rounded shadow-sm cursor-pointer hover:bg-blue-50 ${selected ? 'border-blue-500' : 'border-gray-300'}`}
-              title="ダブルクリックで編集"
+              title="クリックで選択 / ダブルクリックで編集"
             >
               {label}
             </div>
@@ -967,6 +977,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onLabelUpdate: props.onUpdateEdgeLabel,
           onInsertNode: props.onInsertNodeOnEdge,
           informationTypeName: e.informationType?.name ?? null,
+          // ラベル/チップなど線以外をクリックしても選択できるように。
+          onSelect: (eid: string) => setSelectedEdgeId(eid),
           // 先端ドラッグでの付け替え（ドロップ先ノードへ target を変更）。
           onReconnectTarget: props.onReconnectEdge
             ? (edgeId: string, newTargetNodeId: string) => {
@@ -995,6 +1007,23 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     const t = setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 60);
     return () => clearTimeout(t);
   }, [fitView, flowData.id, orientation]);
+
+  // 選択中の矢印を Delete / Backspace で削除（入力欄にフォーカス中は無視）。
+  // React Flow 標準の削除(deleteKeyCode)はノードまで巻き込むため無効化し、自前で矢印だけ消す。
+  const onDeleteEdge = props.onDeleteEdge;
+  useEffect(() => {
+    if (!selectedEdgeId || !onDeleteEdge) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      onDeleteEdge(selectedEdgeId);
+      setSelectedEdgeId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedEdgeId, onDeleteEdge]);
 
   // 接続ドラッグを開始したノードを覚えておく（向きの正規化に使う）。
   const connectStartNodeRef = useRef<string | null>(null);
@@ -1165,6 +1194,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         }}
         onReconnect={onReconnect}
         onNodesChange={onNodesChange}
+        deleteKeyCode={null}
         nodesDraggable
         nodesConnectable
         elementsSelectable
@@ -1394,6 +1424,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             onClose={() => setSelectedEdgeId(null)}
             onUpdateEdge={props.onUpdateEdge}
             onCreateInformationType={props.onCreateInformationType}
+            onDelete={
+              props.onDeleteEdge
+                ? () => {
+                    props.onDeleteEdge?.(edge.id);
+                    setSelectedEdgeId(null);
+                  }
+                : undefined
+            }
             onRepoint={
               props.onReconnectEdge
                 ? (next) => props.onReconnectEdge?.(edge.id, next)
@@ -1993,6 +2031,7 @@ function EdgePropertyPanel({
   onUpdateEdge,
   onRepoint,
   onReverse,
+  onDelete,
   onCreateInformationType,
 }: {
   edge: FlowDataEdge;
@@ -2002,6 +2041,8 @@ function EdgePropertyPanel({
   sourceLabel?: string;
   targetLabel?: string;
   onClose: () => void;
+  /** この矢印を削除する。 */
+  onDelete?: () => void;
   onUpdateEdge?: (
     edgeId: string,
     patch: { informationTypeId?: string | null; label?: string },
@@ -2168,6 +2209,21 @@ function EdgePropertyPanel({
           >
             <RefreshCw className="h-3.5 w-3.5" />
             向きを反転
+          </button>
+        )}
+
+        {onDelete && (
+          <button
+            type="button"
+            onClick={() => {
+              onDelete();
+              onClose();
+            }}
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50"
+            title="この矢印を削除します（Delete / Backspace キーでも削除できます）"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            矢印を削除
           </button>
         )}
       </div>
