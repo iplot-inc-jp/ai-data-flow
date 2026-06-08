@@ -74,6 +74,14 @@ export interface LayoutOptions {
   lanePadding: number;
   /** レーンのデフォルト厚（ロールが laneHeight を持たない場合） */
   defaultLaneHeight: number;
+  /**
+   * ロール別レーン厚の手動オーバーライド（{ [roleId]: thickness }）。
+   * レンダラ（computeLaneBands）の laneHeightOverrides と「同一の意味・同一の値」で
+   * 渡すこと。指定があるレーンは「内容に追従した自動厚」と「override」の大きい方を
+   * 採用する（max(autoThickness, override)）。これにより 整形 が算出するレーン厚と
+   * 背景レーン帯のレンダリングが一致し、整形後にノードがレーン帯の外へはみ出さない。
+   */
+  laneHeightOverrides: Record<string, number>;
   /** roleId が roles に無い／null のノードを集約する未割当レーンのID */
   unassignedLaneId: string;
   /** 未割当レーンの表示名 */
@@ -89,6 +97,7 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   marginX: 70,
   lanePadding: 22,
   defaultLaneHeight: 120,
+  laneHeightOverrides: {},
   unassignedLaneId: '__unassigned__',
   unassignedLaneName: '未割当',
 };
@@ -349,7 +358,15 @@ export function computeFlowLayout(
     }
     const required = maxCount * slotSize - opt.verticalGap + opt.lanePadding * 2;
     const desired = _r.laneHeight ?? opt.defaultLaneHeight;
-    return Math.max(desired, required, opt.defaultLaneHeight);
+    const autoThickness = Math.max(desired, required, opt.defaultLaneHeight);
+    // 手動オーバーライドがあれば、自動厚と override の大きい方を採用する。
+    // computeLaneBands と同一の max() 規約なので、整形が算出するレーン厚が
+    // 背景レーン帯（レンダラ）と一致し、整形後のノードが帯からはみ出さない。
+    const override = opt.laneHeightOverrides[_r.id];
+    if (typeof override === 'number' && override > 0) {
+      return Math.max(autoThickness, override);
+    }
+    return autoThickness;
   });
 
   // --- レーンオフセット（単一の座標源） ---
@@ -571,19 +588,31 @@ export function computeLaneBands(
     opt.minLaneHeight * 3,
   );
 
-  // --- 各レーンを「所属ノードの実クロス座標範囲」を包むよう配置 ---
-  // 自由配置されたノードを帯が確実に内包するため、帯はノードの実 min/max
-  // クロス座標 ± パディングで決める。レーンはロール順に並べ、前レーンの下端
-  // （vertical では右端）以降から始めることで重なりを防ぐ（contiguous & ordered）。
-  // ノードを持たないレーンは現在のカーソルから minLaneHeight ぶんの帯を置く。
+  // --- 各レーンを contiguous（前レーンの下端から連続）に積み、所属ノードを内包 ---
+  //
+  // 不変条件: 各ノードのクロス軸中心（と半サイズ）は必ず自レーン帯の内側に収まる。
+  //
+  // レーンはロール順に「前レーンの下端 = 現在のカーソル」から連続配置する
+  // （contiguous & ordered, 重ならない）。これは computeFlowLayout のレーン積層
+  // 規約と一致する。各レーンの厚みは「所属ノードのクロス座標スパン + 両側パディング」
+  // を minLaneHeight まで底上げし、さらに override があれば override まで拡張する
+  // （max を採用 = 手動で広げたレーンが内容で勝手に縮まない / 内容超過時のみ自動拡張）。
+  //
+  // 重要: 帯は laneStart(=cursor) から thickness ぶん下へ伸ばすだけでなく、
+  // 「所属ノードが thickness 内に収まらない」場合は laneEnd を naturalEnd まで
+  // 必ず延長する。これにより override で前レーンが押し下がっても、後続レーンの
+  // ノードが帯の外（上/下）へはみ出すことが構造的に起きない（band ⊇ content を保証）。
   const lanes: Lane[] = [];
   let cursor = 0;
   roleOrder.forEach((r, i) => {
     const members = byRole.get(r.id)!;
     const override = opt.laneHeightOverrides[r.id];
     const hasOverride = typeof override === 'number' && override > 0;
-    let laneStart: number;
+
+    // レーンは前レーンの下端から連続して始まる（ordered, non-overlapping）。
+    const laneStart = cursor;
     let laneEnd: number;
+
     if (members.length > 0) {
       let minCross = Infinity;
       let maxCross = -Infinity;
@@ -593,22 +622,21 @@ export function computeLaneBands(
         minCross = Math.min(minCross, center - half);
         maxCross = Math.max(maxCross, center + half);
       }
-      const naturalStart = minCross - opt.lanePadding;
       const naturalEnd = maxCross + opt.lanePadding;
-      // 前レーンと重ならないようカーソル以降から開始
-      laneStart = Math.max(cursor, naturalStart);
-      // 最小厚と自然範囲の両方を満たす下端
+      // 内容スパン（laneStart からノード下端 + パディングまで）と最小厚の大きい方。
       laneEnd = Math.max(laneStart + opt.minLaneHeight, naturalEnd);
+      // 手動オーバーライドがあれば自動厚と override の大きい方まで拡張。
+      if (hasOverride) {
+        const autoThickness = laneEnd - laneStart;
+        laneEnd = laneStart + Math.max(autoThickness, override);
+      }
+      // band ⊇ content の保証: 何があってもノード下端 + パディングまでは必ず覆う。
+      // （override 等で厚みが決まった後も、内容がそれを超えるなら帯を延長する）
+      laneEnd = Math.max(laneEnd, naturalEnd);
     } else {
-      laneStart = cursor;
-      laneEnd = cursor + opt.minLaneHeight;
+      laneEnd = laneStart + (hasOverride ? Math.max(opt.minLaneHeight, override) : opt.minLaneHeight);
     }
-    // 手動オーバーライドがあれば、内容に追従した自動厚と override の大きい方を採用。
-    // （手動で広げたレーンが内容で勝手に縮まず、内容超過時のみ自動拡張する）
-    if (hasOverride) {
-      const autoThickness = laneEnd - laneStart;
-      laneEnd = laneStart + Math.max(autoThickness, override);
-    }
+
     const thickness = laneEnd - laneStart;
     const center = laneStart + thickness / 2;
     lanes.push(

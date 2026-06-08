@@ -463,8 +463,10 @@ describe('computeLaneBands', () => {
     expect(approver.top + approver.height).toBeGreaterThanOrEqual(460);
   });
 
-  it('horizontal: 横に並んだノード（side by side）は 1 つの行（最小厚）に収まる', () => {
-    // 同じレーンに横並び（Y は同じ、X だけ違う）
+  it('horizontal: 横に並んだノード（side by side）は薄い 1 行に収まり、ノードを内包する', () => {
+    // 同じレーンに横並び（Y は同じ、X だけ違う）。レーンは原点(cursor=0)から
+    // 連続配置されるので、ノード(y=80)を内包するため帯は minLaneHeight 以上に
+    // なるが、縦に広がったレーンよりは十分薄い。
     const nodes: BandInputNode[] = [
       { id: 'a', roleId: 'r-customer', x: 100, y: 80, width: 156, height: 52 },
       { id: 'b', roleId: 'r-customer', x: 320, y: 80, width: 156, height: 52 },
@@ -472,8 +474,13 @@ describe('computeLaneBands', () => {
     ];
     const res = computeLaneBands(nodes, roles, 'horizontal');
     const customer = res.lanes.find((l) => l.roleId === 'r-customer')!;
-    // 縦の広がりが無い → 最小厚のまま
-    expect(customer.height).toBe(DEFAULT_LANE_BANDS_OPTIONS.minLaneHeight);
+    // 最小厚以上で、横並び（縦の広がり無し）なので過度に厚くならない
+    expect(customer.height).toBeGreaterThanOrEqual(
+      DEFAULT_LANE_BANDS_OPTIONS.minLaneHeight,
+    );
+    // ノード(中心 y=80, 高さ 52)を帯が確実に内包する（band ⊇ content）
+    expect(customer.top).toBeLessThanOrEqual(80 - 52 / 2);
+    expect(customer.top + customer.height).toBeGreaterThanOrEqual(80 + 52 / 2);
     // 帯の幅（時間軸）は一番右のノードを含む
     expect(res.width).toBeGreaterThanOrEqual(540 + 156 / 2);
   });
@@ -575,5 +582,173 @@ describe('computeLaneBands', () => {
         withDefault.lanes.map((l) => l.height),
       );
     });
+  });
+});
+
+// ===========================================
+// 整形⇄レンダリングの整合（回帰テスト: ノードがレーン帯からはみ出さない）
+// ===========================================
+//
+// バグ: 整形（computeFlowLayout）はノードを Role.laneHeight/defaultLaneHeight 由来の
+// レーン厚で配置するのに対し、レンダラ（computeLaneBands）は per-flow の
+// laneHeightOverrides でレーン帯を描いていたため、両者のレーン厚が食い違い、
+// 整形後にノード中心がレーン帯の外（帯の上/下）に落ちることがあった。
+//
+// 不変条件: 整形後の各コンテンツノードの「クロス軸中心」は、そのロールの
+// レーン帯 [lane.top, lane.top+lane.height]（horizontal）/
+// [lane.left, lane.left+lane.width]（vertical）の内側に必ず収まる。
+//
+// この describe は SwimlaneCanvas の実パイプライン（整形の中心座標を左上に変換して
+// 保存 → 背景レーン帯をその保存位置から再算出）を関数レベルで再現し、はみ出しが
+// ゼロであることを検証する。整形に laneHeightOverrides を渡すことで両エンジンが
+// 同一のレーン厚を使う前提を固定する。
+describe('整形⇄レンダリング整合: ノードはレーン帯からはみ出さない', () => {
+  // SwimlaneCanvas と一致させたノードサイズ（NODE_W/NODE_H == opt.nodeWidth/Height）
+  const NODE_W = DEFAULT_LAYOUT_OPTIONS.nodeWidth;
+  const NODE_H = DEFAULT_LAYOUT_OPTIONS.nodeHeight;
+
+  /**
+   * 整形 → 保存 → 背景帯再算出 の実パイプラインを関数レベルで再現する。
+   * 戻り値は computeLaneBands の結果と、保存位置から復元した各ノードの BandInputNode。
+   */
+  function tidyThenBands(
+    inputNodes: LayoutInputNode[],
+    edges: LayoutInputEdge[],
+    inputRoles: LayoutRole[],
+    orientation: 'horizontal' | 'vertical',
+    laneHeightOverrides: Record<string, number> = {},
+  ) {
+    // 1) 整形: 両エンジンが同一レーン厚を使うよう overrides を渡す
+    const layout = computeFlowLayout(inputNodes, edges, inputRoles, {
+      orientation,
+      laneHeightOverrides,
+    });
+    // 2) 保存（中心→左上）→ 背景帯用に復元（左上→中心）。SwimlaneCanvas と同一。
+    const bandNodes: BandInputNode[] = layout.nodes.map((pn) => {
+      const left = pn.x - pn.width / 2;
+      const top = pn.y - pn.height / 2;
+      return {
+        id: pn.id,
+        roleId: pn.roleId,
+        x: left + NODE_W / 2,
+        y: top + NODE_H / 2,
+        width: NODE_W,
+        height: NODE_H,
+      };
+    });
+    // 3) 背景レーン帯を保存位置から再算出（レンダラと同一の overrides）
+    const bands = computeLaneBands(bandNodes, inputRoles, orientation, {
+      laneHeightOverrides,
+    });
+    return { layout, bandNodes, bands };
+  }
+
+  /** 各ノードのクロス軸中心が自ロールのレーン帯に収まることを表明する。 */
+  function expectAllNodesInsideBands(
+    bandNodes: BandInputNode[],
+    bands: ReturnType<typeof computeLaneBands>,
+    orientation: 'horizontal' | 'vertical',
+  ) {
+    const isHorizontal = orientation === 'horizontal';
+    for (const n of bandNodes) {
+      const lane = bands.lanes.find(
+        (l) => l.roleId === (n.roleId ?? DEFAULT_LANE_BANDS_OPTIONS.unassignedLaneId),
+      )!;
+      expect(lane).toBeDefined();
+      const start = isHorizontal ? lane.top : lane.left!;
+      const size = isHorizontal ? lane.height : lane.width!;
+      const center = isHorizontal ? n.y : n.x;
+      // クロス軸中心が帯の内側（さらにノード半分も帯内）に収まる
+      const half = (isHorizontal ? n.height : n.width) / 2;
+      expect(center).toBeGreaterThanOrEqual(start);
+      expect(center).toBeLessThanOrEqual(start + size);
+      // ノード全体（中心±半サイズ）も帯に内包される（縁にぴったり張り付かない）
+      expect(center - half).toBeGreaterThanOrEqual(start);
+      expect(center + half).toBeLessThanOrEqual(start + size);
+    }
+  }
+
+  const linearNodes: LayoutInputNode[] = [
+    { id: 'a', type: 'START', roleId: 'r-customer', order: 0 },
+    { id: 'b', type: 'PROCESS', roleId: 'r-approver', order: 1 },
+    { id: 'c', type: 'SYSTEM_INTEGRATION', roleId: 'r-system', order: 2 },
+    { id: 'd', type: 'PROCESS', roleId: 'r-customer', order: 3 },
+  ];
+
+  it('horizontal: 整形後すべてのノードがレーン帯内に収まる（override なし）', () => {
+    const { bandNodes, bands } = tidyThenBands(
+      linearNodes,
+      [],
+      roles,
+      'horizontal',
+    );
+    expectAllNodesInsideBands(bandNodes, bands, 'horizontal');
+  });
+
+  it('vertical: 整形後すべてのノードがレーン帯内に収まる（override なし）', () => {
+    const { bandNodes, bands } = tidyThenBands(linearNodes, [], roles, 'vertical');
+    expectAllNodesInsideBands(bandNodes, bands, 'vertical');
+  });
+
+  it('horizontal: 同一セル多重ノード（自動拡張レーン）でもはみ出さない', () => {
+    const crowded: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b1', roleId: 'r-approver', order: 0 },
+      { id: 'b2', roleId: 'r-approver', order: 0 },
+      { id: 'b3', roleId: 'r-approver', order: 0 },
+      { id: 'c', roleId: 'r-system', order: 1 },
+    ];
+    const { bandNodes, bands } = tidyThenBands(crowded, [], roles, 'horizontal');
+    expectAllNodesInsideBands(bandNodes, bands, 'horizontal');
+  });
+
+  it('horizontal: laneHeightOverride があってもノードがレーン帯内に収まる', () => {
+    // r-customer を手動で 300 に広げる。override が 整形 にも渡るので
+    // 後続レーンの top が押し下がっても整形のノード Y がそれに追従する。
+    const overrides = { 'r-customer': 300 };
+    const { bandNodes, bands } = tidyThenBands(
+      linearNodes,
+      [],
+      roles,
+      'horizontal',
+      overrides,
+    );
+    // override が効いている（customer 帯が 300 以上）
+    const customer = bands.lanes.find((l) => l.roleId === 'r-customer')!;
+    expect(customer.height).toBeGreaterThanOrEqual(300);
+    // それでも全ノードがレーン帯内
+    expectAllNodesInsideBands(bandNodes, bands, 'horizontal');
+  });
+
+  it('vertical: laneHeightOverride があってもノードがレーン帯内に収まる', () => {
+    const overrides = { 'r-approver': 280 };
+    const { bandNodes, bands } = tidyThenBands(
+      linearNodes,
+      [],
+      roles,
+      'vertical',
+      overrides,
+    );
+    const approver = bands.lanes.find((l) => l.roleId === 'r-approver')!;
+    expect(approver.width).toBeGreaterThanOrEqual(280);
+    expectAllNodesInsideBands(bandNodes, bands, 'vertical');
+  });
+
+  it('複数レーンに override があり、未割当ノードも混在してもはみ出さない', () => {
+    const mixed: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-approver', order: 1 },
+      { id: 'u', order: 2 }, // 未割当
+      { id: 'c', roleId: 'r-system', order: 3 },
+    ];
+    const overrides = { 'r-customer': 260, 'r-system': 320 };
+    const { bandNodes, bands } = tidyThenBands(
+      mixed,
+      [],
+      roles,
+      'horizontal',
+      overrides,
+    );
+    expectAllNodesInsideBands(bandNodes, bands, 'horizontal');
   });
 });

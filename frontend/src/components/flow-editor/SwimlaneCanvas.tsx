@@ -581,6 +581,21 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     [roles],
   );
 
+  // --- レーン高さの手動オーバーライド（サーバ永続化 + ドラッグ中のローカル先取り） ---
+  // サーバから来た flowData.laneHeights を基底に、ドラッグ中はローカル state を重ねて
+  // 即時にプレビューする。ドラッグ完了時に onUpdateLaneHeight で永続化する。
+  // 整形エンジン（computeFlowLayout）と背景レーン帯（computeLaneBands）の両方が
+  // この同一値を使うため、tidyLayout より前に宣言する。
+  const [localLaneHeights, setLocalLaneHeights] = useState<Record<string, number>>({});
+  useEffect(() => {
+    // フロー切替時はローカルのドラッグ先取りを破棄してサーバ値に従う
+    setLocalLaneHeights({});
+  }, [flowData.id]);
+  const laneHeightOverrides = useMemo(
+    () => ({ ...(flowData.laneHeights ?? {}), ...localLaneHeights }),
+    [flowData.laneHeights, localLaneHeights],
+  );
+
   // --- 整形エンジン（computeFlowLayout）: 綺麗な決定的座標 ---
   // 用途は 2 つ:
   //  1) 未配置ノード（positionX/Y が 0,0）のシード位置（原点スタックを防ぐ）
@@ -598,10 +613,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       source: e.sourceNodeId,
       target: e.targetNodeId,
     }));
+    // 整形が算出するレーン厚を背景レーン帯（computeLaneBands）と完全一致させるため、
+    // 同一の laneHeightOverrides を渡す。これにより整形後にノード中心が必ず
+    // 自レーン帯内に収まり、帯の外へはみ出さない。
     return computeFlowLayout(inputNodes, inputEdges, laneRoles, {
       orientation,
+      laneHeightOverrides,
     } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
-  }, [flowData.nodes, flowData.edges, laneRoles, orientation]);
+  }, [flowData.nodes, flowData.edges, laneRoles, orientation, laneHeightOverrides]);
 
   // --- 各ノードの実効位置（左上座標） ---
   // 保存済み positionX/Y があればそれを使い、未配置なら tidyLayout のシード座標を使う。
@@ -627,19 +646,6 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     }
     return map;
   }, [flowData.nodes, tidyLayout]);
-
-  // --- レーン高さの手動オーバーライド（サーバ永続化 + ドラッグ中のローカル先取り） ---
-  // サーバから来た flowData.laneHeights を基底に、ドラッグ中はローカル state を重ねて
-  // 即時にプレビューする。ドラッグ完了時に onUpdateLaneHeight で永続化する。
-  const [localLaneHeights, setLocalLaneHeights] = useState<Record<string, number>>({});
-  useEffect(() => {
-    // フロー切替時はローカルのドラッグ先取りを破棄してサーバ値に従う
-    setLocalLaneHeights({});
-  }, [flowData.id]);
-  const laneHeightOverrides = useMemo(
-    () => ({ ...(flowData.laneHeights ?? {}), ...localLaneHeights }),
-    [flowData.laneHeights, localLaneHeights],
-  );
 
   // --- 背景レーン帯（ノードに追従して自動サイズ + 手動オーバーライド） ---
   const bands = useMemo(() => {
