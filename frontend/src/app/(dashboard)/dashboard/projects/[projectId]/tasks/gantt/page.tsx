@@ -83,6 +83,10 @@ export default function GanttPage() {
   // 「先行に追加」プルダウンの選択値。
   const [pickPredId, setPickPredId] = useState<string>('');
 
+  // マウスでの依存（矢印）作成: 接続モードと、選択済みの先行タスク。
+  const [connectMode, setConnectMode] = useState(false);
+  const [pendingFromId, setPendingFromId] = useState<string | null>(null);
+
   // ---------------------------------------------------------------------
   // データ取得
   // ---------------------------------------------------------------------
@@ -183,13 +187,102 @@ export default function GanttPage() {
     [fetchAll]
   );
 
-  // バークリック -> タスク詳細へ。
+  // バークリック。接続モード OFF なら詳細へ、ON なら矢印を引く 2 クリック操作。
   const handleClick = useCallback(
     (id: string) => {
-      router.push(`/dashboard/projects/${projectId}/tasks/${id}`);
+      // 通常モード: タスク詳細へ移動。
+      if (!connectMode) {
+        router.push(`/dashboard/projects/${projectId}/tasks/${id}`);
+        return;
+      }
+      // 接続モード 1 クリック目: 先行タスクとして選択。
+      if (!pendingFromId) {
+        setPendingFromId(id);
+        return;
+      }
+      // 同じバーをもう一度クリック: 取消。
+      if (pendingFromId === id) {
+        setPendingFromId(null);
+        return;
+      }
+      // 2 クリック目（別バー）: 先行(pendingFromId)→後続(id) の依存を作成。
+      const from = pendingFromId;
+      const to = id;
+      setPendingFromId(null);
+      // 同一依存が既にあれば何もしない（重複防止）。逆向きの重複も防ぐ。
+      const exists = dependencies.some(
+        (d) =>
+          (d.predecessorId === from && d.successorId === to) ||
+          (d.predecessorId === to && d.successorId === from)
+      );
+      if (exists) return;
+      void (async () => {
+        try {
+          await tasksApi.addDep(to, from);
+          await fetchAll();
+        } catch (err) {
+          console.error('Failed to add dependency:', err);
+          await fetchAll();
+        }
+      })();
     },
-    [router, projectId]
+    [connectMode, pendingFromId, dependencies, router, projectId, fetchAll]
   );
+
+  // 接続モードのトグル。OFF にするときは選択中の先行も解除する。
+  const toggleConnectMode = useCallback(() => {
+    setConnectMode((on) => {
+      if (on) setPendingFromId(null);
+      return !on;
+    });
+  }, []);
+
+  // 矢印クリック -> その依存を削除（確認あり）。
+  const handleArrowClick = useCallback(
+    async (fromId: string, toId: string) => {
+      const dep = dependencies.find(
+        (d) => d.predecessorId === fromId && d.successorId === toId
+      );
+      if (!dep) return;
+      if (!window.confirm('この依存(矢印)を削除しますか？')) return;
+      try {
+        await tasksApi.removeDep(dep.id);
+        await fetchAll();
+      } catch (err) {
+        console.error('Failed to remove dependency:', err);
+        await fetchAll();
+      }
+    },
+    [dependencies, fetchAll]
+  );
+
+  // 親タスクの変更（GUI）。'' は「なし（トップレベル）」= parentId:null。
+  const handleParentChange = useCallback(
+    async (value: string) => {
+      if (!depTaskId) return;
+      try {
+        await tasksApi.update(depTaskId, { parentId: value || null });
+        await fetchAll();
+      } catch (err) {
+        console.error('Failed to update parent:', err);
+        await fetchAll();
+      }
+    },
+    [depTaskId, fetchAll]
+  );
+
+  // ESC で接続モードを終了（選択中の先行も解除）。
+  useEffect(() => {
+    if (!connectMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPendingFromId(null);
+        setConnectMode(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [connectMode]);
 
   // ---------------------------------------------------------------------
   // 依存関係パネル -> バックエンド
@@ -239,6 +332,21 @@ export default function GanttPage() {
     );
   }, [depTaskId, tasks, currentDeps, orderedTaskList]);
 
+  // 親タスク候補: 自分・自分の子孫を除外（循環防止）。WBS 表示順。
+  const parentCandidates = useMemo(() => {
+    if (!depTaskId) return [];
+    const descendants = collectDescendantIds(tasks, depTaskId);
+    return orderedTaskList.filter(
+      (t) => t.id !== depTaskId && !descendants.has(t.id)
+    );
+  }, [depTaskId, tasks, orderedTaskList]);
+
+  // 選択中タスクの現在の親 id（なしは ''）。Select の value 用。
+  const currentParentId = useMemo(
+    () => tasks.find((t) => t.id === depTaskId)?.parentId ?? '',
+    [tasks, depTaskId]
+  );
+
   // ---------------------------------------------------------------------
   // 描画
   // ---------------------------------------------------------------------
@@ -259,8 +367,8 @@ export default function GanttPage() {
             WBS / ガントチャート
           </span>
         }
-        description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗を編集できます（変更は即保存）。依存関係は下の「依存関係」パネルで追加・削除します。"
-        help="左の WBS 一覧と右のタイムラインが同じ行で並びます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。先行→後続の依存（矢印）は下の依存関係パネルで編集できます。バーをクリックするとそのタスクの詳細へ移動します。"
+        description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗を編集できます（変更は即保存）。「依存を追加」ボタンの接続モードでバーを2回クリックすると矢印（依存）が引け、矢印クリックで削除できます。親子関係・依存は下のパネルでも編集できます。"
+        help="左の WBS 一覧と右のタイムラインが同じ行で並びます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。マウスでの依存編集は、(1)「依存を追加」ボタンで接続モードにし先行→後続の順にバーを2クリックして矢印を引く、(2) 矢印をクリックすると確認のうえ依存を削除、で行えます。通常モードではバークリックでタスク詳細へ移動します。親子関係（親タスク）は下のパネルのセレクトで変更できます。"
         backHref={`/dashboard/projects/${projectId}/tasks`}
         backLabel="タスク管理に戻る"
         actions={
@@ -270,12 +378,27 @@ export default function GanttPage() {
                 'バー本体を左右にドラッグすると、開始日と期限がスライドして即保存されます。',
                 'バーの左右の端を掴んでドラッグすると、開始日／期限だけを伸縮できます。',
                 'バー上の進捗ハンドル（バー右端の小さなつまみ）をドラッグすると進捗％が更新されます。',
-                'バー本体をクリックすると、そのタスクの詳細画面へ移動します。',
-                '依存関係（矢印）は下の「依存関係」パネルで、先行タスクを追加（＋）／削除（×）して編集します。',
+                '「依存を追加」ボタンで接続モードにし、先行タスク→後続タスクの順にバーを2回クリックすると依存（矢印）が引けます（ESC で終了）。',
+                '依存の矢印をクリックすると、確認のうえその依存を削除できます。',
+                '親子関係は下のパネルの「親タスク」セレクトで変更できます（依存の追加・削除も同パネルで可能）。',
+                '通常モードではバー本体のクリックでタスク詳細へ移動します。',
                 '右上の「日 / 週 / 月」で目盛りの粒度を切り替えられます。',
               ]}
             />
             <ManualButton feature="tasks-gantt" />
+            <Button
+              type="button"
+              variant={connectMode ? 'default' : 'outline'}
+              onClick={toggleConnectMode}
+              className={`gap-1.5 ${
+                connectMode ? 'bg-blue-600 text-white hover:bg-blue-700' : ''
+              }`}
+              title="接続モード: 先行→後続の順にバーを2回クリックして依存（矢印）を引く"
+              aria-pressed={connectMode}
+            >
+              <Link2 className="h-4 w-4" />
+              依存を追加
+            </Button>
             <Link href={`/dashboard/projects/${projectId}/tasks`}>
               <Button variant="outline" className="gap-1.5">
                 <ListTodo className="h-4 w-4" />
@@ -322,28 +445,44 @@ export default function GanttPage() {
         </Card>
       ) : (
         <>
+          {/* 接続モードのヒントバナー */}
+          {connectMode && (
+            <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              <Link2 className="h-4 w-4 shrink-0" />
+              <span>
+                先行タスクのバー→後続タスクのバーの順にクリックすると依存(矢印)が引けます。もう一度同じバーで取消、ESC/もう一度ボタンで終了。
+              </span>
+            </div>
+          )}
+
           <Card className="overflow-auto border-gray-200 bg-white">
             {/* frappe-gantt（クライアント専用・SSR 無効） */}
-            <div className="gantt-host" style={{ minHeight: 420 }}>
+            <div
+              className={`gantt-host ${connectMode ? 'gantt-connect' : ''}`}
+              style={{ minHeight: 420 }}
+            >
               <FrappeGantt
                 tasks={frappeTasks}
                 viewMode={VIEW_MODE_MAP[zoom]}
                 onDateChange={handleDateChange}
                 onProgressChange={handleProgressChange}
                 onClick={handleClick}
+                onArrowClick={handleArrowClick}
+                mode={connectMode ? 'connect' : 'navigate'}
+                pendingFromId={pendingFromId}
               />
             </div>
           </Card>
 
-          {/* 依存関係パネル（frappe-gantt はドラッグでの依存作成に未対応のため） */}
+          {/* 親子関係・依存関係パネル（マウス操作のフォールバック兼 親タスク編集） */}
           <Card className="border-gray-200 bg-white p-5">
             <div className="mb-3 flex items-center gap-2">
               <Link2 className="h-4 w-4 text-blue-600" />
               <h2 className="text-base font-semibold text-gray-800">
-                依存関係
+                親子関係・依存関係
               </h2>
               <span className="text-xs text-gray-400">
-                タスクを選んで、その「先行」タスクを追加・削除します（先行→後続の矢印が引かれます）。
+                タスクを選んで、親タスク（WBSの親子）と「先行」タスク（先行→後続の矢印）を編集します。
               </span>
             </div>
 
@@ -367,6 +506,36 @@ export default function GanttPage() {
 
             {depTaskId ? (
               <div className="space-y-4">
+                {/* 親タスク（WBS の親子関係）の変更 */}
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-gray-500">
+                    親タスク
+                  </p>
+                  <div className="max-w-md">
+                    <Select
+                      // 「なし」は内部的に '__root__'（空文字は Select の placeholder と衝突するため）。
+                      value={currentParentId || '__root__'}
+                      onValueChange={(v) =>
+                        handleParentChange(v === '__root__' ? '' : v)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="親タスクを選択…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__root__">
+                          なし（トップレベル）
+                        </SelectItem>
+                        {parentCandidates.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.wbs ? `${t.wbs} ${t.title}` : t.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
                 {/* 既存の先行リスト */}
                 <div>
                   <p className="mb-1.5 text-xs font-medium text-gray-500">
