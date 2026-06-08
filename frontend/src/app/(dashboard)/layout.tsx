@@ -34,6 +34,7 @@ import {
   Map as MapIcon,
   ShieldAlert,
   FileSpreadsheet,
+  BookOpen,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -619,6 +620,7 @@ export default function DashboardLayout({
       {
         label: '設定',
         items: [
+          { name: 'マニュアル', href: `${base}/manual`, icon: BookOpen },
           { name: 'ロール', href: `${base}/roles`, icon: UserCog },
           { name: '設定', href: `${base}/settings`, icon: Settings },
         ],

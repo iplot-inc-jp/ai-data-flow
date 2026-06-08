@@ -53,6 +53,7 @@ import {
 } from '@/lib/issue-markdown';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { IdeationAssistDialog } from '@/components/issue-trees/ideation-assist-dialog';
 import {
@@ -998,6 +999,7 @@ function IssueTreeMindMap() {
               ]}
             />
           </div>
+          <ManualButton feature="issue-trees" />
           <Button variant="outline" size="sm" onClick={fetchTree} className="text-gray-600">
             <RefreshCw className="mr-1 h-4 w-4" />
             再読込

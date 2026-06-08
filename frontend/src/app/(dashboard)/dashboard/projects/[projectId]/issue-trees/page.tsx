@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -300,6 +301,7 @@ export default function IssueTreesPage() {
               ]}
             />
           </div>
+          <ManualButton feature="issue-trees" />
           <Button
             onClick={() => openCreate('WHY')}
             className="bg-blue-600 hover:bg-blue-700"

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import {
   Dialog,
@@ -645,6 +646,7 @@ export default function ProjectFlowsPage() {
               ]}
             />
           </div>
+          <ManualButton feature="flows" />
           {/* Parent-child hierarchy map */}
           <Link href={`/dashboard/projects/${projectId}/flows/hierarchy`}>
             <Button variant="outline" className="border-gray-300 text-gray-700">

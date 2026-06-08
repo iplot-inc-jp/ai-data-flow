@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { ShieldAlert, AlertTriangle } from 'lucide-react';
 import { RECORD_TEMPLATES } from '@/lib/record-templates';
@@ -57,14 +58,17 @@ export default function RiskManagementPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              '「行を追加」でリスク・ボトルネックを1行ずつ登録します（横スクロール可）。',
-              '発生確率（高/中/低）×影響度（高/中/低）から優先度を判断して記入します。',
-              '対応策・対応MTGの要否・期限・担当・ステータスを埋めます。',
-              '入力後「保存」を押してプロジェクトに記録します。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                '「行を追加」でリスク・ボトルネックを1行ずつ登録します（横スクロール可）。',
+                '発生確率（高/中/低）×影響度（高/中/低）から優先度を判断して記入します。',
+                '対応策・対応MTGの要否・期限・担当・ステータスを埋めます。',
+                '入力後「保存」を押してプロジェクトに記録します。',
+              ]}
+            />
+            <ManualButton feature="risk-management" />
+          </>
         }
       />
 

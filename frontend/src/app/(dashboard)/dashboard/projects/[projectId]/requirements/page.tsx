@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
@@ -388,6 +389,7 @@ export default function RequirementsPage() {
               ]}
             />
           </span>
+          <ManualButton feature="requirements" />
           <Button
             variant="outline"
             onClick={() => setIsAiDialogOpen(true)}

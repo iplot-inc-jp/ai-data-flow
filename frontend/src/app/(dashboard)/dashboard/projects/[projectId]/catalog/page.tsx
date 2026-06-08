@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -472,6 +473,7 @@ export default function ProjectCatalogPage() {
               ]}
             />
           </span>
+          <ManualButton feature="catalog" />
           {/* スキーマから取り込み(AI) */}
           <Dialog open={isSchemaDialogOpen} onOpenChange={(open) => {
             if (!open) closeSchemaDialog();

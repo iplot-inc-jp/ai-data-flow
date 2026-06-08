@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import {
   Select,
   SelectContent,
@@ -274,6 +275,7 @@ export default function GanttPage() {
                 '右上の「日 / 週 / 月」で目盛りの粒度を切り替えられます。',
               ]}
             />
+            <ManualButton feature="tasks-gantt" />
             <Link href={`/dashboard/projects/${projectId}/tasks`}>
               <Button variant="outline" className="gap-1.5">
                 <ListTodo className="h-4 w-4" />

@@ -26,6 +26,7 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import {
   DragDropContext,
   Droppable,
@@ -535,6 +536,7 @@ export default function TasksPage() {
                 '上部のフィルタ（状態・担当・マイルストーン・カテゴリ・キーワード）で絞り込めます。',
               ]}
             />
+            <ManualButton feature="tasks" />
             {/* 表示切替：一覧 / ボード */}
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
               <button

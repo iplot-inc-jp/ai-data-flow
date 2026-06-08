@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
 import { ReportTypeRegistry } from '@/components/dfd/ReportTypeRegistry';
@@ -154,15 +155,18 @@ export default function ProjectDfdPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            title="第1レベルDFDの使い方"
-            steps={[
-              '「再生成」で、プロジェクトの業務フローをFUNCTIONノードとして自動生成します（手動追加・位置は保持）。',
-              'フロー間のデータ連携（クロスフローリンク）は、源泉フロー → 宛先フローのデータフローとして描かれます。',
-              'FUNCTIONノードをダブルクリック（または「開く」）すると、その業務フロー単体のDFD（第2レベル）へドリルダウンします。',
-              '「図 / 一覧表」を切り替えて、データフロー一覧表でも確認できます。PNG出力で図を画像として保存できます。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              title="第1レベルDFDの使い方"
+              steps={[
+                '「再生成」で、プロジェクトの業務フローをFUNCTIONノードとして自動生成します（手動追加・位置は保持）。',
+                'フロー間のデータ連携（クロスフローリンク）は、源泉フロー → 宛先フローのデータフローとして描かれます。',
+                'FUNCTIONノードをダブルクリック（または「開く」）すると、その業務フロー単体のDFD（第2レベル）へドリルダウンします。',
+                '「図 / 一覧表」を切り替えて、データフロー一覧表でも確認できます。PNG出力で図を画像として保存できます。',
+              ]}
+            />
+            <ManualButton feature="dfd" />
+          </>
         }
       />
 

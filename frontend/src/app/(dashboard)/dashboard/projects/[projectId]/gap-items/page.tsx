@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { AnalysisTab } from './_components/analysis-tab';
@@ -498,6 +499,7 @@ export default function GapItemsPage() {
               { keys: '?', desc: 'この操作方法を開く' },
             ]}
           />
+          <ManualButton feature="gap-items" />
           <Button onClick={() => setIsCreateOpen(true)} className="bg-blue-600 hover:bg-blue-700">
             <Plus className="h-4 w-4 mr-2" />
             GAP追加

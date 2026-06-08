@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { Loader2, Map, GitCompareArrows, Check, Save } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
@@ -242,6 +243,7 @@ export default function RoadmapPage() {
                 '変更は自動保存されます。手動で保存したいときは「保存」を押してください。',
               ]}
             />
+            <ManualButton feature="roadmap" />
             <Button
               onClick={handleSaveAll}
               disabled={saving || loading || gapItems.length === 0}

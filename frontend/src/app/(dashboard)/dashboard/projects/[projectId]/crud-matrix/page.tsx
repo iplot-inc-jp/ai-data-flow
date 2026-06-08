@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import {
   Dialog,
@@ -517,22 +518,25 @@ export default function CrudMatrixPage() {
             <p className="text-gray-500 mt-1">エンティティ × ロール / 業務 の操作マトリクス（俯瞰思考）</p>
           </div>
         </div>
-        <span ref={howToRef} className="inline-flex">
-          <HowToPanel
-            steps={[
-              '上部のタブで5つの見方を切り替えます。①機能の洗い出し（テーブル×ロール→非空セルから機能一覧を自動生成）、②ロール×CRUD権限（設計バグを自動警告）、③業務×CRUD（どの業務がどのデータを触るかを追跡）、④API×ロール、⑤ステータス×ロール。',
-              '①②では表のセルをクリックすると、そのテーブル×ロールに対するC/R/U/Dをチェックして保存できます。',
-              '④はセルをクリックでAPI呼び出し許可(●)をトグル。⑤は各テーブルにステータスを追加し、セルをクリックして許可操作を編集します。',
-              '②の警告（誰も作成/更新できない・外部ロールの書込/削除・削除権の過多）は設計の見直しポイントです。',
-            ]}
-            shortcuts={[
-              { keys: '1〜5', desc: '表示モード①〜⑤を切り替え' },
-              { keys: '⌘/Ctrl+S', desc: 'セル編集中なら保存' },
-              { keys: 'Esc', desc: '編集ダイアログ/ポップオーバーを閉じる' },
-              { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
-            ]}
-          />
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span ref={howToRef} className="inline-flex">
+            <HowToPanel
+              steps={[
+                '上部のタブで5つの見方を切り替えます。①機能の洗い出し（テーブル×ロール→非空セルから機能一覧を自動生成）、②ロール×CRUD権限（設計バグを自動警告）、③業務×CRUD（どの業務がどのデータを触るかを追跡）、④API×ロール、⑤ステータス×ロール。',
+                '①②では表のセルをクリックすると、そのテーブル×ロールに対するC/R/U/Dをチェックして保存できます。',
+                '④はセルをクリックでAPI呼び出し許可(●)をトグル。⑤は各テーブルにステータスを追加し、セルをクリックして許可操作を編集します。',
+                '②の警告（誰も作成/更新できない・外部ロールの書込/削除・削除権の過多）は設計の見直しポイントです。',
+              ]}
+              shortcuts={[
+                { keys: '1〜5', desc: '表示モード①〜⑤を切り替え' },
+                { keys: '⌘/Ctrl+S', desc: 'セル編集中なら保存' },
+                { keys: 'Esc', desc: '編集ダイアログ/ポップオーバーを閉じる' },
+                { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+              ]}
+            />
+          </span>
+          <ManualButton feature="crud-matrix" />
+        </div>
       </div>
 
       {/* モード切替 */}

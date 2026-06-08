@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { Loader2, ClipboardList, GitBranch, Pencil, AlertCircle } from 'lucide-react';
 import {
   flowDefinitionApi,
@@ -100,14 +101,17 @@ export default function BusinessDefinitionPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            title="業務定義シートの使い方"
-            steps={[
-              '行は1つの業務フローです。業務フロー名をクリックすると、そのフローの「個別定義」タブを開きます。',
-              '目的・担当・INPUT・OUTPUT・頻度・システムの各セルは直接入力でき、フォーカスを外すと自動保存されます。',
-              'DO列は手順の要約を表示します。手順の追加・並べ替え・関係者・例外処理などの詳細は「編集」リンクから個別定義タブで行います。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              title="業務定義シートの使い方"
+              steps={[
+                '行は1つの業務フローです。業務フロー名をクリックすると、そのフローの「個別定義」タブを開きます。',
+                '目的・担当・INPUT・OUTPUT・頻度・システムの各セルは直接入力でき、フォーカスを外すと自動保存されます。',
+                'DO列は手順の要約を表示します。手順の追加・並べ替え・関係者・例外処理などの詳細は「編集」リンクから個別定義タブで行います。',
+              ]}
+            />
+            <ManualButton feature="business-definition" />
+          </>
         }
       />
 

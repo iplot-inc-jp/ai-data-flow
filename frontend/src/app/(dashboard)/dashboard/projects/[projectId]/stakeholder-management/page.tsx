@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Users,
@@ -78,14 +79,17 @@ export default function StakeholderManagementPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              'タブで管理したい表（ステークホルダーマップ等）を選びます。',
-              '「行を追加」で行を増やし、各セルに入力します（横スクロール可）。',
-              'タブごとに「保存」を押してプロジェクトに記録します。',
-              'ステークホルダーマップは関係者の影響度・支持度・巻き込み方の管理に使います。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                'タブで管理したい表（ステークホルダーマップ等）を選びます。',
+                '「行を追加」で行を増やし、各セルに入力します（横スクロール可）。',
+                'タブごとに「保存」を押してプロジェクトに記録します。',
+                'ステークホルダーマップは関係者の影響度・支持度・巻き込み方の管理に使います。',
+              ]}
+            />
+            <ManualButton feature="stakeholder-management" />
+          </>
         }
       />
 

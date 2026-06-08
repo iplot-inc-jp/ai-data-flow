@@ -49,6 +49,7 @@ import type {
 } from '@/components/flow-editor/flow-types';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { ManualButton } from '@/components/ui/manual-dialog';
 import { Input } from '@/components/ui/input';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import {
@@ -1507,6 +1508,7 @@ export default function ProjectFlowDetailPage() {
               ]}
             />
           </div>
+          <ManualButton feature="flows" />
           {/* フロー図タブのときだけ表示するツールバー */}
           {activeTab === 'flow' && (
           <>
