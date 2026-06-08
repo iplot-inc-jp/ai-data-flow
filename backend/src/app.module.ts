@@ -26,6 +26,8 @@ import {
   TASK_COMMENT_REPOSITORY,
   DFD_REPOSITORY,
   REPORT_TYPE_REPOSITORY,
+  STAKEHOLDER_REPOSITORY,
+  MEETING_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -41,6 +43,7 @@ import {
   GetProjectsUseCase,
   CreateRoleUseCase,
   GetRolesUseCase,
+  UpdateRoleUseCase,
   // ProjectPhase
   CreatePhaseUseCase,
   GetPhasesUseCase,
@@ -116,6 +119,17 @@ import {
   CreateReportTypeUseCase,
   UpdateReportTypeUseCase,
   DeleteReportTypeUseCase,
+  // Stakeholder
+  CreateStakeholderUseCase,
+  GetStakeholdersUseCase,
+  UpdateStakeholderUseCase,
+  DeleteStakeholderUseCase,
+  // Meeting
+  CreateMeetingUseCase,
+  GetMeetingsUseCase,
+  UpdateMeetingUseCase,
+  DeleteMeetingUseCase,
+  SetMeetingStakeholdersUseCase,
 } from './application';
 
 // Infrastructure
@@ -141,6 +155,8 @@ import {
   TaskCommentRepositoryImpl,
   DfdRepositoryImpl,
   ReportTypeRepositoryImpl,
+  StakeholderRepositoryImpl,
+  MeetingRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -167,6 +183,10 @@ import {
   TaskCommentController,
   TaskCommentByIdController,
   DfdController,
+  StakeholderController,
+  StakeholderByIdController,
+  MeetingController,
+  MeetingByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -244,6 +264,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     DfdController,
     ReportTypeController,
     ReportTypeByIdController,
+    StakeholderController,
+    StakeholderByIdController,
+    MeetingController,
+    MeetingByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -337,6 +361,14 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       provide: REPORT_TYPE_REPOSITORY,
       useClass: ReportTypeRepositoryImpl,
     },
+    {
+      provide: STAKEHOLDER_REPOSITORY,
+      useClass: StakeholderRepositoryImpl,
+    },
+    {
+      provide: MEETING_REPOSITORY,
+      useClass: MeetingRepositoryImpl,
+    },
 
     // ========== Use Cases ==========
     RegisterUserUseCase,
@@ -348,6 +380,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetProjectsUseCase,
     CreateRoleUseCase,
     GetRolesUseCase,
+    UpdateRoleUseCase,
     // ProjectPhase
     CreatePhaseUseCase,
     GetPhasesUseCase,
@@ -423,6 +456,17 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     CreateReportTypeUseCase,
     UpdateReportTypeUseCase,
     DeleteReportTypeUseCase,
+    // Stakeholder
+    CreateStakeholderUseCase,
+    GetStakeholdersUseCase,
+    UpdateStakeholderUseCase,
+    DeleteStakeholderUseCase,
+    // Meeting
+    CreateMeetingUseCase,
+    GetMeetingsUseCase,
+    UpdateMeetingUseCase,
+    DeleteMeetingUseCase,
+    SetMeetingStakeholdersUseCase,
 
     // ========== Services ==========
     ClaudeService,

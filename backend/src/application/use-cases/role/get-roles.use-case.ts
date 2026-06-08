@@ -18,6 +18,9 @@ export interface RoleDto {
   color: string | null;
   order: number;
   laneHeight: number;
+  responsibility: string | null;
+  decisionScope: string | null;
+  kpi: string | null;
 }
 
 /**
@@ -46,6 +49,9 @@ export class GetRolesUseCase {
         color: role.color,
         order: role.order ?? 0,
         laneHeight: role.laneHeight ?? 120,
+        responsibility: role.responsibility,
+        decisionScope: role.decisionScope,
+        kpi: role.kpi,
       }));
   }
 }

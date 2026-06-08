@@ -42,6 +42,69 @@ export class CreateRoleRequestDto {
     message: 'カラーは#RRGGBB形式で入力してください',
   })
   color?: string;
+
+  @ApiPropertyOptional({ description: '責務' })
+  @IsOptional()
+  @IsString()
+  responsibility?: string;
+
+  @ApiPropertyOptional({ description: '決裁範囲' })
+  @IsOptional()
+  @IsString()
+  decisionScope?: string;
+
+  @ApiPropertyOptional({ description: 'KPI' })
+  @IsOptional()
+  @IsString()
+  kpi?: string;
+}
+
+/**
+ * ロール更新リクエストDTO
+ */
+export class UpdateRoleRequestDto {
+  @ApiPropertyOptional({ example: '管理者', description: 'ロール名' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1, { message: 'ロール名は必須です' })
+  @MaxLength(50, { message: 'ロール名は50文字以内で入力してください' })
+  name?: string;
+
+  @ApiPropertyOptional({
+    enum: RoleTypeDto,
+    example: 'HUMAN',
+    description: 'ロールタイプ（HUMAN: 人、SYSTEM: システム、OTHER: その他）',
+  })
+  @IsOptional()
+  @IsEnum(RoleTypeDto, {
+    message: 'タイプはHUMAN, SYSTEM, OTHERのいずれかを指定してください',
+  })
+  type?: RoleTypeDto;
+
+  @ApiPropertyOptional({ example: 'システム管理者', description: '説明' })
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @ApiPropertyOptional({ example: '#3B82F6', description: 'カラー（HEX形式）' })
+  @IsOptional()
+  @IsString()
+  color?: string | null;
+
+  @ApiPropertyOptional({ description: '責務' })
+  @IsOptional()
+  @IsString()
+  responsibility?: string | null;
+
+  @ApiPropertyOptional({ description: '決裁範囲' })
+  @IsOptional()
+  @IsString()
+  decisionScope?: string | null;
+
+  @ApiPropertyOptional({ description: 'KPI' })
+  @IsOptional()
+  @IsString()
+  kpi?: string | null;
 }
 
 /**
@@ -71,6 +134,15 @@ export class RoleResponseDto {
 
   @ApiProperty({ example: 120, description: 'スイムレーンの高さ' })
   laneHeight?: number;
+
+  @ApiProperty({ description: '責務', nullable: true })
+  responsibility?: string | null;
+
+  @ApiProperty({ description: '決裁範囲', nullable: true })
+  decisionScope?: string | null;
+
+  @ApiProperty({ description: 'KPI', nullable: true })
+  kpi?: string | null;
 
   @ApiProperty()
   createdAt?: Date;

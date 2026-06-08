@@ -22,3 +22,5 @@ export * from './dfd-diagram.entity';
 export * from './dfd-node.entity';
 export * from './dfd-flow.entity';
 export * from './report-type.entity';
+export * from './stakeholder.entity';
+export * from './meeting.entity';

@@ -9,6 +9,9 @@ export interface CreateRoleProps {
   type: RoleType;
   description?: string | null;
   color?: string | null;
+  responsibility?: string | null;
+  decisionScope?: string | null;
+  kpi?: string | null;
 }
 
 export interface ReconstructRoleProps {
@@ -20,6 +23,9 @@ export interface ReconstructRoleProps {
   color: string | null;
   order?: number;
   laneHeight?: number;
+  responsibility?: string | null;
+  decisionScope?: string | null;
+  kpi?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,6 +42,9 @@ export class Role extends BaseEntity {
   private _color: string | null;
   private _order: number;
   private _laneHeight: number;
+  private _responsibility: string | null;
+  private _decisionScope: string | null;
+  private _kpi: string | null;
 
   private constructor(
     id: string,
@@ -46,6 +55,9 @@ export class Role extends BaseEntity {
     color: string | null,
     order: number,
     laneHeight: number,
+    responsibility: string | null,
+    decisionScope: string | null,
+    kpi: string | null,
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -57,6 +69,9 @@ export class Role extends BaseEntity {
     this._color = color;
     this._order = order;
     this._laneHeight = laneHeight;
+    this._responsibility = responsibility;
+    this._decisionScope = decisionScope;
+    this._kpi = kpi;
   }
 
   /**
@@ -91,6 +106,9 @@ export class Role extends BaseEntity {
       color,
       0, // default order
       120, // default laneHeight
+      props.responsibility?.trim() || null,
+      props.decisionScope?.trim() || null,
+      props.kpi?.trim() || null,
       now,
       now,
     );
@@ -109,6 +127,9 @@ export class Role extends BaseEntity {
       props.color,
       props.order ?? 0,
       props.laneHeight ?? 120,
+      props.responsibility ?? null,
+      props.decisionScope ?? null,
+      props.kpi ?? null,
       props.createdAt,
       props.updatedAt,
     );
@@ -154,6 +175,21 @@ export class Role extends BaseEntity {
     this.touch();
   }
 
+  changeResponsibility(responsibility: string | null): void {
+    this._responsibility = responsibility?.trim() || null;
+    this.touch();
+  }
+
+  changeDecisionScope(decisionScope: string | null): void {
+    this._decisionScope = decisionScope?.trim() || null;
+    this.touch();
+  }
+
+  changeKpi(kpi: string | null): void {
+    this._kpi = kpi?.trim() || null;
+    this.touch();
+  }
+
   // ========== Getter ==========
 
   get projectId(): string {
@@ -174,6 +210,18 @@ export class Role extends BaseEntity {
 
   get color(): string | null {
     return this._color;
+  }
+
+  get responsibility(): string | null {
+    return this._responsibility;
+  }
+
+  get decisionScope(): string | null {
+    return this._decisionScope;
+  }
+
+  get kpi(): string | null {
+    return this._kpi;
   }
 
   get order(): number {

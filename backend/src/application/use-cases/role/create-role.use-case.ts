@@ -16,6 +16,9 @@ export interface CreateRoleInput {
   type: RoleType;
   description?: string;
   color?: string;
+  responsibility?: string | null;
+  decisionScope?: string | null;
+  kpi?: string | null;
 }
 
 export interface CreateRoleOutput {
@@ -25,6 +28,9 @@ export interface CreateRoleOutput {
   type: RoleType;
   description: string | null;
   color: string | null;
+  responsibility: string | null;
+  decisionScope: string | null;
+  kpi: string | null;
 }
 
 /**
@@ -66,6 +72,9 @@ export class CreateRoleUseCase {
         type: input.type,
         description: input.description,
         color: input.color,
+        responsibility: input.responsibility,
+        decisionScope: input.decisionScope,
+        kpi: input.kpi,
       },
       id,
     );
@@ -81,6 +90,9 @@ export class CreateRoleUseCase {
       type: role.type,
       description: role.description,
       color: role.color,
+      responsibility: role.responsibility,
+      decisionScope: role.decisionScope,
+      kpi: role.kpi,
     };
   }
 }

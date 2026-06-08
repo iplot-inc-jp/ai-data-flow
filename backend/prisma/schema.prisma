@@ -104,6 +104,8 @@ model Project {
   tasks             Task[]
   dfdDiagrams       DfdDiagram[]
   reportTypes       ReportType[]
+  stakeholders      Stakeholder[]
+  meetings          Meeting[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -122,6 +124,9 @@ model Role {
   color       String?
   order       Int      @default(0)
   laneHeight  Int      @default(120) @map("lane_height") // スイムレーンの高さ
+  responsibility String? @db.Text
+  decisionScope  String? @map("decision_scope") @db.Text
+  kpi            String? @db.Text
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -1150,4 +1155,81 @@ model ReportType {
   attachments Attachment[]
 
   @@map("report_types")
+}
+
+// ===========================================
+// ステークホルダー
+// ===========================================
+
+model Stakeholder {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  name            String
+  affiliation     String?
+  role            String?
+  interest        String?  @db.Text
+  concern         String?  @db.Text
+  influence       String?
+  support         String?
+  engagement      String?  @db.Text
+  reportFrequency String?  @map("report_frequency")
+  contactMethod   String?  @map("contact_method")
+  owner           String?
+  reportLine      String?  @map("report_line")
+  asisHearing     String?  @map("asis_hearing") @db.Text
+  tobeSparring    String?  @map("tobe_sparring") @db.Text
+  note            String?  @db.Text
+  order           Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project  Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meetings MeetingStakeholder[]
+
+  @@map("stakeholders")
+}
+
+// ===========================================
+// 会議体
+// ===========================================
+
+model Meeting {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  name              String
+  purpose           String?  @db.Text
+  frequency         String?
+  dayTime           String?  @map("day_time")
+  requiredAttendees String?  @map("required_attendees") @db.Text
+  optionalAttendees String?  @map("optional_attendees") @db.Text
+  agendaTemplate    String?  @map("agenda_template") @db.Text
+  preMaterials      String?  @map("pre_materials") @db.Text
+  minutesOwner      String?  @map("minutes_owner")
+  decisionMaker     String?  @map("decision_maker")
+  note              String?  @db.Text
+  order             Int      @default(0)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  project      Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stakeholders MeetingStakeholder[]
+
+  @@map("meetings")
+}
+
+// ===========================================
+// 会議体 ↔ ステークホルダー（多対多）
+// ===========================================
+
+model MeetingStakeholder {
+  id            String   @id @default(uuid())
+  meetingId     String   @map("meeting_id")
+  stakeholderId String   @map("stakeholder_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  meeting     Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  stakeholder Stakeholder @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, stakeholderId])
+  @@map("meeting_stakeholders")
 }
