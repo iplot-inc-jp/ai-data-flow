@@ -286,6 +286,8 @@ import {
 import { SubProjectController } from './presentation/controllers/sub-project.controller';
 import { RecordSheetController } from './presentation/controllers/record-sheet.controller';
 import { AnalysisController } from './presentation/controllers/analysis.controller';
+import { GapLedgerController } from './presentation/controllers/gap-ledger.controller';
+import { CruoaController } from './presentation/controllers/cruoa.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -344,6 +346,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     SubProjectController,
     RecordSheetController,
     AnalysisController,
+    GapLedgerController,
+    CruoaController,
     DfdController,
     InformationTypeController,
     InformationTypeByIdController,

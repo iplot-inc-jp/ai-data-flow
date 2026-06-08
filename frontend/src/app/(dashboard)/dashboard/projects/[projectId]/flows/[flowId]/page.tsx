@@ -1833,11 +1833,7 @@ export default function ProjectFlowDetailPage() {
               C=作成 / R=参照 / U=更新 / O=出力 / A=承認 を付与し、二重管理（複数ロールが C/U）・属人化（作成者1名）を発見します。
             </p>
           </div>
-          <CruoaMatrix
-            projectId={projectId}
-            templateKey={`info-map:${flowId}`}
-            roles={roles}
-          />
+          <CruoaMatrix flowId={flowId} roles={roles} />
         </div>
       )}
 

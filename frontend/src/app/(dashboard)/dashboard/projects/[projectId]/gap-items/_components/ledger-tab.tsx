@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { Check, X, Loader2, ClipboardList } from 'lucide-react';
-import { useRecordSheet } from '../_lib/use-record-sheet';
+import { gapLedgerApi } from '@/lib/gap-ledger';
 import { SheetToolbar } from './sheet-toolbar';
 
 type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -64,7 +64,7 @@ const phaseBadge: Record<string, string> = {
 
 const filled = (v: string | null | undefined) => !!v && v.trim() !== '';
 
-// gap id ごとの追加メタ（インパクト/難易度/フェーズ/補完問い）を RecordSheet に保存
+// gap id ごとの追加メタ（インパクト/難易度/フェーズ/補完問い）を GapLedger テーブルに保存
 type ScoreRow = {
   gapId: string;
   impact: string; // 件/月（削減は負数）
@@ -72,6 +72,73 @@ type ScoreRow = {
   phase: string; // NONE/Q/P2/P3
   toComplete: string; // 補完すべきこと
 };
+
+/**
+ * GapLedger テーブルを ScoreRow[] として読み書きするローカルフック。
+ * 旧 useRecordSheet<ScoreRow>(projectId, 'gap-ledger-meta', []) の返り値面
+ * （rows/setRows/save/saving/savedAt）をそのまま再現し、コンポーネント本体は無改変で済む。
+ */
+function useGapLedgerMeta(projectId: string) {
+  const [rows, setRows] = useState<ScoreRow[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const fetched = await gapLedgerApi.list(projectId);
+        if (!active) return;
+        setRows(
+          fetched.map((r) => ({
+            gapId: r.gapId,
+            impact: r.impact ?? '',
+            difficulty: r.difficulty ?? 'MID',
+            phase: r.phase ?? 'NONE',
+            toComplete: r.toComplete ?? '',
+          })),
+        );
+      } catch (err) {
+        console.error('Failed to load gap ledger:', err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  const update = useCallback((updater: (prev: ScoreRow[]) => ScoreRow[]) => {
+    setRows((prev) => updater(prev));
+    setSavedAt(null);
+  }, []);
+
+  const save = useCallback(
+    async (next?: ScoreRow[]) => {
+      const payload = next ?? rows;
+      setSaving(true);
+      try {
+        await gapLedgerApi.save(
+          projectId,
+          payload.map((r) => ({
+            gapId: r.gapId,
+            impact: r.impact,
+            difficulty: r.difficulty,
+            phase: r.phase,
+            toComplete: r.toComplete,
+          })),
+        );
+        setSavedAt(Date.now());
+      } catch (err) {
+        console.error('Failed to save gap ledger:', err);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [projectId, rows],
+  );
+
+  return { rows, setRows: update, saving, savedAt, save };
+}
 
 export function LedgerTab({
   projectId,
@@ -88,7 +155,7 @@ export function LedgerTab({
     saving,
     savedAt,
     save,
-  } = useRecordSheet<ScoreRow>(projectId, 'gap-ledger-meta', []);
+  } = useGapLedgerMeta(projectId);
 
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
 

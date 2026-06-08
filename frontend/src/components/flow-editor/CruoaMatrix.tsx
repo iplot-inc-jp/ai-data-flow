@@ -14,18 +14,16 @@ import {
   UserX,
 } from 'lucide-react';
 import type { Role } from './flow-types';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+import { cruoaApi } from '@/lib/cruoa';
 
 /**
  * 情報の地図（CRUOA マトリクス）エディタ。
  * 行=情報項目 × 列=ロール（プロジェクトのロール／無ければ自由列）。
  * 各セルに C=作成 / R=参照 / U=更新 / O=出力 / A=承認 を複数選択でマッピングする。
  *
- * 永続化は既存の RecordSheet API（rows=任意オブジェクト配列）を再利用する。
- *   1 行 = { __info: 情報項目名, __cols: JSON(列定義), <colId>: "C/U" ... }
- * 列定義（ロールIDまたは自由列）は各行に __cols として冗長に持たせ、行が空でも
- * 復元できるよう先頭行に保持する（行が無い場合は roles から既定列を生成）。
+ * 永続化はフロー単位の専用テーブル（CruoaCol / CruoaRow / CruoaCell）を
+ * cruoaApi で一括置換する。列・行・セルはそれぞれ id を持ち、セルは
+ * { rowId, colId, value } で行×列の交差を表す。
  *
  * 診断（uiHint）:
  *  - 同一情報を複数ロールが C または U → 二重管理（転記リスク）として警告
@@ -53,12 +51,10 @@ const TAG_COLOR: Record<CruoaTag, string> = {
 
 type MatrixCol = { id: string; label: string; roleId?: string };
 type MatrixRow = {
+  id: string;
   info: string;
   cells: Record<string, string>; // colId -> "C/U" 形式（スラッシュ区切り）
 };
-
-const INFO_KEY = '__info';
-const COLS_KEY = '__cols';
 
 function parseTags(value: string | undefined): CruoaTag[] {
   if (!value) return [];
@@ -74,13 +70,11 @@ function serializeTags(tags: CruoaTag[]): string {
 }
 
 export function CruoaMatrix({
-  projectId,
-  templateKey,
-  roles,
+  flowId,
+  roles = [],
 }: {
-  projectId: string;
-  templateKey: string;
-  roles: Role[];
+  flowId: string;
+  roles?: Role[];
 }) {
   const [cols, setCols] = useState<MatrixCol[]>([]);
   const [rows, setRows] = useState<MatrixRow[]>([]);
@@ -88,14 +82,6 @@ export function CruoaMatrix({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-
-  const getHeaders = useCallback(() => {
-    const token =
-      typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    return headers;
-  }, []);
 
   // 既定列（プロジェクトのロール、無ければ汎用列）
   const defaultCols = useCallback((): MatrixCol[] => {
@@ -116,43 +102,35 @@ export function CruoaMatrix({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${API_URL}/api/projects/${projectId}/record-sheets/${templateKey}`,
-        { headers: getHeaders() }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const fetched = Array.isArray(data?.rows) ? data.rows : [];
-        // 列定義は先頭行の __cols から復元
-        let restoredCols: MatrixCol[] | null = null;
-        const first = fetched[0] as Record<string, unknown> | undefined;
-        if (first && typeof first[COLS_KEY] === 'string') {
-          try {
-            const parsed = JSON.parse(first[COLS_KEY] as string);
-            if (Array.isArray(parsed)) restoredCols = parsed as MatrixCol[];
-          } catch {
-            /* noop */
-          }
-        }
-        const effectiveCols = restoredCols && restoredCols.length > 0 ? restoredCols : defaultCols();
-        setCols(effectiveCols);
-        const restoredRows: MatrixRow[] = fetched.map((raw: unknown) => {
-          const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+      const data = await cruoaApi.get(flowId);
+      const fetchedCols = Array.isArray(data?.cols) ? data.cols : [];
+      const fetchedRows = Array.isArray(data?.rows) ? data.rows : [];
+      const fetchedCells = Array.isArray(data?.cells) ? data.cells : [];
+
+      const effectiveCols: MatrixCol[] =
+        fetchedCols.length > 0
+          ? [...fetchedCols]
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+              .map((c) => ({
+                id: c.id,
+                label: c.label ?? '',
+                ...(c.roleId ? { roleId: c.roleId } : {}),
+              }))
+          : defaultCols();
+      setCols(effectiveCols);
+
+      const restoredRows: MatrixRow[] = [...fetchedRows]
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map((r) => {
           const cells: Record<string, string> = {};
-          for (const col of effectiveCols) {
-            const v = r[col.id];
-            cells[col.id] = v == null ? '' : String(v);
+          for (const cell of fetchedCells) {
+            if (cell.rowId === r.id) {
+              cells[cell.colId] = cell.value ?? '';
+            }
           }
-          return { info: r[INFO_KEY] == null ? '' : String(r[INFO_KEY]), cells };
+          return { id: r.id, info: r.info ?? '', cells };
         });
-        setRows(restoredRows);
-      } else if (res.status === 404) {
-        setCols(defaultCols());
-        setRows([]);
-      } else {
-        setError('情報の地図の読み込みに失敗しました');
-        setCols(defaultCols());
-      }
+      setRows(restoredRows);
     } catch (err) {
       console.error('Failed to fetch CRUOA matrix:', err);
       setError('情報の地図の読み込み中にエラーが発生しました');
@@ -160,7 +138,7 @@ export function CruoaMatrix({
     } finally {
       setLoading(false);
     }
-  }, [projectId, templateKey, getHeaders, defaultCols]);
+  }, [flowId, defaultCols]);
 
   useEffect(() => {
     fetchSheet();
@@ -169,7 +147,10 @@ export function CruoaMatrix({
   const dirty = () => setSavedAt(null);
 
   const addRow = () => {
-    setRows((prev) => [...prev, { info: '', cells: {} }]);
+    setRows((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), info: '', cells: {} },
+    ]);
     dirty();
   };
 
@@ -226,30 +207,32 @@ export function CruoaMatrix({
     setSaving(true);
     setError(null);
     try {
-      const colsJson = JSON.stringify(cols);
-      // RecordSheet 形式（{colKey:value} の配列）にシリアライズ。
-      // 列定義は各行の __cols に冗長保存（行が空でも先頭行で復元できるように）。
-      const serialized = rows.map((r) => {
-        const out: Record<string, string> = { [INFO_KEY]: r.info, [COLS_KEY]: colsJson };
-        for (const col of cols) out[col.id] = r.cells[col.id] ?? '';
-        return out;
-      });
-      // 行が無くても列定義を残すためのプレースホルダ行
-      const payloadRows =
-        serialized.length > 0 ? serialized : [{ [INFO_KEY]: '', [COLS_KEY]: colsJson }];
-      const res = await fetch(
-        `${API_URL}/api/projects/${projectId}/record-sheets/${templateKey}`,
-        {
-          method: 'PUT',
-          headers: getHeaders(),
-          body: JSON.stringify({ rows: payloadRows }),
-        }
+      const payloadCols = cols.map((c, index) => ({
+        id: c.id,
+        label: c.label,
+        roleId: c.roleId ?? null,
+        order: index,
+      }));
+      const payloadRows = rows.map((r, index) => ({
+        id: r.id,
+        info: r.info,
+        order: index,
+      }));
+      const payloadCells = rows.flatMap((r) =>
+        cols
+          .filter((col) => (r.cells[col.id] ?? '') !== '')
+          .map((col) => ({
+            rowId: r.id,
+            colId: col.id,
+            value: r.cells[col.id],
+          })),
       );
-      if (res.ok) {
-        setSavedAt(Date.now());
-      } else {
-        setError('保存に失敗しました');
-      }
+      await cruoaApi.save(flowId, {
+        cols: payloadCols,
+        rows: payloadRows,
+        cells: payloadCells,
+      });
+      setSavedAt(Date.now());
     } catch (err) {
       console.error('Failed to save CRUOA matrix:', err);
       setError('保存中にエラーが発生しました');
@@ -424,7 +407,7 @@ export function CruoaMatrix({
                     const isDup = dupRowSet.has(rowIndex);
                     return (
                       <tr
-                        key={rowIndex}
+                        key={row.id}
                         className={`border-b border-gray-100 ${
                           isDup ? 'bg-amber-50/40' : 'hover:bg-gray-50/50'
                         }`}

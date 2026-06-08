@@ -119,6 +119,7 @@ model Project {
   analysisSensitivityRows AnalysisSensitivityRow[]
   analysisGapRows         AnalysisGapRow[]
   analysisLeakRows        AnalysisLeakRow[]
+  gapLedgers              GapLedger[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -264,6 +265,8 @@ model BusinessFlow {
   definition          FlowDefinition?
   dfd                 DfdDiagram?              @relation("FlowDfd")
   dfdNodeRefs         DfdNode[]                @relation("DfdNodeRefFlow")
+  cruoaCols           CruoaCol[]
+  cruoaRows           CruoaRow[]
 
   @@map("business_flows")
 }
@@ -769,6 +772,7 @@ model GapItem {
   asisNode  FlowNode?     @relation("GapAsisNode", fields: [asisNodeId], references: [id], onDelete: SetNull)
   tobeNode  FlowNode?     @relation("GapTobeNode", fields: [tobeNodeId], references: [id], onDelete: SetNull)
   issueTree IssueTree?    @relation(fields: [issueTreeId], references: [id], onDelete: SetNull)
+  ledger    GapLedger?
 
   @@map("gap_items")
 }
@@ -1572,4 +1576,73 @@ model AnalysisLeakRow {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("analysis_leak_rows")
+}
+
+// ===========================================
+// GAP台帳オーバーレイ（gap-ledger-meta + gap-roadmap を統合）
+// GAP item ごとの追加メタ（インパクト/難易度/フェーズ/補完問い）
+// ===========================================
+
+model GapLedger {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  gapId      String   @unique @map("gap_id")
+  impact     String?
+  difficulty String?
+  phase      String?
+  toComplete String?  @map("to_complete")
+  // ロードマップ（roadmap ページ）用の追加項目。phase 同様 GapItem に対する 1:1 オーバーレイ。
+  target     String?
+  note       String?
+  order      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  gap     GapItem @relation(fields: [gapId], references: [id], onDelete: Cascade)
+
+  @@map("gap_ledgers")
+}
+
+// ===========================================
+// CRUOA 情報の地図（業務フロー単位の動的マトリクス）
+// 列 / 行 / セルを実テーブル化（replace-all）
+// ===========================================
+
+model CruoaCol {
+  id        String   @id @default(uuid())
+  flowId    String   @map("flow_id")
+  label     String?
+  roleId    String?  @map("role_id")
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@map("cruoa_cols")
+}
+
+model CruoaRow {
+  id        String   @id @default(uuid())
+  flowId    String   @map("flow_id")
+  info      String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  flow  BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  cells CruoaCell[]
+
+  @@map("cruoa_rows")
+}
+
+model CruoaCell {
+  id        String   @id @default(uuid())
+  rowId     String   @map("row_id")
+  colId     String   @map("col_id")
+  value     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  row CruoaRow @relation(fields: [rowId], references: [id], onDelete: Cascade)
+
+  @@map("cruoa_cells")
 }

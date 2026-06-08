@@ -16,11 +16,9 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { Loader2, Map, GitCompareArrows, Check, Save } from 'lucide-react';
+import { gapLedgerApi } from '@/lib/gap-ledger';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
-
-// このページが読み書きする記録シートの識別子
-const TEMPLATE_KEY = 'gap-roadmap';
 
 type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
 
@@ -34,7 +32,7 @@ type GapItem = {
   status: string;
 };
 
-// gap-roadmap シートの1行 = gapId ごとのフェーズ割当
+// 1行 = gapId ごとのフェーズ割当
 type RoadmapRow = {
   gapId: string;
   phase: string;
@@ -46,6 +44,25 @@ type RoadmapRow = {
 // フェーズ（列）。TOBE3段階の考え方をミラー。
 const PHASES = ['3ヶ月以内 (Quick Win)', '1年以内 (Phase2)', '3年以内 (Phase3)', '未分類'];
 const UNASSIGNED = '未分類';
+
+// GapLedger.phase（Q/P2/P3/NONE）と、このページの表示フェーズ列は同一フィールド。
+// ledger タブ（ledger-tab.tsx）のキーと相互変換して値の一貫性を保つ。
+const PHASE_KEY_TO_LABEL: Record<string, string> = {
+  Q: '3ヶ月以内 (Quick Win)',
+  P2: '1年以内 (Phase2)',
+  P3: '3年以内 (Phase3)',
+  NONE: UNASSIGNED,
+};
+const PHASE_LABEL_TO_KEY: Record<string, string> = {
+  '3ヶ月以内 (Quick Win)': 'Q',
+  '1年以内 (Phase2)': 'P2',
+  '3年以内 (Phase3)': 'P3',
+  [UNASSIGNED]: 'NONE',
+};
+const ledgerPhaseToLabel = (raw: string | null | undefined): string =>
+  (raw && PHASE_KEY_TO_LABEL[raw]) || UNASSIGNED;
+const labelToLedgerPhase = (label: string): string =>
+  PHASE_LABEL_TO_KEY[label] ?? 'NONE';
 
 // 列ごとの白テーマ配色
 const phaseStyle: Record<string, { head: string; dot: string }> = {
@@ -82,15 +99,15 @@ export default function RoadmapPage() {
     return headers;
   }, []);
 
-  // GAP一覧 + gap-roadmap シートを同時取得して join
+  // GAP一覧 + GAP台帳（GapLedger.phase）を同時取得して join
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const headers = getHeaders();
-      const [gapRes, sheetRes] = await Promise.all([
+      const [gapRes, ledgers] = await Promise.all([
         fetch(`${API_URL}/api/projects/${projectId}/gap-items`, { headers }),
-        fetch(`${API_URL}/api/projects/${projectId}/record-sheets/${TEMPLATE_KEY}`, { headers }),
+        gapLedgerApi.list(projectId).catch(() => []),
       ]);
 
       if (!gapRes.ok) {
@@ -100,22 +117,19 @@ export default function RoadmapPage() {
       const gaps: GapItem[] = await gapRes.json();
       setGapItems(gaps);
 
+      // 各 GAP の台帳行から phase を読み、表示フェーズに変換して割当マップを作る
       const map: Record<string, RoadmapRow> = {};
-      if (sheetRes.ok) {
-        const sheet: { rows?: RoadmapRow[] } = await sheetRes.json();
-        const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
-        rows.forEach((r) => {
-          if (r && typeof r.gapId === 'string') {
-            map[r.gapId] = {
-              gapId: r.gapId,
-              phase: typeof r.phase === 'string' && PHASES.includes(r.phase) ? r.phase : UNASSIGNED,
-              target: typeof r.target === 'string' ? r.target : '',
-              order: typeof r.order === 'number' ? r.order : 0,
-              note: typeof r.note === 'string' ? r.note : '',
-            };
-          }
-        });
-      }
+      ledgers.forEach((r) => {
+        if (r && typeof r.gapId === 'string') {
+          map[r.gapId] = {
+            gapId: r.gapId,
+            phase: ledgerPhaseToLabel(r.phase),
+            target: r.target ?? '',
+            order: r.order ?? 0,
+            note: r.note ?? '',
+          };
+        }
+      });
       setAssignments(map);
     } catch (err) {
       console.error('Failed to fetch roadmap:', err);
@@ -129,34 +143,24 @@ export default function RoadmapPage() {
     fetchAll();
   }, [fetchAll]);
 
-  // 現時点の割当（gapごと、未割当はデフォルト行を補う）を行配列にして保存
+  // 現時点の割当を {gapId, phase, target, note, order} で保存。
+  // impact/difficulty/toComplete（ledger タブ所有）は送らないのでマージ更新で保持される。
   const persist = useCallback(
     async (next: Record<string, RoadmapRow>) => {
       setSaving(true);
       try {
-        const rows: RoadmapRow[] = gapItems.map((g, i) => {
+        const rows = gapItems.map((g) => {
           const a = next[g.id];
           return {
             gapId: g.id,
-            phase: a?.phase ?? UNASSIGNED,
+            phase: labelToLedgerPhase(a?.phase ?? UNASSIGNED),
             target: a?.target ?? '',
-            order: a?.order ?? i,
             note: a?.note ?? '',
+            order: a?.order ?? 0,
           };
         });
-        const res = await fetch(
-          `${API_URL}/api/projects/${projectId}/record-sheets/${TEMPLATE_KEY}`,
-          {
-            method: 'PUT',
-            headers: getHeaders(),
-            body: JSON.stringify({ title: 'GAPロードマップ', rows }),
-          },
-        );
-        if (res.ok) {
-          setSavedAt(Date.now());
-        } else {
-          setError('保存に失敗しました');
-        }
+        await gapLedgerApi.save(projectId, rows);
+        setSavedAt(Date.now());
       } catch (err) {
         console.error('Failed to save roadmap:', err);
         setError('保存に失敗しました');
@@ -164,7 +168,7 @@ export default function RoadmapPage() {
         setSaving(false);
       }
     },
-    [projectId, gapItems, getHeaders],
+    [projectId, gapItems],
   );
 
   // 1件の割当を更新してオートセーブ
