@@ -1297,6 +1297,64 @@ function IssueTreeMindMap() {
     [treeId, getHeaders],
   );
 
+  // 発想法レンズ文脈つきの AI 子ノード候補取得（POST .../ai-suggest）。
+  // ideationMethodName / ideationLenses をボディに追加して投げ、形は fetchAiSuggestions と同じ。
+  const fetchAiSuggestionsForIdeation = useCallback(
+    async (args: {
+      nodeId: string;
+      ideationMethodName: string;
+      ideationLenses: string[];
+      context?: string;
+    }): Promise<{
+      ok: boolean;
+      suggestions: { label: string; kind: IssueNodeKind }[];
+      keyMissing: boolean;
+      message?: string;
+    }> => {
+      try {
+        const res = await fetch(
+          `${API_URL}/api/issue-trees/${treeId}/nodes/${args.nodeId}/ai-suggest`,
+          {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({
+              ...(args.context ? { context: args.context } : {}),
+              ideationMethodName: args.ideationMethodName,
+              ideationLenses: args.ideationLenses,
+            }),
+          },
+        );
+        if (!res.ok) {
+          const keyMissing = res.status === 400;
+          let message: string | undefined;
+          try {
+            const data = await res.json();
+            message = data?.error ?? data?.message;
+          } catch {
+            // noop
+          }
+          return { ok: false, suggestions: [], keyMissing, message };
+        }
+        const data = await res.json();
+        const suggestions = Array.isArray(data?.suggestions)
+          ? data.suggestions.map((s: { label: string; kind: IssueNodeKind }) => ({
+              label: s.label,
+              kind: s.kind,
+            }))
+          : [];
+        return { ok: true, suggestions, keyMissing: false };
+      } catch {
+        return {
+          ok: false,
+          suggestions: [],
+          keyMissing: false,
+          message: '通信エラーが発生しました',
+        };
+      }
+    },
+    [treeId, getHeaders],
+  );
+
   const patchNode = useCallback(
     async (nodeId: string, body: Record<string, unknown>) => {
       setBusy(true);
@@ -2107,6 +2165,10 @@ function IssueTreeMindMap() {
         }
         treeType={legacyTreeTypeForPattern(pattern)}
         onAdd={addNodesBulk}
+        treeId={treeId}
+        onAiSuggest={fetchAiSuggestionsForIdeation}
+        onAdoptAi={adoptAiSuggestions}
+        settingsHref="/dashboard/settings"
       />
 
       {/* 生成AI候補ダイアログ（spec D） */}

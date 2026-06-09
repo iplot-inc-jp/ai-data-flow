@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsInt,
   IsObject,
+  IsArray,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
@@ -177,6 +178,24 @@ export class SuggestIssueNodesRequestDto {
   @IsOptional()
   @IsString()
   context?: string;
+
+  @ApiPropertyOptional({
+    example: 'SCAMPER',
+    description: '発想法の名称（与えると、その観点で子候補を起案する）',
+  })
+  @IsOptional()
+  @IsString()
+  ideationMethodName?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['代用できないか？', '結合できないか？'],
+    description: '発想法のレンズ（観点）の配列',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  ideationLenses?: string[];
 }
 
 /**

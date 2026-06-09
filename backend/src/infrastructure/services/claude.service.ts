@@ -48,6 +48,10 @@ export interface IssueNodeSuggestContext {
   gapDescription?: string | null;
   /** ユーザーからの補足（任意） */
   userContext?: string | null;
+  /** 発想法の名称（任意）。与えると、その観点で具体的な子候補を起案する */
+  ideationMethodName?: string | null;
+  /** 発想法のレンズ（観点）の配列（任意） */
+  ideationLenses?: string[] | null;
 }
 
 /**
@@ -323,10 +327,31 @@ ${mermaid}`,
     if (context.userContext) {
       lines.push(`補足: ${context.userContext}`);
     }
-    lines.push('');
-    lines.push(
-      `上記の対象ノードの子として、kind="${context.expectedKind}"（${context.expectedKindLabel}）の候補を 3〜6 件提案してください。`,
+
+    const ideationLenses = (context.ideationLenses ?? []).filter(
+      (lens) => lens && lens.trim().length > 0,
     );
+    const hasIdeation =
+      !!context.ideationMethodName && ideationLenses.length > 0;
+
+    lines.push('');
+    if (hasIdeation) {
+      lines.push(
+        `次の発想法「${context.ideationMethodName}」の観点（レンズ）に沿って、対象ノードに対する**具体的で実行可能な**子ノード候補を起案せよ。各レンズにつき1〜2個。`,
+      );
+      lines.push('レンズ:');
+      for (const lens of ideationLenses) {
+        lines.push(`- ${lens}`);
+      }
+      lines.push('');
+      lines.push(
+        `すべての候補の kind は "${context.expectedKind}"（${context.expectedKindLabel}）に統一してください。`,
+      );
+    } else {
+      lines.push(
+        `上記の対象ノードの子として、kind="${context.expectedKind}"（${context.expectedKindLabel}）の候補を 3〜6 件提案してください。`,
+      );
+    }
 
     const response = await client.messages.create({
       model: this.defaultModel(),

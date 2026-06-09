@@ -452,6 +452,8 @@ export class IssueTreeController {
         gapBusinessArea,
         gapDescription,
         userContext: dto.context ?? null,
+        ideationMethodName: dto.ideationMethodName ?? null,
+        ideationLenses: dto.ideationLenses ?? null,
       },
       apiKey,
     );
