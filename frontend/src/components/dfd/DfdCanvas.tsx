@@ -43,6 +43,7 @@ import {
   type Edge,
   type EdgeProps,
   type Connection,
+  type OnConnectStartParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { createPortal } from 'react-dom';
@@ -744,18 +745,41 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     return () => clearTimeout(t);
   }, [fitView, diagram.id]);
 
+  // ドラッグを開始したノードを記録（向きの正規化に使う）。
+  const connectStartNodeRef = useRef<string | null>(null);
+  const onConnectStart = useCallback(
+    (_e: unknown, params: OnConnectStartParams) => {
+      connectStartNodeRef.current = params.nodeId ?? null;
+    },
+    [],
+  );
+
   const onConnect = useCallback(
     (c: Connection) => {
-      if (c.source && c.target && c.source !== c.target) {
-        // ドラッグで使った辺（ハンドル）を保存する。
-        void props.onAddFlow?.({
-          sourceNodeId: c.source,
-          targetNodeId: c.target,
-          dataItem: '情報',
-          sourceHandle: c.sourceHandle ?? null,
-          targetHandle: c.targetHandle ?? null,
-        });
+      const start = connectStartNodeRef.current;
+      connectStartNodeRef.current = null;
+      if (!c.source || !c.target || c.source === c.target) return;
+      let source = c.source;
+      let target = c.target;
+      let sourceHandle = c.sourceHandle ?? null;
+      let targetHandle = c.targetHandle ?? null;
+      // 矢印は「ドラッグを始めたノード → ドロップしたノード」に固定する。
+      // ConnectionMode.Loose では各辺に source/target ハンドルが重なっており、
+      // React Flow が向きを逆に割り当てることがあるため、開始ノードを起点に正規化する。
+      if (start && start === c.target) {
+        source = c.target;
+        target = c.source;
+        sourceHandle = c.targetHandle ?? null;
+        targetHandle = c.sourceHandle ?? null;
       }
+      // ドラッグで使った辺（ハンドル）を保存する。
+      void props.onAddFlow?.({
+        sourceNodeId: source,
+        targetNodeId: target,
+        dataItem: '情報',
+        sourceHandle,
+        targetHandle,
+      });
     },
     [props],
   );
@@ -887,6 +911,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onConnect={onConnect}
+          onConnectStart={onConnectStart}
           onReconnect={onReconnect}
           onNodesChange={onNodesChange}
           nodesDraggable
