@@ -1698,21 +1698,35 @@ function IssueTreeMindMap() {
     setDragNodes(rfNodes);
   }, [rfNodes, setDragNodes]);
 
-  // ドラッグ確定で位置を保存。実ノードのみ metadata に { ...既存, x, y } を merge して
-  // 既存の per-node PUT(patchNode) で保存する。仮想ルートや非実ノードは無視。
-  const handleNodeDragStop = useCallback(
-    (_evt: unknown, node: Node) => {
-      if (node.id === ROOT_ID) return;
-      const src = (tree?.nodes ?? []).find((n) => n.id === node.id);
-      if (!src) return;
-      const nextMeta = {
-        ...(src.metadata ?? {}),
-        x: node.position.x,
-        y: node.position.y,
-      };
-      patchNode(node.id, { metadata: nextMeta });
+  // ドラッグ確定で位置を保存。複数選択を一気に動かした場合は **動かした全ノード** を保存する
+  // （単一ノードだけ保存されるバグ修正）。実ノードのみ metadata に { ...既存, x, y } を merge。
+  const persistNodePositions = useCallback(
+    (nodes: Node[]) => {
+      const real = tree?.nodes ?? [];
+      for (const node of nodes) {
+        if (node.id === ROOT_ID) continue;
+        const src = real.find((n) => n.id === node.id);
+        if (!src) continue;
+        patchNode(node.id, {
+          metadata: { ...(src.metadata ?? {}), x: node.position.x, y: node.position.y },
+        });
+      }
     },
     [tree, patchNode],
+  );
+  // React Flow v12: 第3引数 nodes = 同時にドラッグした全ノード（複数選択時は全部入る）。
+  const handleNodeDragStop = useCallback(
+    (_evt: unknown, node: Node, nodes?: Node[]) => {
+      persistNodePositions(nodes && nodes.length > 0 ? nodes : [node]);
+    },
+    [persistNodePositions],
+  );
+  // 矩形選択をまとめてドラッグした場合（選択ドラッグ）も全ノードを保存。
+  const handleSelectionDragStop = useCallback(
+    (_evt: unknown, nodes: Node[]) => {
+      persistNodePositions(nodes ?? []);
+    },
+    [persistNodePositions],
   );
 
   // 全実ノードの metadata から x/y を消して保存し、computeLayout レイアウトに戻す（整形の本体）。
@@ -2024,6 +2038,7 @@ function IssueTreeMindMap() {
               edges={rfEdges}
               onNodesChange={onNodesChange}
               onNodeDragStop={handleNodeDragStop}
+              onSelectionDragStop={handleSelectionDragStop}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onPaneClick={() => {
