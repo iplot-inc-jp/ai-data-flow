@@ -71,6 +71,8 @@ import {
   LayoutGrid,
   Database,
   RefreshCw,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -1118,6 +1120,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const [menu, setMenu] = useState<ContextMenuState>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  // 全画面トグル: true の間、最外ラッパを fixed inset-0 z-50 に拡大して
+  // React Flow を画面いっぱいに表示する。Esc / ボタン再押下で解除。
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // --- 向き（縦/横）: flow ごとに localStorage 永続化 ---
@@ -1451,6 +1456,30 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return () => clearTimeout(t);
   }, [fitView, flowData.id, orientation]);
 
+  // 全画面トグル: 拡大/縮小いずれもサイズ変化後に fitView で図を収め直す。
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      // ラッパのサイズが変わってから fitView する（同期実行だと旧サイズで計算される）。
+      setTimeout(() => fitView({ padding: 0.2, duration: 200 }), 60);
+      return next;
+    });
+  }, [fitView]);
+
+  // 全画面中に Esc で解除（入力欄フォーカス中は無視）。
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      setIsFullscreen(false);
+      setTimeout(() => fitView({ padding: 0.2, duration: 200 }), 60);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFullscreen, fitView]);
+
   // 選択中の矢印を Delete / Backspace で削除（入力欄にフォーカス中は無視）。
   // React Flow 標準の削除(deleteKeyCode)はノードまで巻き込むため無効化し、自前で矢印だけ消す。
   const onDeleteEdge = props.onDeleteEdge;
@@ -1732,7 +1761,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   ]);
 
   return (
-    <div ref={wrapperRef} className="relative w-full h-full bg-white">
+    <div
+      ref={wrapperRef}
+      className={
+        isFullscreen
+          ? 'fixed inset-0 z-50 bg-white'
+          : 'relative w-full h-full bg-white'
+      }
+    >
       <ReactFlow
         nodes={dragNodes}
         edges={rfEdges}
@@ -1753,6 +1789,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         maxZoom={2}
         fitView
         fitViewOptions={{ padding: 0.2 }}
+        panOnScroll
+        zoomOnScroll={false}
         proOptions={{ hideAttribution: true }}
         onNodeDragStop={handleNodeDragStop}
         onPaneClick={() => { setSelectedEdgeId(null); closeMenu(); }}
@@ -1860,6 +1898,20 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             >
               <Download className="w-4 h-4 mr-1" />
               画像出力(PNG)
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleFullscreen}
+              className="text-gray-700"
+              title={isFullscreen ? '全画面を解除（Esc）' : '全画面表示'}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-4 h-4 mr-1" />
+              ) : (
+                <Maximize2 className="w-4 h-4 mr-1" />
+              )}
+              {isFullscreen ? '縮小' : '全画面'}
             </Button>
           </div>
         </Panel>

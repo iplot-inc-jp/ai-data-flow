@@ -56,6 +56,8 @@ import {
   Database,
   Circle,
   FileText,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -596,6 +598,24 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // 全画面トグル（fixed inset-0 z-50 オーバーレイ）。Esc で解除。
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Esc で全画面解除。
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFullscreen]);
+
+  // 全画面切替の前後でビューを合わせ直す（拡大/縮小どちらでも fitView）。
+  useEffect(() => {
+    const t = setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 120);
+    return () => clearTimeout(t);
+  }, [isFullscreen, fitView]);
 
   // FUNCTION の採番を反映（既存 number は保持）
   const numberedNodes = useMemo(() => assignFunctionNumbers(diagram.nodes, 1), [diagram.nodes]);
@@ -836,7 +856,10 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   }, [selectedFlow?.informationTypeId]);
 
   return (
-    <div ref={wrapperRef} className="relative w-full h-full bg-white">
+    <div
+      ref={wrapperRef}
+      className={`relative bg-white ${isFullscreen ? 'fixed inset-0 z-50 w-screen h-screen' : 'w-full h-full'}`}
+    >
       {/* 帳票ヘッダ */}
       <div className="border-b-2 px-4 py-2 flex items-center justify-between gap-4" style={{ borderColor: NAVY }}>
         <div className="flex items-center gap-2 min-w-0">
@@ -874,6 +897,9 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           maxZoom={2}
           fitView
           fitViewOptions={{ padding: 0.25 }}
+          // 2本指スクロール=パン（移動）。ズームはピンチ（zoomOnPinch 既定true）と +/- コントロールで。
+          panOnScroll
+          zoomOnScroll={false}
           proOptions={{ hideAttribution: true }}
           onNodeDragStop={handleNodeDragStop}
           onPaneClick={() => { setSelectedEdgeId(null); setSelectedNodeId(null); }}
@@ -914,6 +940,16 @@ function DfdCanvasInner(props: DfdCanvasProps) {
               </Button>
               <Button variant="outline" size="sm" onClick={handleExportPng} className="text-gray-700" title="この図をPNG画像で保存">
                 <Download className="w-4 h-4 mr-1" />PNG出力
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsFullscreen((v) => !v)}
+                className="text-gray-700"
+                title={isFullscreen ? '全画面を終了（Esc）' : '全画面表示'}
+              >
+                {isFullscreen ? <Minimize2 className="w-4 h-4 mr-1" /> : <Maximize2 className="w-4 h-4 mr-1" />}
+                {isFullscreen ? '縮小' : '全画面'}
               </Button>
             </div>
           </Panel>

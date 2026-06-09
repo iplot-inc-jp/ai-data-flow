@@ -26,6 +26,7 @@ import {
   getSmoothStepPath,
   getBezierPath,
   useNodesState,
+  useReactFlow,
   SelectionMode,
   type Node,
   type Edge,
@@ -931,6 +932,10 @@ function IssueTreeMindMap() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // 全画面トグル: ON のときキャンバスのラッパを fixed inset-0 z-50 に拡大して
+  // React Flow を画面いっぱいにする。Esc / ボタン再押下で解除。
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   // 選択中のエッジ（親→子リンク）。Delete でデタッチ、選択中は外すボタンを出す。
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   // 線の形（角ばり / 曲線）。ツリーごとに localStorage 永続化（flow の向き永続化と同様）。
@@ -978,6 +983,35 @@ function IssueTreeMindMap() {
   const [creatingTaskNodeId, setCreatingTaskNodeId] = useState<string | null>(null);
 
   const howToRef = useRef<HTMLDivElement>(null);
+
+  // 全画面トグル時に React Flow を再フィットさせる（拡大/縮小でビューポートが変わるため）。
+  const { fitView } = useReactFlow();
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => {
+      const next = !prev;
+      // ラッパのサイズ確定後に fitView。RAF 2 段でレイアウト反映を待つ。
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => fitView({ padding: 0.2 })),
+      );
+      return next;
+    });
+  }, [fitView]);
+
+  // Esc で全画面を解除。
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsFullscreen(false);
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => fitView({ padding: 0.2 })),
+        );
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isFullscreen, fitView]);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
@@ -2002,6 +2036,25 @@ function IssueTreeMindMap() {
           <Button
             variant="outline"
             size="sm"
+            onClick={toggleFullscreen}
+            className="text-gray-600"
+            title={isFullscreen ? '全画面を解除（Esc）' : 'キャンバスを全画面表示'}
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize2 className="mr-1 h-4 w-4" />
+                全画面解除
+              </>
+            ) : (
+              <>
+                <Maximize2 className="mr-1 h-4 w-4" />
+                全画面
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               setImportError(null);
               setImportOpen(true);
@@ -2045,7 +2098,13 @@ function IssueTreeMindMap() {
 
       {/* キャンバス + サイドパネル */}
       <div className="relative flex flex-1 gap-3 overflow-hidden">
-        <Card className="flex-1 overflow-hidden border-gray-200 bg-white">
+        <Card
+          className={
+            isFullscreen
+              ? 'fixed inset-0 z-50 m-0 overflow-hidden rounded-none border-0 bg-white'
+              : 'flex-1 overflow-hidden border-gray-200 bg-white'
+          }
+        >
           <CardContent className="h-full p-0">
             <ReactFlow
               nodes={dragNodes}
@@ -2075,6 +2134,10 @@ function IssueTreeMindMap() {
               selectionOnDrag
               selectionMode={SelectionMode.Partial}
               panOnDrag={[1, 2]}
+              // 2本指スクロール = パン（移動）。ズームはピンチ（zoomOnPinch 既定 true）と
+              // コントロール（+/-）に限定し、スクロールでのズームは無効化する。
+              panOnScroll
+              zoomOnScroll={false}
               // 標準の Delete はノードまで巻き込むため無効化し、矢印の切り離しは自前で扱う。
               deleteKeyCode={null}
             >
