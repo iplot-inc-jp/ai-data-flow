@@ -933,8 +933,22 @@ function IssueTreeMindMap() {
 
   // 選択中のエッジ（親→子リンク）。Delete でデタッチ、選択中は外すボタンを出す。
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  // 線の形（角ばり / 曲線）。永続化フィールドが無いためセッション内のみ（見た目だけ）。
+  // 線の形（角ばり / 曲線）。ツリーごとに localStorage 永続化（flow の向き永続化と同様）。
   const [edgeShape, setEdgeShape] = useState<IssueEdgeShape>('smoothstep');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const v = window.localStorage.getItem('issue-tree-edge-shape-' + treeId);
+    if (v === 'bezier' || v === 'smoothstep') setEdgeShape(v);
+  }, [treeId]);
+  const changeEdgeShape = useCallback(
+    (s: IssueEdgeShape) => {
+      setEdgeShape(s);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('issue-tree-edge-shape-' + treeId, s);
+      }
+    },
+    [treeId],
+  );
   // レイアウトの間隔係数（「広げる/狭める」）。X_GAP / MIND_ROW_H に乗算。既定1.0。
   // 永続化フィールドが無いためセッション内のみ。変更すると computeLayout を再適用する。
   const [spacing, setSpacing] = useState<number>(SPACING_DEFAULT);
@@ -1930,7 +1944,7 @@ function IssueTreeMindMap() {
                 '打ち手ノードは推奨（採用／保留／不採用）を設定して取捨選択します。',
                 '原因（なぜ）ノードからは「調査タスク」、打ち手ノードからは「実行タスク」を作成し、ノードに紐づけてタスク管理できます。紐づくタスクは右パネルに一覧表示されます。',
                 '親→子をつなぐ線（矢印）はどこをクリックしても選択できます。選択中の線の中点に出る「鎖を外す」ボタン（または Delete）で、その子ノードを親から切り離してルート直下へ移動できます（ノード自体は削除されません）。',
-                '右上の「角ばり / 曲線」で線の見た目を切り替えられます（表示のみ・保存はされません）。',
+                '右上の「角ばり / 曲線」で線の見た目を切り替えられます（ツリーごとに保存されます）。',
                 'ヘッダーの「整形」で手動配置をリセットして自動レイアウトに戻せます。「狭める / 広げる」でノード間の距離（間隔）を一括で詰めたり空けたりできます（手動配置はリセットされます）。',
                 '何もない所を左ドラッグすると矩形で複数ノードをまとめて選択できます。画面の移動（パン）は中ボタン / 右ボタンのドラッグで行います。',
                 '「テキストから取り込み」でインデント箇条書きを一括投入できます（作成時向け）。',
@@ -2070,8 +2084,8 @@ function IssueTreeMindMap() {
                 <div className="flex items-center gap-0.5">
                   <button
                     type="button"
-                    onClick={() => setEdgeShape('smoothstep')}
-                    title="線を角ばりにする"
+                    onClick={() => changeEdgeShape('smoothstep')}
+                    title="線を角ばりにする（保存されます）"
                     className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition ${
                       edgeShape === 'smoothstep'
                         ? 'bg-indigo-50 text-indigo-700'
@@ -2083,8 +2097,8 @@ function IssueTreeMindMap() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setEdgeShape('bezier')}
-                    title="線を曲線にする"
+                    onClick={() => changeEdgeShape('bezier')}
+                    title="線を曲線にする（保存されます）"
                     className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition ${
                       edgeShape === 'bezier'
                         ? 'bg-indigo-50 text-indigo-700'
