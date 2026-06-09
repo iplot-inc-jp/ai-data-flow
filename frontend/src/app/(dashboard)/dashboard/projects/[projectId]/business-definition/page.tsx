@@ -24,6 +24,17 @@ import {
   type FlowDefinitionRow,
   type FlowDefinition,
 } from '@/lib/flow-definition';
+import { informationTypeApi, type InformationType } from '@/lib/dfd';
+
+// INPUT/OUTPUT で扱う「物体・情報・帳票」は情報種別マスタ（InformationType）から引く。
+const INFO_CATEGORY_LABEL: Record<string, string> = {
+  INFORMATION: '情報',
+  OBJECT: '物体',
+  DOCUMENT: '帳票',
+};
+// 入出力候補に使う列キー（情報種別マスタの datalist を付ける）
+const INFO_DATALIST_ID = 'bd-information-types';
+const INFO_KEYS = new Set<keyof FlowDefinition>(['input', 'output']);
 
 // インライン編集できる単純列（DO は要約 + 個別定義への導線なので除く）
 const EDITABLE_COLUMNS: { key: keyof FlowDefinition; label: string }[] = [
@@ -118,6 +129,7 @@ export default function BusinessDefinitionPage() {
   const projectId = params.projectId as string;
 
   const [rows, setRows] = useState<FlowDefinitionRow[]>([]);
+  const [infoTypes, setInfoTypes] = useState<InformationType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -143,6 +155,22 @@ export default function BusinessDefinitionPage() {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // INPUT/OUTPUT の候補（物体・情報・帳票）を情報種別マスタから取得。失敗しても本体は動かす。
+  useEffect(() => {
+    let cancelled = false;
+    informationTypeApi
+      .list(projectId)
+      .then((data) => {
+        if (!cancelled) setInfoTypes(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setInfoTypes([]);
       });
     return () => {
       cancelled = true;
@@ -221,6 +249,14 @@ export default function BusinessDefinitionPage() {
 
   return (
     <div className="space-y-5">
+      {/* INPUT/OUTPUT 入力の候補（情報種別マスタ＝物体・情報・帳票）。表・モーダル双方の input が list で参照 */}
+      <datalist id={INFO_DATALIST_ID}>
+        {infoTypes.map((it) => (
+          <option key={it.id} value={it.name}>
+            {INFO_CATEGORY_LABEL[it.category] ?? it.category}
+          </option>
+        ))}
+      </datalist>
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
@@ -301,8 +337,12 @@ export default function BusinessDefinitionPage() {
                   return (
                     <tr key={row.flowId} className="border-b border-gray-100 align-top">
                       {/* 業務フロー名 + kind バッジ */}
-                      <td className="px-3 py-2.5">
-                        <Link href={flowHref} className="group inline-flex items-center gap-2">
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        <Link
+                          href={flowHref}
+                          className="group inline-flex max-w-[220px] items-center gap-2"
+                          title={row.flowName}
+                        >
                           <span
                             className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                               row.kind === 'ASIS'
@@ -312,7 +352,7 @@ export default function BusinessDefinitionPage() {
                           >
                             {row.kind}
                           </span>
-                          <span className="font-medium text-gray-900 group-hover:text-blue-600 group-hover:underline">
+                          <span className="truncate font-medium text-gray-900 group-hover:text-blue-600 group-hover:underline">
                             {row.flowName}
                           </span>
                         </Link>
@@ -326,6 +366,7 @@ export default function BusinessDefinitionPage() {
                             onChange={(e) => setCell(row.flowId, c.key, e.target.value)}
                             onBlur={(e) => commitCell(row.flowId, c.key, e.target.value)}
                             disabled={savingKey === `${row.flowId}:${c.key}`}
+                            list={INFO_KEYS.has(c.key) ? INFO_DATALIST_ID : undefined}
                             className="w-full min-w-[120px] rounded border border-transparent bg-transparent px-2 py-1 text-gray-900 hover:border-gray-200 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 disabled:opacity-50"
                             placeholder="—"
                           />
@@ -357,6 +398,7 @@ export default function BusinessDefinitionPage() {
                             onChange={(e) => setCell(row.flowId, c.key, e.target.value)}
                             onBlur={(e) => commitCell(row.flowId, c.key, e.target.value)}
                             disabled={savingKey === `${row.flowId}:${c.key}`}
+                            list={INFO_KEYS.has(c.key) ? INFO_DATALIST_ID : undefined}
                             className="w-full min-w-[100px] rounded border border-transparent bg-transparent px-2 py-1 text-gray-900 hover:border-gray-200 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 disabled:opacity-50"
                             placeholder="—"
                           />
@@ -437,6 +479,7 @@ export default function BusinessDefinitionPage() {
                         value={form[f.key as EditableTextKey]}
                         onChange={(e) => setFormField(f.key as keyof ModalForm, e.target.value)}
                         disabled={modalSaving}
+                        list={INFO_KEYS.has(f.key) ? INFO_DATALIST_ID : undefined}
                         className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300 disabled:opacity-50"
                         placeholder="—"
                       />
