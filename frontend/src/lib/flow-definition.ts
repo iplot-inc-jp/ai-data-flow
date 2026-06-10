@@ -24,6 +24,9 @@ export interface FlowDefinitionRow {
   parentId: string | null;
   depth: number;
   definition: FlowDefinition;
+  // ノードの情報リンク（NodeInformationLink→InformationType）から集計した INPUT/OUTPUT（これが正）
+  inputItems: string[];
+  outputItems: string[];
 }
 
 export const EMPTY_DEFINITION: Omit<FlowDefinition, 'flowId'> = {

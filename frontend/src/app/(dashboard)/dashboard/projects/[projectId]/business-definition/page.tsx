@@ -33,17 +33,18 @@ const INFO_CATEGORY_LABEL: Record<string, string> = {
   DOCUMENT: '帳票',
 };
 // 入出力候補に使う列キー（情報種別マスタの datalist を付ける）
+// INPUT/OUTPUT のフリーテキストはモーダルでの手動補足のみ（一覧では情報リンク集計をチップ表示）。
 const INFO_DATALIST_ID = 'bd-information-types';
 const INFO_KEYS = new Set<keyof FlowDefinition>(['input', 'output']);
 
 // インライン編集できる単純列（DO は要約 + 個別定義への導線なので除く）
+// INPUT は INPUT列（情報リンク集計のチップ）の前、OUTPUT は DO の後ろのチップ列なので、
+// インライン編集対象からは外している（目的・担当のみ前半でインライン編集）。
 const EDITABLE_COLUMNS: { key: keyof FlowDefinition; label: string }[] = [
   { key: 'purpose', label: '目的' },
   { key: 'owner', label: '担当' },
-  { key: 'input', label: 'INPUT' },
 ];
 const EDITABLE_COLUMNS_TAIL: { key: keyof FlowDefinition; label: string }[] = [
-  { key: 'output', label: 'OUTPUT' },
   { key: 'frequency', label: '頻度' },
   { key: 'system', label: 'システム' },
 ];
@@ -55,15 +56,16 @@ const MODAL_TEXT_FIELDS: { key: keyof FlowDefinition; label: string }[] = [
   { key: 'frequency', label: '頻度' },
   { key: 'system', label: 'システム' },
   { key: 'trigger', label: 'トリガー' },
-  { key: 'input', label: 'INPUT' },
-  { key: 'output', label: 'OUTPUT' },
+  // INPUT/OUTPUT は情報リンク集計が正。ここは手動補足メモのみ。
+  { key: 'input', label: 'INPUT 補足（手動）' },
+  { key: 'output', label: 'OUTPUT 補足（手動）' },
   { key: 'nextProcess', label: '次工程' },
 ];
 
 // モーダルで編集する複数行テキスト項目（textarea）
+// 注: INPUT/OUTPUT はノードの情報リンク集計が正のため、冗長な inputDetail はモーダルから除外（スキーマ列は残置）。
 const MODAL_TEXTAREA_FIELDS: { key: keyof FlowDefinition; label: string }[] = [
   { key: 'stakeholders', label: '関係者' },
-  { key: 'inputDetail', label: 'INPUT 詳細' },
   { key: 'exceptionHandling', label: '例外処理' },
   { key: 'tacitNotes', label: '暗黙知メモ' },
 ];
@@ -157,6 +159,50 @@ function buildPatch(def: FlowDefinition, form: ModalForm): Partial<FlowDefinitio
   }
 
   return patch;
+}
+
+/**
+ * INPUT/OUTPUT 列のセル。
+ * 主役はノードの情報リンク集計（items＝情報種別名）をチップ表示。空なら「—」。
+ * フリーテキスト（note）は手動補足として小さく併記（編集はモーダルのみ）。
+ */
+function InfoLinkCell({
+  items,
+  note,
+  tone,
+}: {
+  items: string[];
+  note: string | null;
+  tone: 'input' | 'output';
+}) {
+  const chipClass =
+    tone === 'input'
+      ? 'bg-sky-50 text-sky-700 border-sky-200'
+      : 'bg-violet-50 text-violet-700 border-violet-200';
+  const trimmedNote = (note ?? '').trim();
+  return (
+    <div className="min-w-[140px] space-y-1">
+      {items.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {items.map((name) => (
+            <span
+              key={name}
+              className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium ${chipClass}`}
+            >
+              {name}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <span className="text-gray-400">—</span>
+      )}
+      {trimmedNote && (
+        <p className="text-[11px] leading-snug text-gray-400" title={trimmedNote}>
+          補足: {trimmedNote}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export default function BusinessDefinitionPage() {
@@ -280,7 +326,7 @@ export default function BusinessDefinitionPage() {
   }, [editingRow, form, closeEdit]);
 
   const help =
-    '全業務フローの業務定義を1行ずつ俯瞰します。目的・担当・INPUT・OUTPUT・頻度・システムはこの表で直接編集（フォーカスを外すと自動保存）でき、「編集」ボタンからは全項目をモーダルでまとめて編集できます。DO手順など個別フローの編集は「業務フローへ」から行えます。';
+    '全業務フローの業務定義を1行ずつ俯瞰します。目的・担当・頻度・システムはこの表で直接編集（フォーカスを外すと自動保存）できます。INPUT/OUTPUT は各フローのノードに紐づけた情報リンク（情報種別）から自動集計してチップ表示します（業務フロー側で編集）。「編集」ボタンからは目的・関係者・DO手順・例外処理などをモーダルでまとめて編集できます（INPUT/OUTPUT は手動補足メモのみ）。';
 
   // 親子階層（parentId）で DFS 順に並べ替えた表示用の行
   const treeRows = toTreeOrder(rows);
@@ -312,8 +358,9 @@ export default function BusinessDefinitionPage() {
               title="業務定義シートの使い方"
               steps={[
                 '行は1つの業務フローです。業務フロー名をクリックすると、そのフローの「個別定義」タブを開きます。',
-                '目的・担当・INPUT・OUTPUT・頻度・システムの各セルは直接入力でき、フォーカスを外すと自動保存されます。',
-                '「編集」ボタンでは目的・関係者・DO手順・例外処理など全項目をモーダルでまとめて編集できます。',
+                '目的・担当・頻度・システムの各セルは直接入力でき、フォーカスを外すと自動保存されます。',
+                'INPUT/OUTPUT は各フローのノードに紐づけた情報リンク（情報種別）から自動集計したチップを表示します。内容を変えるには業務フロー側でノードの入出力を編集してください。',
+                '「編集」ボタンでは目的・関係者・DO手順・例外処理などをモーダルでまとめて編集できます（INPUT/OUTPUT は手動補足メモのみ）。',
                 '「業務フローへ」ボタンで、そのフローの業務フローエディタへ移動できます。',
               ]}
             />
@@ -418,7 +465,7 @@ export default function BusinessDefinitionPage() {
                         </div>
                       </td>
 
-                      {/* インライン編集セル（前半） */}
+                      {/* インライン編集セル（前半: 目的・担当） */}
                       {EDITABLE_COLUMNS.map((c) => (
                         <td key={c.key} className="px-3 py-2.5">
                           <input
@@ -432,6 +479,11 @@ export default function BusinessDefinitionPage() {
                           />
                         </td>
                       ))}
+
+                      {/* INPUT: ノードの情報リンク集計をチップ表示（正）。input はモーダルのみの手動補足 */}
+                      <td className="px-3 py-2.5">
+                        <InfoLinkCell items={row.inputItems} note={row.definition.input} tone="input" />
+                      </td>
 
                       {/* DO: 要約（読み取り専用）+ 編集ボタン */}
                       <td className="px-3 py-2.5">
@@ -450,7 +502,12 @@ export default function BusinessDefinitionPage() {
                         </div>
                       </td>
 
-                      {/* インライン編集セル（後半） */}
+                      {/* OUTPUT: ノードの情報リンク集計をチップ表示（正）。output はモーダルのみの手動補足 */}
+                      <td className="px-3 py-2.5">
+                        <InfoLinkCell items={row.outputItems} note={row.definition.output} tone="output" />
+                      </td>
+
+                      {/* インライン編集セル（後半: 頻度・システム） */}
                       {EDITABLE_COLUMNS_TAIL.map((c) => (
                         <td key={c.key} className="px-3 py-2.5">
                           <input

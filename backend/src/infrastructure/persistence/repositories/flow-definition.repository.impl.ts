@@ -38,16 +38,39 @@ export class FlowDefinitionRepositoryImpl implements IFlowDefinitionRepository {
     const flows = await this.prisma.businessFlow.findMany({
       where: { projectId },
       orderBy: [{ createdAt: 'asc' }],
-      include: { definition: true },
+      include: {
+        definition: true,
+        // ノードの情報リンク → 情報種別マスタ（INPUT/OUTPUT 集計の正データ）
+        nodes: {
+          include: {
+            informationLinks: { include: { informationType: true } },
+          },
+        },
+      },
     });
-    return flows.map((f) => ({
-      flowId: f.id,
-      flowName: f.name,
-      kind: f.kind,
-      parentId: f.parentId,
-      depth: f.depth,
-      definition: f.definition ? this.toEntity(f.definition) : null,
-    }));
+    return flows.map((f) => {
+      // 各フローのノードを横断して INPUT / OUTPUT の情報種別名を重複除去で集計
+      const inputSet = new Set<string>();
+      const outputSet = new Set<string>();
+      for (const node of f.nodes) {
+        for (const link of node.informationLinks) {
+          const name = link.informationType?.name;
+          if (!name) continue;
+          if (link.direction === 'INPUT') inputSet.add(name);
+          else if (link.direction === 'OUTPUT') outputSet.add(name);
+        }
+      }
+      return {
+        flowId: f.id,
+        flowName: f.name,
+        kind: f.kind,
+        parentId: f.parentId,
+        depth: f.depth,
+        definition: f.definition ? this.toEntity(f.definition) : null,
+        inputItems: [...inputSet],
+        outputItems: [...outputSet],
+      };
+    });
   }
 
   async save(def: FlowDefinition): Promise<void> {

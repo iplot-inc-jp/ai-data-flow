@@ -41,6 +41,7 @@ import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
 import { dfdApi, informationTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type InformationType, type InformationCategory } from '@/lib/dfd';
+import { type RoleType } from '@/lib/api';
 import type {
   FlowData,
   FlowLinkDirection,
@@ -657,6 +658,16 @@ export default function ProjectFlowDetailPage() {
     return headers;
   }, []);
 
+  // ロール一覧取得（フロー途中でのロール追加後の再取得でも再利用する）
+  const fetchRoles = useCallback(async () => {
+    const headers = getHeaders();
+    const rolesRes = await fetch(`${API_URL}/api/roles/project/${projectId}`, { headers });
+    if (rolesRes.ok) {
+      const rolesData = await rolesRes.json();
+      setRoles(rolesData);
+    }
+  }, [projectId, getHeaders]);
+
   // フローデータを取得
   // silent=true（Undo/Redo の restore 直後の再取得）では全画面ローディングを出さず、
   // 図がちらつかないようにする（キャンバスは前回状態を保ったまま差し替わる）。
@@ -672,12 +683,8 @@ export default function ProjectFlowDetailPage() {
       if (!flowRes.ok) throw new Error('Failed to fetch flow data');
       const flow = await flowRes.json();
 
-      // ロール取得
-      const rolesRes = await fetch(`${API_URL}/api/roles/project/${projectId}`, { headers });
-      if (rolesRes.ok) {
-        const rolesData = await rolesRes.json();
-        setRoles(rolesData);
-      }
+      // ロール取得（関数化した fetchRoles を再利用）
+      await fetchRoles();
 
       setFlowData(flow);
     } catch (err) {
@@ -685,7 +692,7 @@ export default function ProjectFlowDetailPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [projectId, getHeaders]);
+  }, [getHeaders, fetchRoles]);
 
   // Mermaid出力取得
   const fetchMermaid = useCallback(async () => {
@@ -1554,6 +1561,31 @@ export default function ProjectFlowDetailPage() {
     [rolesStorageKey]
   );
 
+  // フロー途中でロールを追加（名前 + 人/システム区分）
+  // 既存の getHeaders() ベース fetch で POST /api/roles する。
+  // - projectId はクエリではなく body に入れる（バックエンド CreateRoleRequestDto.projectId は必須）。
+  // - rolesApi.create（@/lib/api）は projectId をクエリに付けるだけで body に載せず、かつ
+  //   トークンを 'token' キーで読む（本アプリは 'accessToken'）ため 401/400 になる。使わない。
+  // 作成後はロール一覧を再取得し、追加したロールは表示選択にも含める。
+  const handleAddRole = useCallback(
+    async (name: string, type: RoleType) => {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/roles`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ projectId, name, type }),
+      });
+      if (!res.ok) throw new Error('Failed to create role');
+      const created = (await res.json()) as Role;
+      // 追加直後から図に出るよう、現在の選択（無指定=全選択）に新ロールを足して永続化。
+      // この永続値を roles 再取得後の選択初期化 useEffect が拾い、新ロールも表示される。
+      const current = selectedRoleIds ?? roles.map((r) => r.id);
+      persistSelectedRoles(Array.from(new Set([...current, created.id])));
+      await fetchRoles();
+    },
+    [projectId, selectedRoleIds, roles, persistSelectedRoles, fetchRoles, getHeaders]
+  );
+
   // ロールのチェック切替
   const toggleRole = useCallback(
     (roleId: string, checked: boolean) => {
@@ -2004,7 +2036,7 @@ export default function ProjectFlowDetailPage() {
           onCreateNodeLink={handleCreateNodeLink}
           onDeleteNodeLink={handleDeleteNodeLink}
           onFetchFlowNodes={handleFetchFlowNodes}
-          onAddRole={() => router.push(`/dashboard/projects/${projectId}/roles`)}
+          onAddRole={handleAddRole}
         />
       </div>
 

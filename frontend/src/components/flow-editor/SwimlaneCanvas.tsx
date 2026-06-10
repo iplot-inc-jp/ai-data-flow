@@ -60,6 +60,9 @@ import {
   GitBranch,
   Cpu,
   Users,
+  User,
+  Server,
+  Circle,
   X,
   Download,
   RotateCw,
@@ -104,6 +107,17 @@ import {
 const LANE_LABEL_W = 132;
 
 export type FlowOrientation = 'horizontal' | 'vertical';
+
+/** ロールの人/システム区分（@/lib/api の RoleType と同値）。 */
+export type RoleType = 'HUMAN' | 'SYSTEM' | 'OTHER';
+
+/** ロール種別 → レーンヘッダーに出すアイコン（人/システム/中立）。 */
+function roleTypeIcon(type: string | undefined): typeof User {
+  if (type === 'SYSTEM') return Server;
+  if (type === 'OTHER') return Circle;
+  // 既定（未設定含む）は「人」扱い
+  return User;
+}
 
 /** ノード更新の差分パッチ。プロパティ保存・ドラッグでの自由配置保存の双方で使う。 */
 export interface NodeUpdatePatch {
@@ -230,7 +244,12 @@ export interface SwimlaneCanvasProps {
    * 子フローが無ければ作成してから遷移する処理は、呼び出し側（ページ）に委譲する。
    */
   onNodeDoubleClick?: (nodeId: string) => void;
-  onAddRole?: () => void;
+  /**
+   * フロー途中でロール（スイムレーン）を新規追加する。
+   * 名前と人/システム区分（HUMAN|SYSTEM|OTHER）を受け取り、呼び出し側（ページ）が
+   * rolesApi.create → ロール一覧再取得で roles prop を更新する。
+   */
+  onAddRole?: (name: string, type: RoleType) => Promise<void>;
   // --- クロスフロー入出力リンク（右サイドバー「他の業務フローと連携」） ---
   /** ノードの入出力リンク一覧（双方向）を取得。サイドバーを開いた時に呼ぶ。 */
   onFetchNodeLinks?: (nodeId: string) => Promise<NodeLinksResult>;
@@ -444,6 +463,8 @@ type LaneNodeData = {
   color?: string;
   orientation: FlowOrientation;
   roleId: string;
+  /** ロールの人/システム区分。ラベル左のアイコン分岐に使う（未割当レーンは undefined）。 */
+  roleType?: string;
   /** リサイズ可能か（実ロールのみ。未割当レーンは不可）。 */
   resizable?: boolean;
   /**
@@ -457,6 +478,8 @@ type LaneNodeData = {
 function LaneNode({ data }: { data: LaneNodeData }) {
   const color = data.color ?? '#94a3b8';
   const isVertical = data.orientation === 'vertical';
+  // ロール種別に応じた人/システム/中立アイコン（ラベル左）。
+  const RoleIcon = roleTypeIcon(data.roleType);
 
   // レーン境界のリサイズハンドルを両端に出す。横帯=上端と下端、縦列=左端と右端。
   // 親（lane 背景）は pointer-events-none なので、ハンドルだけ pointer-events-auto。
@@ -510,7 +533,7 @@ function LaneNode({ data }: { data: LaneNodeData }) {
         style={{ backgroundColor: `${color}0d`, borderRight: `2px solid ${color}33` }}
       >
         <div
-          className="absolute left-0 top-0 w-full flex items-center justify-center text-xs font-medium px-2 text-center border-b"
+          className="absolute left-0 top-0 w-full flex items-center justify-center gap-1 text-xs font-medium px-2 text-center border-b"
           style={{
             height: LANE_LABEL_W,
             backgroundColor: `${color}1f`,
@@ -518,6 +541,7 @@ function LaneNode({ data }: { data: LaneNodeData }) {
             borderColor: `${color}33`,
           }}
         >
+          <RoleIcon className="h-3.5 w-3.5 shrink-0" />
           <span className="line-clamp-3">{data.name}</span>
         </div>
         {handles}
@@ -531,9 +555,10 @@ function LaneNode({ data }: { data: LaneNodeData }) {
       style={{ backgroundColor: `${color}0d`, borderBottom: `2px solid ${color}33` }}
     >
       <div
-        className="absolute left-0 top-0 h-full flex items-center justify-center text-xs font-medium px-2 text-center border-r"
+        className="absolute left-0 top-0 h-full flex items-center justify-center gap-1 text-xs font-medium px-2 text-center border-r"
         style={{ width: LANE_LABEL_W, backgroundColor: `${color}1f`, color, borderColor: `${color}33` }}
       >
+        <RoleIcon className="h-3.5 w-3.5 shrink-0" />
         <span className="line-clamp-3">{data.name}</span>
       </div>
       {handles}
@@ -1091,6 +1116,134 @@ function InformationTypeSidePanel({
 }
 
 // ===========================================
+// ロール一覧チップ + フロー途中でのロール追加（キャンバス左上 Panel）
+// ===========================================
+
+/** 人/システム区分の選択肢（ロール追加フォーム用）。 */
+const ROLE_TYPE_OPTIONS: Array<{ value: RoleType; label: string }> = [
+  { value: 'HUMAN', label: '人' },
+  { value: 'SYSTEM', label: 'システム' },
+  { value: 'OTHER', label: 'その他' },
+];
+
+/**
+ * 現在のロール（スイムレーン）をチップで一覧表示し、フロー編集中に
+ * その場でロールを追加できる小さなフォームを持つ。
+ * 追加自体は onAddRole（= rolesApi.create + 一覧再取得）に委譲する。
+ */
+function AddRoleControl({
+  roles,
+  onAddRole,
+}: {
+  roles: Role[];
+  onAddRole: (name: string, type: RoleType) => Promise<void>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [type, setType] = useState<RoleType>('HUMAN');
+  const [busy, setBusy] = useState(false);
+
+  const commitAdd = useCallback(async () => {
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    try {
+      await onAddRole(trimmed, type);
+      setName('');
+      setType('HUMAN');
+      setAdding(false);
+    } finally {
+      setBusy(false);
+    }
+  }, [name, type, busy, onAddRole]);
+
+  return (
+    <div className="flex max-w-[260px] flex-col gap-1.5">
+      <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-600">
+        <Users className="h-3.5 w-3.5 text-blue-600" />
+        ロール
+      </div>
+      {/* ロールチップ一覧（人/システム区分アイコン付き） */}
+      {roles.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {roles.map((r) => {
+            const RoleIcon = roleTypeIcon(r.type);
+            return (
+              <span
+                key={r.id}
+                className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
+                style={{
+                  backgroundColor: `${r.color}14`,
+                  borderColor: `${r.color}55`,
+                  color: r.color,
+                }}
+                title={r.name}
+              >
+                <RoleIcon className="h-3 w-3" />
+                <span className="max-w-[80px] truncate">{r.name}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {/* ＋ロール追加（名前 + 人/システム） */}
+      {adding ? (
+        <div className="flex flex-col gap-1.5">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void commitAdd();
+              if (e.key === 'Escape') { setAdding(false); setName(''); }
+            }}
+            placeholder="ロール名（例: 営業部）"
+            className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value as RoleType)}
+            className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] bg-white"
+          >
+            {ROLE_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              onClick={() => void commitAdd()}
+              disabled={busy || !name.trim()}
+              className="h-7 flex-1 text-[12px]"
+            >
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : '追加'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setAdding(false); setName(''); }}
+              disabled={busy}
+              className="h-7 text-[12px] text-gray-500"
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="flex items-center justify-center gap-1 rounded border border-dashed border-blue-300 px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-50"
+        >
+          <Plus className="h-3 w-3" />
+          ロール追加
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ===========================================
 // 種別の選択肢（右サイドバー）
 // ===========================================
 
@@ -1307,13 +1460,15 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const rfNodes: Node[] = useMemo(() => {
     const laneNodes: Node[] = bands.lanes.map((lane) => {
       // 実ロールのみリサイズ可（未割当レーンは不可）。永続化ハンドラが無ければ無効。
-      const resizable =
-        !!props.onUpdateLaneHeight && roles.some((r) => r.id === lane.roleId);
+      const realRole = roles.find((r) => r.id === lane.roleId);
+      const resizable = !!props.onUpdateLaneHeight && !!realRole;
       const laneData: LaneNodeData = {
         name: lane.name,
         color: lane.color,
         orientation,
         roleId: lane.roleId,
+        // bands.lanes は type を持たないため、roles から id で引いて種別を渡す（最小変更）。
+        roleType: realRole?.type,
         resizable,
         onResizeStart: handleLaneResizeStart,
       };
@@ -1900,6 +2055,16 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           </div>
         </Panel>
 
+        {/* ロール一覧 + フロー途中でのロール追加（左上、パンくずの下） */}
+        {props.onAddRole && (
+          <Panel
+            position="top-left"
+            className="mt-14 bg-white border border-gray-200 rounded-lg shadow-sm p-2"
+          >
+            <AddRoleControl roles={roles} onAddRole={props.onAddRole} />
+          </Panel>
+        )}
+
         {/* ツールバー（右上）: Undo/Redo + 整形 + 縦横トグル + PNG出力 */}
         <Panel position="top-right" className="bg-white border border-gray-200 rounded-lg shadow-sm p-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -2122,18 +2287,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       })()}
 
       {roles.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <button
-            type="button"
-            onClick={() => props.onAddRole?.()}
-            className="bg-white border border-gray-200 rounded-lg px-5 py-4 shadow-sm hover:border-blue-400 hover:shadow-md transition-all flex flex-col items-center gap-2 text-gray-600"
-          >
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-white border border-gray-200 rounded-lg px-5 py-4 shadow-sm flex flex-col items-center gap-2 text-gray-600">
             <Users className="w-6 h-6 text-blue-600" />
             <span className="text-sm font-medium">まずロール（スイムレーン）を追加してください</span>
             <span className="inline-flex items-center gap-1 text-xs text-blue-600 font-medium">
-              <Plus className="w-3.5 h-3.5" />ロールを追加
+              <Plus className="w-3.5 h-3.5" />左上の「ロール追加」から
             </span>
-          </button>
+          </div>
         </div>
       )}
 

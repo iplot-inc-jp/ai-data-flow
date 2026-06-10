@@ -11,6 +11,10 @@ export interface FlowWithDefinition {
   parentId: string | null;
   depth: number;
   definition: FlowDefinition | null;
+  // ノードの情報リンク（NodeInformationLink→InformationType）から集計した
+  // INPUT/OUTPUT 情報種別名（重複除去済み・これが正）
+  inputItems: string[];
+  outputItems: string[];
 }
 
 export interface IFlowDefinitionRepository {

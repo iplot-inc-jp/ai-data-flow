@@ -13,6 +13,9 @@ export interface FlowDefinitionRow {
   flowId: string; flowName: string; kind: FlowKindValue;
   parentId: string | null; depth: number;
   definition: ReturnType<typeof toFlowDefinitionOutput>;
+  // 情報リンク（NodeInformationLink→InformationType）から集計した INPUT/OUTPUT（これが正）
+  inputItems: string[];
+  outputItems: string[];
 }
 
 @Injectable()
@@ -34,6 +37,7 @@ export class ListFlowDefinitionsUseCase {
       flowId: r.flowId, flowName: r.flowName, kind: r.kind,
       parentId: r.parentId, depth: r.depth,
       definition: toFlowDefinitionOutput(r.flowId, r.definition),
+      inputItems: r.inputItems, outputItems: r.outputItems,
     }));
   }
 }

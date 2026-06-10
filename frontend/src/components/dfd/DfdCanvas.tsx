@@ -46,6 +46,7 @@ import {
   type OnConnectStartParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { useParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { toPng } from 'html-to-image';
 import {
@@ -61,6 +62,7 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import {
   assignFunctionNumbers,
   informationTypeApi,
@@ -126,6 +128,8 @@ export interface DfdCanvasProps {
   onFunctionOpen?: (refFlowId: string) => void;
   /** プロジェクトの情報種別一覧（エッジの情報チップ名・セレクタに使用）。 */
   informationTypes?: InformationType[];
+  /** 情報種別の新規追加先プロジェクト（未指定時は useParams から取得）。 */
+  projectId?: string;
 }
 
 // ===========================================
@@ -618,12 +622,23 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     return () => clearTimeout(t);
   }, [isFullscreen, fitView]);
 
+  // 情報種別の追加先プロジェクト（明示 prop 優先 / 無ければルートの projectId）。
+  const routeParams = useParams();
+  const projectId = props.projectId ?? (routeParams?.projectId as string | undefined) ?? '';
+
+  // 情報種別はローカルに保持（InformationTypePicker の onCreated で即時追加）。
+  // props.informationTypes が更新（再取得）されたら同期する。
+  const [informationTypes, setInformationTypes] = useState<InformationType[]>(props.informationTypes ?? []);
+  useEffect(() => {
+    setInformationTypes(props.informationTypes ?? []);
+  }, [props.informationTypes]);
+
   // FUNCTION の採番を反映（既存 number は保持）
   const numberedNodes = useMemo(() => assignFunctionNumbers(diagram.nodes, 1), [diagram.nodes]);
 
   const informationTypeById = useMemo(
-    () => new Map((props.informationTypes ?? []).map((it) => [it.id, it] as const)),
-    [props.informationTypes],
+    () => new Map(informationTypes.map((it) => [it.id, it] as const)),
+    [informationTypes],
   );
 
   // システム境界（FUNCTION/DATA_STORE を囲む破線楕円, 背景）
@@ -1081,22 +1096,16 @@ function DfdCanvasInner(props: DfdCanvasProps) {
             </div>
             <div>
               <label className="block text-[10px] text-gray-400 mb-0.5">情報種別</label>
-              <select
-                value={selectedFlow.informationTypeId ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value || null;
-                  void props.onUpdateFlow?.(selectedFlow.id, { informationTypeId: v });
-                }}
+              {/* 共通の InformationTypePicker（選択＋その場で新規追加）。 */}
+              <InformationTypePicker
+                projectId={projectId}
+                informationTypes={informationTypes}
+                value={selectedFlow.informationTypeId ?? null}
+                onChange={(id) => void props.onUpdateFlow?.(selectedFlow.id, { informationTypeId: id })}
+                onCreated={(created) => setInformationTypes((prev) => [...prev, created])}
                 disabled={!props.onUpdateFlow}
-                className="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
-              >
-                <option value="">（なし）</option>
-                {(props.informationTypes ?? []).map((it) => (
-                  <option key={it.id} value={it.id}>
-                    [{INFORMATION_CATEGORY_LABELS[it.category]}] {it.name}
-                  </option>
-                ))}
-              </select>
+                triggerClassName="h-8 w-full bg-white border-gray-300 text-gray-900 text-sm"
+              />
             </div>
             {selectedFlow.informationTypeId && (
               edgeAttachments.length > 0 ? (

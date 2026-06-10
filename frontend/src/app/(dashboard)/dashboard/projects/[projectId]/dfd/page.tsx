@@ -268,6 +268,7 @@ export default function ProjectDfdPage() {
             <div className="h-[calc(100vh-320px)] overflow-hidden rounded-lg border border-gray-200">
               <DfdCanvas
                 diagram={diagram}
+                projectId={projectId}
                 informationTypes={informationTypes}
                 onAddNode={handleAddNode}
                 onUpdateNode={handleUpdateNode}
