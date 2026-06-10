@@ -8,6 +8,8 @@ export interface FlowWithDefinition {
   flowId: string;
   flowName: string;
   kind: FlowKindValue;
+  parentId: string | null;
+  depth: number;
   definition: FlowDefinition | null;
 }
 

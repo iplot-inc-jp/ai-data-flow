@@ -44,6 +44,8 @@ export class FlowDefinitionRepositoryImpl implements IFlowDefinitionRepository {
       flowId: f.id,
       flowName: f.name,
       kind: f.kind,
+      parentId: f.parentId,
+      depth: f.depth,
       definition: f.definition ? this.toEntity(f.definition) : null,
     }));
   }

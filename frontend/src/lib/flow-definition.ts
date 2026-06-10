@@ -21,6 +21,8 @@ export interface FlowDefinitionRow {
   flowId: string;
   flowName: string;
   kind: 'ASIS' | 'TOBE';
+  parentId: string | null;
+  depth: number;
   definition: FlowDefinition;
 }
 

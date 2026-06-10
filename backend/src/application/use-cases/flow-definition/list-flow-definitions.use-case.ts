@@ -11,6 +11,7 @@ import { toFlowDefinitionOutput } from './flow-definition.output';
 export interface ListFlowDefinitionsInput { userId: string; projectId: string; }
 export interface FlowDefinitionRow {
   flowId: string; flowName: string; kind: FlowKindValue;
+  parentId: string | null; depth: number;
   definition: ReturnType<typeof toFlowDefinitionOutput>;
 }
 
@@ -31,6 +32,7 @@ export class ListFlowDefinitionsUseCase {
     const rows = await this.repo.findByProjectId(input.projectId);
     return rows.map((r) => ({
       flowId: r.flowId, flowName: r.flowName, kind: r.kind,
+      parentId: r.parentId, depth: r.depth,
       definition: toFlowDefinitionOutput(r.flowId, r.definition),
     }));
   }

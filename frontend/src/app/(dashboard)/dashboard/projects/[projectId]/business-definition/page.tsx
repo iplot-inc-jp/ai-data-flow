@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -101,6 +101,42 @@ function textToSteps(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * 親子（parentId 自己参照）でツリー化し、DFS順（親→その子→孫…）に並べ替える。
+ * ルートは parentId==null、または親が一覧に存在しないもの（孤児はルート扱い）。
+ * 元の並び（createdAt 昇順）を兄弟間で保つ。循環は訪問済みセットで防ぐ。
+ */
+function toTreeOrder(rows: FlowDefinitionRow[]): FlowDefinitionRow[] {
+  const byId = new Map<string, FlowDefinitionRow>(rows.map((r) => [r.flowId, r]));
+  const childrenOf = new Map<string, FlowDefinitionRow[]>();
+  const roots: FlowDefinitionRow[] = [];
+
+  for (const r of rows) {
+    const isRoot = r.parentId == null || !byId.has(r.parentId);
+    if (isRoot) {
+      roots.push(r);
+    } else {
+      const list = childrenOf.get(r.parentId!) ?? [];
+      list.push(r);
+      childrenOf.set(r.parentId!, list);
+    }
+  }
+
+  const ordered: FlowDefinitionRow[] = [];
+  const visited = new Set<string>();
+  const walk = (node: FlowDefinitionRow) => {
+    if (visited.has(node.flowId)) return; // 循環防止
+    visited.add(node.flowId);
+    ordered.push(node);
+    for (const child of childrenOf.get(node.flowId) ?? []) walk(child);
+  };
+  for (const root of roots) walk(root);
+  // 取りこぼし（循環の輪に含まれて未訪問のもの）は末尾に救済
+  for (const r of rows) if (!visited.has(r.flowId)) ordered.push(r);
+
+  return ordered;
+}
+
 /** フォームと元定義を比較し、変わったフィールドだけの patch を作る */
 function buildPatch(def: FlowDefinition, form: ModalForm): Partial<FlowDefinition> {
   const patch: Partial<FlowDefinition> = {};
@@ -125,7 +161,6 @@ function buildPatch(def: FlowDefinition, form: ModalForm): Partial<FlowDefinitio
 
 export default function BusinessDefinitionPage() {
   const params = useParams();
-  const router = useRouter();
   const projectId = params.projectId as string;
 
   const [rows, setRows] = useState<FlowDefinitionRow[]>([]);
@@ -247,6 +282,9 @@ export default function BusinessDefinitionPage() {
   const help =
     '全業務フローの業務定義を1行ずつ俯瞰します。目的・担当・INPUT・OUTPUT・頻度・システムはこの表で直接編集（フォーカスを外すと自動保存）でき、「編集」ボタンからは全項目をモーダルでまとめて編集できます。DO手順など個別フローの編集は「業務フローへ」から行えます。';
 
+  // 親子階層（parentId）で DFS 順に並べ替えた表示用の行
+  const treeRows = toTreeOrder(rows);
+
   return (
     <div className="space-y-5">
       {/* INPUT/OUTPUT 入力の候補（情報種別マスタ＝物体・情報・帳票）。表・モーダル双方の input が list で参照 */}
@@ -331,31 +369,53 @@ export default function BusinessDefinitionPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {treeRows.map((row) => {
                   const view = definitionToRow(row.definition);
                   const flowHref = `/dashboard/projects/${projectId}/flows/${row.flowId}`;
+                  const isChild = row.depth > 0;
                   return (
                     <tr key={row.flowId} className="border-b border-gray-100 align-top">
-                      {/* 業務フロー名 + kind バッジ */}
+                      {/* 業務フロー名: 親子インデント + ツリーインジケータ + 左側「業務フローへ」導線 + 名前リンク */}
                       <td className="whitespace-nowrap px-3 py-2.5">
-                        <Link
-                          href={flowHref}
-                          className="group inline-flex max-w-[220px] items-center gap-2"
-                          title={row.flowName}
+                        <div
+                          className="flex items-center gap-1.5"
+                          style={{ paddingLeft: row.depth * 20 }}
                         >
-                          <span
-                            className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                              row.kind === 'ASIS'
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-emerald-100 text-emerald-700'
-                            }`}
+                          {/* 子行はツリーらしい階層インジケータ（└─）と淡い縦ボーダー */}
+                          {isChild && (
+                            <span className="flex shrink-0 items-center self-stretch border-l-2 border-gray-200 pl-1 text-gray-300">
+                              └─
+                            </span>
+                          )}
+                          {/* 行の左側に置いた「業務フローへ」導線（アイコン付きの小リンク） */}
+                          <Link
+                            href={flowHref}
+                            title="業務フローへ"
+                            aria-label="業務フローへ"
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50 hover:underline"
                           >
-                            {row.kind}
-                          </span>
-                          <span className="truncate font-medium text-gray-900 group-hover:text-blue-600 group-hover:underline">
-                            {row.flowName}
-                          </span>
-                        </Link>
+                            <GitBranch className="h-3 w-3" />
+                            業務フローへ
+                          </Link>
+                          <Link
+                            href={flowHref}
+                            className="group inline-flex max-w-[220px] items-center gap-2"
+                            title={row.flowName}
+                          >
+                            <span
+                              className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                row.kind === 'ASIS'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-emerald-100 text-emerald-700'
+                              }`}
+                            >
+                              {row.kind}
+                            </span>
+                            <span className="truncate font-medium text-gray-900 group-hover:text-blue-600 group-hover:underline">
+                              {row.flowName}
+                            </span>
+                          </Link>
+                        </div>
                       </td>
 
                       {/* インライン編集セル（前半） */}
@@ -405,7 +465,7 @@ export default function BusinessDefinitionPage() {
                         </td>
                       ))}
 
-                      {/* 操作: 編集モーダル / 業務フローへ遷移 */}
+                      {/* 操作: 編集モーダル（「業務フローへ」導線は業務フロー名セルの左側へ移動） */}
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-1.5">
                           <Button
@@ -417,16 +477,6 @@ export default function BusinessDefinitionPage() {
                           >
                             <Pencil className="h-3 w-3" />
                             編集
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => router.push(flowHref)}
-                            className="h-7 gap-1 px-2 text-xs text-blue-600"
-                          >
-                            <GitBranch className="h-3 w-3" />
-                            業務フローへ
                           </Button>
                         </div>
                       </td>
