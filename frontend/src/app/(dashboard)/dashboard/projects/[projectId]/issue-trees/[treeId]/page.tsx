@@ -117,6 +117,8 @@ import {
   ISSUE_NODE_KINDS,
   ROOT_PRIMARY_KIND,
   rootKindForPattern,
+  allowedChildKinds,
+  rootAllowedKinds,
   childKindForPattern,
   patternFromLegacyType,
   legacyTreeTypeForPattern,
@@ -2195,6 +2197,12 @@ function IssueTreeMindMap() {
             onInsertExample={insertExample}
             patternLabel={patternMeta.label}
             exampleCount={patternMeta.example.children.length}
+            pattern={pattern}
+            parentKind={
+              selectedNode.parentId
+                ? (tree?.nodes ?? []).find((n) => n.id === selectedNode.parentId)?.kind ?? null
+                : null
+            }
             onDelete={deleteNode}
           />
         )}
@@ -2300,6 +2308,8 @@ function NodeEditPanel({
   onInsertExample,
   patternLabel,
   exampleCount,
+  pattern,
+  parentKind,
   onDelete,
 }: {
   node: BackendNode;
@@ -2316,6 +2326,10 @@ function NodeEditPanel({
   onInsertExample: (nodeId: string | null) => void;
   patternLabel: string;
   exampleCount: number;
+  /** ツリーのパターン（ルートで選べる種別の算出に使う） */
+  pattern: IssueTreePattern;
+  /** 親ノードの種別。親が無いルートは null（rootAllowedKinds を使う） */
+  parentKind: IssueNodeKind | null;
   onDelete: (nodeId: string) => void;
 }) {
   const [label, setLabel] = useState(node.label);
@@ -2323,6 +2337,19 @@ function NodeEditPanel({
   const kind: IssueNodeKind = node.kind ?? 'ISSUE';
   const cfg = KIND_CONFIG[kind];
   const flavor = KIND_TASK_FLAVOR[kind];
+
+  // 種別セレクタの選択肢: 親種別で許可された子種別（親が無いルートは rootAllowedKinds）に
+  // 現在の自種別を常に加えて絞り込む。取り違え救済として「全種別を表示」トグルで全11種別へ。
+  const [showAllKinds, setShowAllKinds] = useState(false);
+  const kindOptions = useMemo<IssueNodeKind[]>(() => {
+    if (showAllKinds) return KIND_OPTIONS;
+    const allowed = parentKind ? allowedChildKinds(parentKind) : rootAllowedKinds(pattern);
+    // 自種別は常に表示（既存ノードの再選択・現在地の明示）。許可集合に無ければ先頭へ。
+    const set = new Set<IssueNodeKind>(allowed);
+    set.add(kind);
+    // 元の種別並び（ISSUE_NODE_KINDS）を保ちつつ、許可された種別だけに絞る。
+    return KIND_OPTIONS.filter((k) => set.has(k));
+  }, [showAllKinds, parentKind, pattern, kind]);
 
   // METRIC の数値（metadata.value に保持）。
   const initialMetric =
@@ -2352,11 +2379,11 @@ function NodeEditPanel({
           </button>
         </div>
 
-        {/* 種別（全 kind・取り違え救済。配置の強制バリデーションはしない） */}
+        {/* 種別（親種別で許可された子種別＋自種別に絞る。トグルで全 kind=取り違え救済） */}
         <div>
           <div className="mb-1 flex items-center gap-1.5">
             <label className="block text-xs font-medium text-gray-500">種別</label>
-            <HelpTooltip text="ノードの種別です。パターンに合わせた既定が入りますが、混在可・後から変更できます（配置は強制されません）。" />
+            <HelpTooltip text="ノードの種別です。生やす基（親ノード）の種別で選べる子種別が決まります。取り違えの修正は「全種別を表示」で全11種別から選べます（配置は強制されません）。" />
           </div>
           <div
             className={`mb-1 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${cfg.chip} border-transparent`}
@@ -2366,7 +2393,7 @@ function NodeEditPanel({
           {/* 現在種別の説明（各選択肢はホバーで title 表示。ここは現在の種別の説明を常時表示）。 */}
           <p className="mb-1.5 text-[11px] leading-snug text-gray-500">{cfg.description}</p>
           <div className="grid grid-cols-3 gap-1">
-            {KIND_OPTIONS.map((k) => {
+            {kindOptions.map((k) => {
               const active = k === kind;
               const Icon = KIND_ICON[k];
               const kc = KIND_CONFIG[k];
@@ -2391,6 +2418,16 @@ function NodeEditPanel({
               );
             })}
           </div>
+          {/* 取り違え救済: 全種別を表示トグル（既定OFF=親種別で制限） */}
+          <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-[11px] text-gray-500">
+            <input
+              type="checkbox"
+              checked={showAllKinds}
+              onChange={(e) => setShowAllKinds(e.target.checked)}
+              className="h-3 w-3"
+            />
+            全種別を表示（取り違えの修正用）
+          </label>
         </div>
 
         {/* ラベル */}

@@ -382,6 +382,33 @@ export function rootKindForPattern(pattern: IssueTreePattern): IssueNodeKind {
   return pattern === 'KPI' ? 'METRIC' : 'ISSUE';
 }
 
+/**
+ * 親種別 → 「生やせる子ノードの種別」一覧（許可マトリクスの実体）。
+ * KIND_CONFIG[parentKind].childAddButtons の childKind を distinct（順序維持）で返す。
+ * childAddButtons が空（RESULT 等の末端）の親では空配列になる。
+ */
+export function allowedChildKinds(parentKind: IssueNodeKind): IssueNodeKind[] {
+  const seen = new Set<IssueNodeKind>();
+  const out: IssueNodeKind[] = [];
+  for (const b of KIND_CONFIG[parentKind].childAddButtons) {
+    if (!seen.has(b.childKind)) {
+      seen.add(b.childKind);
+      out.push(b.childKind);
+    }
+  }
+  return out;
+}
+
+/**
+ * ルート（親が無いノード）で選べる種別一覧。
+ * パターンの ROOT_PRIMARY_KIND（パターンに合う主役）を先頭優先で返す。
+ * 万一未定義なら全種別にフォールバックする。
+ */
+export function rootAllowedKinds(pattern: IssueTreePattern): IssueNodeKind[] {
+  const primary = ROOT_PRIMARY_KIND[pattern];
+  return primary && primary.length > 0 ? primary : [...ISSUE_NODE_KINDS];
+}
+
 /** 旧 type(WHY/SOLUTION) → pattern フォールバック。 */
 export function patternFromLegacyType(type?: 'WHY' | 'SOLUTION'): IssueTreePattern {
   return type === 'SOLUTION' ? 'HOW' : 'WHY';

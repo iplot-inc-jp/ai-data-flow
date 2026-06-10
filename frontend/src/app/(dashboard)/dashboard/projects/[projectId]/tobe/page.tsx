@@ -38,6 +38,8 @@ import {
   type TobeRoadmap,
   type TobeRoadmapInput,
 } from '@/lib/asis-tobe';
+// 領域（SubProject）は ASIS と共通の SubProject マスタから取得する（@/lib/masters に統一）。
+import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -52,8 +54,12 @@ type BusinessFlow = {
   description?: string | null;
 };
 
-type SubProject = { id: string; name: string };
+// 領域（SubProject）は ASIS と共通の SubProject マスタ。parentId で 領域→サブ領域 の入れ子を持つ。
+type SubProject = SubProjectMaster;
 type FlowFolder = { id: string; name: string };
+
+// 「未分類」セレクト用のセンチネル（空文字を value にすると未選択と区別しにくいため）。
+const UNASSIGNED = '__none__';
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -61,6 +67,38 @@ function authHeaders(): Record<string, string> {
     typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
+}
+
+/**
+ * 領域(parentId==null)→サブ領域(parentId 有り) の入れ子を DFS 順（親→その子…）に並べ替え、
+ * depth 付きのフラット配列にする。孤児（親が一覧に存在しない）はトップ領域扱い。
+ */
+function flattenSubProjects(
+  list: SubProject[]
+): { sub: SubProject; depth: number }[] {
+  const byId = new Map(list.map((s) => [s.id, s]));
+  const childrenOf = new Map<string | null, SubProject[]>();
+  for (const s of list) {
+    const key = s.parentId && byId.has(s.parentId) ? s.parentId : null;
+    const arr = childrenOf.get(key) ?? [];
+    arr.push(s);
+    childrenOf.set(key, arr);
+  }
+  const out: { sub: SubProject; depth: number }[] = [];
+  const visited = new Set<string>();
+  const walk = (parentId: string | null, depth: number) => {
+    const children = (childrenOf.get(parentId) ?? []).sort(
+      (a, b) => a.order - b.order || a.name.localeCompare(b.name)
+    );
+    for (const sub of children) {
+      if (visited.has(sub.id)) continue; // 循環(parentId ループ)で無限再帰しないよう防止
+      visited.add(sub.id);
+      out.push({ sub, depth });
+      walk(sub.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
 }
 
 export default function TobeManagementPage() {
@@ -78,19 +116,20 @@ export default function TobeManagementPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
+  // 領域／サブ領域（SubProject）。UNASSIGNED は未分類。
+  const [newSubProjectId, setNewSubProjectId] = useState(UNASSIGNED);
   const [creating, setCreating] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [flowRes, subRes, folderRes] = await Promise.all([
+      // 領域（SubProject）は ASIS と共通の subProjectApi.list で取得する。
+      const [flowRes, subProjectsData, folderRes] = await Promise.all([
         fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, {
           headers: authHeaders(),
         }),
-        fetch(`${API_URL}/api/projects/${projectId}/sub-projects`, {
-          headers: authHeaders(),
-        }),
+        subProjectApi.list(projectId).catch(() => [] as SubProject[]),
         fetch(`${API_URL}/api/projects/${projectId}/flow-folders`, {
           headers: authHeaders(),
         }),
@@ -102,10 +141,7 @@ export default function TobeManagementPage() {
       } else {
         setError('業務フローの読み込みに失敗しました');
       }
-      if (subRes.ok) {
-        const data = await subRes.json();
-        setSubProjects(Array.isArray(data) ? data : []);
-      }
+      setSubProjects(Array.isArray(subProjectsData) ? subProjectsData : []);
       if (folderRes.ok) {
         const data = await folderRes.json();
         setFolders(Array.isArray(data) ? data : []);
@@ -125,6 +161,12 @@ export default function TobeManagementPage() {
   const tobeFlows = useMemo(
     () => flows.filter((f) => f.kind === 'TOBE'),
     [flows]
+  );
+
+  // 領域→サブ領域 を入れ子（DFS）で並べたセレクタ用の一覧。
+  const flatSubProjects = useMemo(
+    () => flattenSubProjects(subProjects),
+    [subProjects]
   );
 
   const subProjectName = useCallback(
@@ -152,6 +194,8 @@ export default function TobeManagementPage() {
           name: newName.trim(),
           kind: 'TOBE',
           description: newDescription.trim() || undefined,
+          // ASIS と共通の SubProject マスタから選んだ領域／サブ領域。未分類なら null。
+          subProjectId: newSubProjectId === UNASSIGNED ? null : newSubProjectId,
         }),
       });
       if (res.ok) {
@@ -159,6 +203,7 @@ export default function TobeManagementPage() {
         setIsCreateOpen(false);
         setNewName('');
         setNewDescription('');
+        setNewSubProjectId(UNASSIGNED);
         if (created?.id) {
           openFlow(created.id);
           return;
@@ -191,7 +236,7 @@ export default function TobeManagementPage() {
             title="TOBE管理の使い方"
             steps={[
               'TOBE業務フローのカードをクリックすると、そのフローを開いて編集できます。',
-              '「TOBEフロー作成」で新しいあるべき姿フローを作成し、そのまま編集画面に移動します。',
+              '「あるべき姿を追加」で領域（ASISと共通）を選んで新しいあるべき姿フローを作成し、そのまま編集画面に移動します。',
               'あるべき姿・打ち手の表に、領域ごとのあるべき姿と打ち手・期待効果を書き留めます。',
               '段階設計の表で、打ち手を 3ヶ月/1年/3年 に割り当て、ROI・コスト・回収期間・スコープ判断を整理します。',
             ]}
@@ -245,7 +290,7 @@ export default function TobeManagementPage() {
                   className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
                 >
                   <Plus className="h-4 w-4" />
-                  TOBEフロー作成
+                  あるべき姿を追加
                 </Button>
               </div>
             </div>
@@ -254,7 +299,7 @@ export default function TobeManagementPage() {
               <Card className="border-dashed border-emerald-200 bg-emerald-50/40">
                 <CardContent className="py-10 text-center">
                   <p className="text-sm text-muted-foreground">
-                    TOBE業務フローはまだありません。「TOBEフロー作成」からあるべき姿フローを追加しましょう。
+                    TOBE業務フローはまだありません。「あるべき姿を追加」からあるべき姿フローを追加しましょう。
                   </p>
                 </CardContent>
               </Card>
@@ -360,11 +405,11 @@ export default function TobeManagementPage() {
         </>
       )}
 
-      {/* ── TOBEフロー作成ダイアログ ─────────────────────── */}
+      {/* ── あるべき姿（TOBEフロー）作成ダイアログ ───────────── */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent className="bg-white text-gray-900">
           <DialogHeader>
-            <DialogTitle>TOBEフローを作成</DialogTitle>
+            <DialogTitle>あるべき姿（TOBE業務フロー）を追加</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -379,6 +424,33 @@ export default function TobeManagementPage() {
                 }}
                 autoFocus
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tobe-flow-subproject">領域／サブ領域</Label>
+              <select
+                id="tobe-flow-subproject"
+                value={newSubProjectId}
+                onChange={(e) => setNewSubProjectId(e.target.value)}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+              >
+                <option value={UNASSIGNED}>未分類</option>
+                {flatSubProjects.map(({ sub, depth }) => (
+                  <option key={sub.id} value={sub.id}>
+                    {`${'　'.repeat(depth)}${sub.name}`}
+                  </option>
+                ))}
+              </select>
+              {/* ASIS と同じ領域マスタを共有していることを明示。管理は「領域」ページで。 */}
+              <p className="text-xs text-muted-foreground">
+                領域／サブ領域は ASIS と共通のマスタです。追加・編集は{' '}
+                <Link
+                  href={`/dashboard/projects/${projectId}/domains`}
+                  className="text-emerald-600 hover:underline"
+                >
+                  サイドメニューの「領域」
+                </Link>
+                {' '}から行えます。
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="tobe-flow-desc">説明（任意）</Label>
