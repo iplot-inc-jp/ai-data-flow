@@ -488,6 +488,8 @@ type LaneNodeData = {
   roleType?: string;
   /** リサイズ可能か（実ロールのみ。未割当レーンは不可）。 */
   resizable?: boolean;
+  /** 手前側（上端/左端）ハンドルを出すか。先頭レーンは前レーンが無いので出さない。 */
+  showStartHandle?: boolean;
   /**
    * リサイズハンドルの pointerDown。canvas 側がドラッグを引き受ける。
    * edge はドラッグした境界（横帯=top|bottom、縦列=left|right）。
@@ -542,8 +544,8 @@ function LaneNode({ data }: { data: LaneNodeData }) {
   const handles =
     data.resizable && data.onResizeStart
       ? isVertical
-        ? [makeHandle('left'), makeHandle('right')]
-        : [makeHandle('top'), makeHandle('bottom')]
+        ? [data.showStartHandle ? makeHandle('left') : null, makeHandle('right')]
+        : [data.showStartHandle ? makeHandle('top') : null, makeHandle('bottom')]
       : null;
 
   if (isVertical) {
@@ -1522,38 +1524,44 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   }, [flowData.nodes, effectivePositions, laneRoles, orientation, laneHeightOverrides]);
 
   // --- レーン境界ハンドルのドラッグ: レーン厚を手動リサイズ ---
-  // 横帯=下端を下げる/上端を上げると高さ↑ / 縦列=右端を右へ・左端を左へ動かすと幅↑。
-  // 上端/左端ハンドルは下端/右端と逆方向のデルタ（上へ＝広がる）で厚みを更新する。
-  // 画面ピクセル差をズームで割って flow 座標の差に変換し、ローカル先取り表示。
-  // pointerup でサーバ永続化（onUpdateLaneHeight）。
+  // レーンは順番に上→下（縦なら左→右）へ積まれるため、あるレーンの厚みを増やすと
+  // 必ず「下（右）側」へ伸びる。そこで掴んだ境界が必ずカーソルに追従するよう、
+  //  ・下端/右端 = そのレーン自身の厚みを増減（下/右が＋）
+  //  ・上端/左端 = ひとつ前（上/左）のレーンとの共有境界 → 前のレーンの厚みを増減
+  // とし、どちらも「下/右へドラッグ＝＋」の同じ符号で扱う（上をドラッグして下が伸びる違和感を解消）。
+  // 先頭レーンの上端/左端は前レーンが無いので操作対象外（ハンドル自体も出さない）。
+  // 画面ピクセル差をズームで割って flow 座標の差に変換し、ローカル先取り表示。pointerup で永続化。
   const handleLaneResizeStart = useCallback(
     (roleId: string, edge: 'top' | 'bottom' | 'left' | 'right', e: ReactPointerEvent) => {
-      const lane = bands.lanes.find((l) => l.roleId === roleId);
-      if (!lane) return;
+      const idx = bands.lanes.findIndex((l) => l.roleId === roleId);
+      if (idx < 0) return;
+      const isStartEdge = edge === 'top' || edge === 'left'; // 手前側＝前レーンとの共有境界
+      const targetLane = isStartEdge ? bands.lanes[idx - 1] : bands.lanes[idx];
+      if (!targetLane) return; // 先頭レーンの手前側境界は触れない
+      const targetRoleId = targetLane.roleId;
       const MIN_LANE_THICKNESS = 60;
-      const startThickness = isVertical ? lane.width ?? 0 : lane.height;
+      const startThickness = isVertical ? targetLane.width ?? 0 : targetLane.height;
       const startClient = isVertical ? e.clientX : e.clientY;
       const zoom = getViewport().zoom || 1;
-      // 上端/左端は境界が手前側にあるため、ドラッグ方向と厚みの増減が逆。
-      const sign = edge === 'top' || edge === 'left' ? -1 : 1;
 
+      // 境界を 下/右 へ動かす（client 増）と対象レーンが太る = 常に同符号。
       const computeNext = (client: number) =>
         Math.max(
           MIN_LANE_THICKNESS,
-          Math.round(startThickness + (sign * (client - startClient)) / zoom),
+          Math.round(startThickness + (client - startClient) / zoom),
         );
 
       const onMove = (ev: PointerEvent) => {
         const next = computeNext(isVertical ? ev.clientX : ev.clientY);
-        setLocalLaneHeights((prev) => ({ ...prev, [roleId]: next }));
+        setLocalLaneHeights((prev) => ({ ...prev, [targetRoleId]: next }));
       };
       const onUp = (ev: PointerEvent) => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         const next = computeNext(isVertical ? ev.clientX : ev.clientY);
         // ローカル先取りはサーバ再取得（flowData.laneHeights）が反映されるまで残す。
-        setLocalLaneHeights((prev) => ({ ...prev, [roleId]: next }));
-        props.onUpdateLaneHeight?.(roleId, next);
+        setLocalLaneHeights((prev) => ({ ...prev, [targetRoleId]: next }));
+        props.onUpdateLaneHeight?.(targetRoleId, next);
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
@@ -1563,7 +1571,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
   // --- React Flow ノード（背景レーン + コンテンツ） ---
   const rfNodes: Node[] = useMemo(() => {
-    const laneNodes: Node[] = bands.lanes.map((lane) => {
+    const laneNodes: Node[] = bands.lanes.map((lane, idx) => {
       // 実ロールのみリサイズ可（未割当レーンは不可）。永続化ハンドラが無ければ無効。
       const realRole = roles.find((r) => r.id === lane.roleId);
       const resizable = !!props.onUpdateLaneHeight && !!realRole;
@@ -1575,6 +1583,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         // bands.lanes は type を持たないため、roles から id で引いて種別を渡す（最小変更）。
         roleType: realRole?.type,
         resizable,
+        // 先頭レーンは前レーンが無いので手前側（上端/左端）ハンドルは出さない。
+        showStartHandle: idx > 0,
         onResizeStart: handleLaneResizeStart,
       };
       if (isVertical) {
