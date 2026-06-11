@@ -68,7 +68,8 @@ function ComparePane({
           </span>
         )}
       </div>
-      {loading ? (
+      {loading && !flowData ? (
+        // 初回ロードのみスピナー。再取得中（flowData あり）はキャンバスを差し替えない。
         <div className="flex h-full items-center justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
         </div>

@@ -2170,7 +2170,9 @@ export default function ProjectFlowDetailPage() {
     }
   }, [showMermaid, mermaidCode, renderMermaid]);
 
-  if (loading) {
+  // 初回ロード時のみ全画面スピナー。再取得中（flowData あり）はキャンバスを差し替えず
+  // マウントしたままにする（ノード移動・複数選択移動・範囲選択・整形等で全画面/選択が解除されないように）。
+  if (loading && !flowData) {
     return (
       <div className="flex items-center justify-center h-[600px]">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
