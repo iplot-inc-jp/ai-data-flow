@@ -37,6 +37,7 @@ import {
   MarkerType,
   BaseEdge,
   EdgeLabelRenderer,
+  NodeResizer,
   getSmoothStepPath,
   getBezierPath,
   getStraightPath,
@@ -153,6 +154,10 @@ export interface NodeUpdatePatch {
   /** 自由配置の保存座標（ノード左上ではなく中心ではなく、サーバ保存値=左上基準）。 */
   positionX?: number;
   positionY?: number;
+  /** 手動リサイズ後の描画幅（実カラム）。未指定なら既定 NODE_W で描画。 */
+  width?: number;
+  /** 手動リサイズ後の描画高さ（実カラム）。未指定なら既定 NODE_H で描画。 */
+  height?: number;
   /** 処理時間（実カラム。旧 metadata.duration）。 */
   processingTime?: string | null;
   /** 今回の対応数（実カラム。旧 metadata.handledCount）。 */
@@ -375,7 +380,15 @@ export interface SwimlaneCanvasProps {
   /** 注釈の本文・位置・アイコンを部分更新する（本文編集の onBlur / ドラッグ停止）。 */
   onUpdateAnnotation?: (
     id: string,
-    patch: { text?: string; positionX?: number; positionY?: number; color?: string | null; icon?: string | null },
+    patch: {
+      text?: string;
+      positionX?: number;
+      positionY?: number;
+      width?: number;
+      height?: number;
+      color?: string | null;
+      icon?: string | null;
+    },
   ) => void;
   /** 注釈を削除する（ホバー時の ✕）。 */
   onDeleteAnnotation?: (id: string) => void;
@@ -448,6 +461,8 @@ type ContentNodeData = {
   hasLinks?: boolean;
   roleColor?: string;
   orientation: FlowOrientation;
+  /** リサイズ確定時に呼ぶ（width/height を永続化）。embedded（閲覧）では未設定。 */
+  onResizeEnd?: (id: string, size: { width: number; height: number }) => void;
 };
 
 const NODE_STYLE: Record<string, string> = {
@@ -469,7 +484,7 @@ const HANDLE_SIDES: Array<{ id: string; position: Position }> = [
   { id: 'left', position: Position.Left },
 ];
 
-function ContentNode({ data, selected }: { data: ContentNodeData; selected?: boolean }) {
+function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData; selected?: boolean }) {
   const cls = NODE_STYLE[data.ntype] ?? NODE_STYLE.PROCESS;
   return (
     <div
@@ -477,6 +492,22 @@ function ContentNode({ data, selected }: { data: ContentNodeData; selected?: boo
         selected ? 'ring-2 ring-blue-500 ring-offset-1' : ''
       }`}
     >
+      {/* マウスリサイズ（選択時のみハンドル表示。embedded=閲覧では onResizeEnd 未設定＝非表示）。
+          確定(onResizeEnd)で width/height を親へ渡し永続化する。アスペクト比固定なし。 */}
+      {data.onResizeEnd && (
+        <NodeResizer
+          minWidth={120}
+          minHeight={40}
+          isVisible={!!selected}
+          keepAspectRatio={false}
+          onResizeEnd={(_, params) =>
+            data.onResizeEnd?.(id, {
+              width: Math.round(params.width),
+              height: Math.round(params.height),
+            })
+          }
+        />
+      )}
       {/* 4辺のハンドル: それぞれ source/target 兼用（ConnectionMode.Loose）。
           矢印を任意の辺へ付け替えられるようにする。小さなドットで、
           ノード本体のドラッグを邪魔しないよう nodrag を付与。
@@ -1058,6 +1089,8 @@ type AnnotationNodeData = {
   icon?: string | null;
   onUpdateText?: (id: string, text: string) => void;
   onDelete?: (id: string) => void;
+  /** リサイズ確定時に呼ぶ（width/height を永続化）。embedded（閲覧）では未設定。 */
+  onResizeEnd?: (id: string, size: { width: number; height: number }) => void;
 };
 
 const ANNOTATION_W = 200;
@@ -1100,7 +1133,15 @@ const ICON_MAP: Record<string, LucideIcon> = {
 // アイコン注釈の既定色（未指定 icon のフォールバックも含む）。
 const ICON_ANNOTATION_DEFAULT_COLOR = '#f59e0b';
 
-function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) {
+function AnnotationNode({
+  id,
+  data,
+  selected,
+}: {
+  id: string;
+  data: AnnotationNodeData;
+  selected?: boolean;
+}) {
   const isSticky = data.kind === 'STICKY';
   const isIcon = data.kind === 'ICON';
   const [value, setValue] = useState(data.text ?? '');
@@ -1128,6 +1169,21 @@ function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) 
     const iconColor = data.color || ICON_ANNOTATION_DEFAULT_COLOR;
     return (
       <div className="group/annotation relative flex h-full w-full items-center justify-center">
+        {/* マウスリサイズ（選択時のみハンドル。embedded=閲覧では onResizeEnd 未設定＝非表示）。 */}
+        {data.onResizeEnd && (
+          <NodeResizer
+            minWidth={24}
+            minHeight={24}
+            isVisible={!!selected}
+            keepAspectRatio={false}
+            onResizeEnd={(_, params) =>
+              data.onResizeEnd?.(id, {
+                width: Math.round(params.width),
+                height: Math.round(params.height),
+              })
+            }
+          />
+        )}
         <IconComp className="h-8 w-8" style={{ color: iconColor }} strokeWidth={2} />
         {/* ホバーで出る削除ボタン（付箋・コメントと同じ✕） */}
         <button
@@ -1147,9 +1203,24 @@ function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) 
 
   return (
     <div
-      className={`group/annotation w-full h-full ${wrapperClass}`}
+      className={`group/annotation flex w-full h-full flex-col ${wrapperClass}`}
       style={isSticky ? { backgroundColor: stickyColor } : undefined}
     >
+      {/* マウスリサイズ（選択時のみハンドル。embedded=閲覧では onResizeEnd 未設定＝非表示）。 */}
+      {data.onResizeEnd && (
+        <NodeResizer
+          minWidth={120}
+          minHeight={ANNOTATION_MIN_H}
+          isVisible={!!selected}
+          keepAspectRatio={false}
+          onResizeEnd={(_, params) =>
+            data.onResizeEnd?.(id, {
+              width: Math.round(params.width),
+              height: Math.round(params.height),
+            })
+          }
+        />
+      )}
       {/* コメントは左下に小さな吹き出しのしっぽを付ける */}
       {!isSticky && (
         <>
@@ -1158,7 +1229,7 @@ function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) 
       )}
       {/* 種別ラベル（小） */}
       <div
-        className={`flex items-center justify-between px-2 pt-1 text-[10px] font-medium ${
+        className={`flex shrink-0 items-center justify-between px-2 pt-1 text-[10px] font-medium ${
           isSticky ? 'text-amber-700/80' : 'text-gray-400'
         }`}
       >
@@ -1166,10 +1237,10 @@ function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) 
       </div>
       <textarea
         // ノード本体のドラッグや pan を奪わないよう nodrag/nopan を付与（テキスト編集を優先）。
-        className={`nodrag nopan w-full resize-none border-0 bg-transparent px-2 pb-2 text-xs leading-snug outline-none ${
+        // 箱の高さに追従して伸縮させるため flex-1（min-h-0 で縮小も許可）。
+        className={`nodrag nopan min-h-0 w-full flex-1 resize-none border-0 bg-transparent px-2 pb-2 text-xs leading-snug outline-none ${
           isSticky ? 'text-amber-900 placeholder:text-amber-700/40' : 'text-gray-800 placeholder:text-gray-400'
         }`}
-        style={{ height: ANNOTATION_MIN_H - 22 }}
         value={value}
         placeholder={isSticky ? 'メモを入力…' : 'コメントを入力…'}
         onChange={(e) => setValue(e.target.value)}
@@ -1929,6 +2000,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         type: n.type,
         roleId: n.roleId ?? n.role?.id ?? null,
         order: n.order,
+        // 整形（縦横転置含む）が実サイズで配置できるよう、保存済みのリサイズ値を渡す。
+        // 未設定なら computeFlowLayout のデフォルト（NODE_W/H 相当）が使われる。
+        width: typeof n.width === 'number' && n.width > 0 ? n.width : undefined,
+        height: typeof n.height === 'number' && n.height > 0 ? n.height : undefined,
       })),
     [flowData.nodes],
   );
@@ -1986,14 +2061,17 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const bands = useMemo(() => {
     const bandNodes: BandInputNode[] = flowData.nodes.map((n) => {
       const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
+      // リサイズ済みノードは実サイズで帯に内包させる（保存値→なければ既定）。
+      const w = typeof n.width === 'number' && n.width > 0 ? n.width : NODE_W;
+      const h = typeof n.height === 'number' && n.height > 0 ? n.height : NODE_H;
       return {
         id: n.id,
         roleId: n.roleId ?? n.role?.id ?? null,
         // computeLaneBands は中心座標を取る → 左上 + 半サイズ
-        x: pos.x + NODE_W / 2,
-        y: pos.y + NODE_H / 2,
-        width: NODE_W,
-        height: NODE_H,
+        x: pos.x + w / 2,
+        y: pos.y + h / 2,
+        width: w,
+        height: h,
       };
     });
     return computeLaneBands(bandNodes, laneRoles, orientation, {
@@ -2106,6 +2184,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
     const contentNodes: Node[] = flowData.nodes.map((src) => {
       const pos = effectivePositions.get(src.id) ?? { x: 0, y: 0 };
+      // 保存済みリサイズ値があればその寸法で描画、無ければ既定 NODE_W/H。
+      const w = typeof src.width === 'number' && src.width > 0 ? src.width : NODE_W;
+      const h = typeof src.height === 'number' && src.height > 0 ? src.height : NODE_H;
       return {
         id: src.id,
         type: 'content',
@@ -2118,10 +2199,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           hasLinks: (src.links?.length ?? 0) > 0,
           roleColor: src.role?.color,
           orientation,
+          // embedded（閲覧）ではリサイズ不可（ハンドルを出さない）。
+          onResizeEnd: props.embedded
+            ? undefined
+            : (id, size) => props.onUpdateNode?.(id, { width: size.width, height: size.height }),
         } as ContentNodeData,
-        width: NODE_W,
-        height: NODE_H,
-        style: { width: NODE_W, height: NODE_H },
+        width: w,
+        height: h,
+        style: { width: w, height: h },
         draggable: true,
         zIndex: 1,
       } as Node;
@@ -2138,18 +2223,26 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         icon: a.icon,
         onUpdateText: (id, text) => props.onUpdateAnnotation?.(id, { text }),
         onDelete: (id) => props.onDeleteAnnotation?.(id),
+        // embedded（閲覧）ではリサイズ不可（ハンドルを出さない）。
+        onResizeEnd: props.embedded
+          ? undefined
+          : (id, size) => props.onUpdateAnnotation?.(id, { width: size.width, height: size.height }),
       };
       // アイコン注釈は透明背景の小ノード。付箋/コメントの箱（幅 200 / 最低高 96）は出さない。
       const isIconAnnotation = a.kind === 'ICON';
+      // 保存済みリサイズ値があればその寸法で描画、無ければ既定サイズ。
+      const defaultW = isIconAnnotation ? ICON_ANNOTATION_SIZE : ANNOTATION_W;
+      const defaultH = isIconAnnotation ? ICON_ANNOTATION_SIZE : ANNOTATION_MIN_H;
+      const w = typeof a.width === 'number' && a.width > 0 ? a.width : defaultW;
+      const h = typeof a.height === 'number' && a.height > 0 ? a.height : defaultH;
       return {
         id: a.id,
         type: 'annotation',
         position: { x: a.positionX, y: a.positionY },
         data,
-        width: isIconAnnotation ? ICON_ANNOTATION_SIZE : ANNOTATION_W,
-        style: isIconAnnotation
-          ? { width: ICON_ANNOTATION_SIZE, height: ICON_ANNOTATION_SIZE }
-          : { width: ANNOTATION_W, minHeight: ANNOTATION_MIN_H },
+        width: w,
+        height: h,
+        style: { width: w, height: h },
         draggable: true,
         selectable: true,
         connectable: false,
@@ -2166,6 +2259,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     isVertical,
     roles,
     handleLaneResizeStart,
+    props.embedded,
+    props.onUpdateNode,
     props.onUpdateLaneHeight,
     props.onUpdateRole,
     props.annotations,
@@ -2644,14 +2739,18 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     const newCenter = new Map<string, { x: number; y: number }>();
     const positions: NodePositionPatch[] = flowData.nodes.map((n) => {
       const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
+      // 保存済みリサイズ値があれば実サイズで中心↔左上を換算（無ければ既定 NODE_W/H）。
+      const w = typeof n.width === 'number' && n.width > 0 ? n.width : NODE_W;
+      const h = typeof n.height === 'number' && n.height > 0 ? n.height : NODE_H;
       // 旧中心の x↔y を入れ替えて転置（左上 → 中心 → 入替 → 左上）。
-      const cx = pos.y + NODE_H / 2;
-      const cy = pos.x + NODE_W / 2;
+      // ノード自身の w/h は転置しない（向きが変わってもノードの寸法は保持）。
+      const cx = pos.y + h / 2;
+      const cy = pos.x + w / 2;
       newCenter.set(n.id, { x: cx, y: cy });
       return {
         id: n.id,
-        positionX: cx - NODE_W / 2,
-        positionY: cy - NODE_H / 2,
+        positionX: cx - w / 2,
+        positionY: cy - h / 2,
         roleId: n.roleId ?? n.role?.id ?? null,
         order: typeof n.order === 'number' ? n.order : undefined,
       };

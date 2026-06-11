@@ -41,6 +41,16 @@ export interface LayoutInputNode {
   roleId?: string | null;
   /** 時系列上の位置。昇順でタイムライン軸が決まる。 */
   order?: number;
+  /**
+   * このノード個別の描画幅。未指定なら opt.nodeWidth を使う。
+   * リサイズされたノードは主軸間隔・クロス軸スロット・PositionedNode.width に反映される。
+   */
+  width?: number;
+  /**
+   * このノード個別の描画高さ。未指定なら opt.nodeHeight を使う。
+   * リサイズされたノードは主軸間隔・クロス軸スロット・PositionedNode.height に反映される。
+   */
+  height?: number;
 }
 
 export interface LayoutInputEdge {
@@ -62,12 +72,19 @@ export interface LayoutOptions {
   orientation: FlowOrientation;
   /** 時間軸 1 ステップ分の長さ（horizontal: 列幅 / vertical: 行高） */
   columnWidth: number;
-  /** ノードの描画幅 */
+  /** ノードの描画幅（個別 width を持たないノードのデフォルト） */
   nodeWidth: number;
-  /** ノードの描画高さ */
+  /** ノードの描画高さ（個別 height を持たないノードのデフォルト） */
   nodeHeight: number;
   /** 同一セル内でクロス軸方向に積む際のノード間ギャップ */
   verticalGap: number;
+  /**
+   * 隣接タイムライン列の「ノード端どうしの間」に最低限確保する主軸方向の余白。
+   * エッジ中間に表示される「運ぶ情報」チップが隣接ノードに隠れないよう、概ね
+   * チップ 1 個分が収まる余白をここで確保する。隣接列の主軸中心間ピッチは
+   * max(columnWidth, 前ノード半分 + 後ノード半分 + edgeLabelGap) になる。
+   */
+  edgeLabelGap: number;
   /** 時間軸先頭マージン（最初のステップ中心までのオフセット） */
   marginX: number;
   /** レーン内のクロス軸方向パディング */
@@ -94,6 +111,7 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   nodeWidth: 156,
   nodeHeight: 52,
   verticalGap: 18,
+  edgeLabelGap: 120,
   marginX: 70,
   lanePadding: 22,
   defaultLaneHeight: 120,
@@ -439,6 +457,17 @@ export function computeFlowLayout(
   // --- タイムライン軸（order 昇順 + エッジによる同 order 連鎖の展開）を算出 ---
   const timelineIndexOf = buildTimelineIndex(inputNodes, inputEdges);
 
+  // 各ノードの実効サイズ（個別 width/height 優先、無ければ opt のデフォルト）。
+  const nodeWidthOf = (n: LayoutInputNode): number =>
+    typeof n.width === 'number' && n.width > 0 ? n.width : opt.nodeWidth;
+  const nodeHeightOf = (n: LayoutInputNode): number =>
+    typeof n.height === 'number' && n.height > 0 ? n.height : opt.nodeHeight;
+  // クロス軸 / 主軸方向のノード実効サイズ（向きで入れ替わる）。
+  const crossSizeOf = (n: LayoutInputNode): number =>
+    isHorizontal ? nodeHeightOf(n) : nodeWidthOf(n);
+  const mainSizeOf = (n: LayoutInputNode): number =>
+    isHorizontal ? nodeWidthOf(n) : nodeHeightOf(n);
+
   // --- (timeline, レーン) セルへグルーピング ---
   type Cell = LayoutInputNode & {
     timeline: number;
@@ -476,16 +505,21 @@ export function computeFlowLayout(
   }
 
   // --- 各レーンの実効厚（過密セルに合わせ自動拡張） ---
-  // クロス軸の 1 ノード分のスロット長。
-  const crossSize = isHorizontal ? opt.nodeHeight : opt.nodeWidth;
-  const slotSize = crossSize + opt.verticalGap;
+  // セル内クロス軸スタックの実長（ノード実サイズ + ギャップ）を求めるヘルパ。
+  const cellStackCrossLength = (list: Cell[]): number => {
+    if (list.length === 0) return 0;
+    let sum = 0;
+    for (const c of list) sum += crossSizeOf(c);
+    return sum + (list.length - 1) * opt.verticalGap;
+  };
   const effectiveSizes: number[] = roleOrder.map((_r, laneIndex) => {
-    let maxCount = 0;
+    // レーン内の最も厚いセル（個別サイズを考慮した実クロス軸スタック長）に合わせる。
+    let maxStack = 0;
     for (let t = 0; t <= maxTimeline; t++) {
       const list = cells.get(cellKey(t, laneIndex));
-      if (list) maxCount = Math.max(maxCount, list.length);
+      if (list) maxStack = Math.max(maxStack, cellStackCrossLength(list));
     }
-    const required = maxCount * slotSize - opt.verticalGap + opt.lanePadding * 2;
+    const required = maxStack > 0 ? maxStack + opt.lanePadding * 2 : 0;
     const desired = _r.laneHeight ?? opt.defaultLaneHeight;
     const autoThickness = Math.max(desired, required, opt.defaultLaneHeight);
     // 手動オーバーライドがあれば、自動厚と override の大きい方を採用する。
@@ -537,9 +571,41 @@ export function computeFlowLayout(
   });
   const crossTotal = crossStart;
 
+  // --- 時間軸方向の列ごとの主軸中心（個別サイズ + 情報チップ余白を考慮） ---
+  // 各タイムライン列の「主軸方向の最大ノードサイズ」を集計する。隣接列の中心間
+  // ピッチは max(columnWidth, 前列半分 + 後列半分 + edgeLabelGap) とし、エッジ中間の
+  // 情報チップ（可変幅）が概ね 1 個収まる余白を確保する。全ノード既定サイズかつ
+  // columnWidth が十分なら従来どおり等ピッチ（= columnWidth）になる。
+  const columnMainSize: number[] = [];
+  for (let t = 0; t <= maxTimeline; t++) {
+    let maxMain = 0;
+    for (let laneIndex = 0; laneIndex < roleOrder.length; laneIndex++) {
+      const list = cells.get(cellKey(t, laneIndex));
+      if (!list) continue;
+      for (const c of list) maxMain = Math.max(maxMain, mainSizeOf(c));
+    }
+    // ノードの無い列でもデフォルトサイズ分の幅を確保（ピッチ計算の半分に使う）。
+    columnMainSize[t] = maxMain > 0 ? maxMain : (isHorizontal ? opt.nodeWidth : opt.nodeHeight);
+  }
+  // 列中心を累積（marginX を先頭列中心の前余白とみなす）。
+  const columnCenter: number[] = [];
+  let mainCursor = opt.marginX;
+  for (let t = 0; t <= maxTimeline; t++) {
+    if (t === 0) {
+      columnCenter[0] = mainCursor;
+      continue;
+    }
+    const pitch = Math.max(
+      opt.columnWidth,
+      columnMainSize[t - 1] / 2 + columnMainSize[t] / 2 + opt.edgeLabelGap,
+    );
+    mainCursor += pitch;
+    columnCenter[t] = mainCursor;
+  }
+
   // 時間軸方向の中心座標（timeline 列/行 → ピクセル）
   const timeCenter = (timeline: number) =>
-    opt.marginX + timeline * opt.columnWidth;
+    columnCenter[timeline] ?? opt.marginX + timeline * opt.columnWidth;
 
   // --- ノード座標の確定 ---
   const positioned: PositionedNode[] = [];
@@ -552,19 +618,24 @@ export function computeFlowLayout(
     const along = timeCenter(timeline); // 時間軸方向の中心
     const laneCenter = isHorizontal ? lane.centerY : lane.centerX;
 
-    const count = list.length;
-    // セル内の積み上げ全体の長さを求め、レーン中心に対してクロス軸センタリング
-    const stackSize = count * crossSize + (count - 1) * opt.verticalGap;
-    const startCross = laneCenter - stackSize / 2 + crossSize / 2;
+    // セル内の積み上げ全体の長さ（個別クロス軸サイズ + ギャップ）を求め、
+    // レーン中心に対してクロス軸センタリング。各ノードの中心は
+    // 「前ノードまでの累積長 + 自ノード半分」で決まる（サイズ差で重ならない）。
+    const stackSize = cellStackCrossLength(list);
+    const stackStart = laneCenter - stackSize / 2; // スタック上端（クロス軸先頭）
+    let crossCursor = stackStart;
 
     list.forEach((c, i) => {
-      const cross = startCross + i * slotSize;
+      if (i > 0) crossCursor += opt.verticalGap;
+      const half = crossSizeOf(c) / 2;
+      const cross = crossCursor + half; // このノードのクロス軸中心
+      crossCursor += crossSizeOf(c);
       positioned.push({
         id: c.id,
         x: isHorizontal ? along : cross,
         y: isHorizontal ? cross : along,
-        width: opt.nodeWidth,
-        height: opt.nodeHeight,
+        width: nodeWidthOf(c),
+        height: nodeHeightOf(c),
         roleId: roleOrder[laneIndex].id,
         laneIndex,
         type: normalizeType(c.type),
@@ -612,8 +683,11 @@ export function computeFlowLayout(
     });
   }
 
-  const timeExtent =
-    opt.marginX * 2 + maxTimeline * opt.columnWidth + opt.nodeWidth;
+  // 時間軸方向の全長: 最終列中心 + その列の主軸半分 + 末尾マージン。
+  // （個別サイズ・チップ余白で広がった可変ピッチを正しく反映する）
+  const lastCenter = columnCenter[maxTimeline] ?? opt.marginX;
+  const lastHalfMain = (columnMainSize[maxTimeline] ?? (isHorizontal ? opt.nodeWidth : opt.nodeHeight)) / 2;
+  const timeExtent = lastCenter + lastHalfMain + opt.marginX;
 
   return {
     nodes: positioned,

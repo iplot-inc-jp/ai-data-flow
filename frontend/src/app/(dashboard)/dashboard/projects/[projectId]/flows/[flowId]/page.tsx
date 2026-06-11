@@ -1140,6 +1140,9 @@ export default function ProjectFlowDetailPage() {
         order?: number;
         positionX?: number;
         positionY?: number;
+        /** マウスリサイズ後の描画幅/高さ（PUT node で永続化）。 */
+        width?: number;
+        height?: number;
         processingTime?: string | null;
         handledCount?: string | null;
         supplement?: string | null;
@@ -1766,7 +1769,16 @@ export default function ProjectFlowDetailPage() {
   const handleUpdateAnnotation = useCallback(
     async (
       id: string,
-      patch: { text?: string; positionX?: number; positionY?: number; color?: string | null; icon?: string | null }
+      patch: {
+        text?: string;
+        positionX?: number;
+        positionY?: number;
+        /** マウスリサイズ後の描画幅/高さ（PATCH annotation で永続化）。 */
+        width?: number;
+        height?: number;
+        color?: string | null;
+        icon?: string | null;
+      }
     ) => {
       if (!flowData) return;
       // 楽観更新（ドラッグ移動・本文編集が即座に反映され、再取得のちらつきを避ける）

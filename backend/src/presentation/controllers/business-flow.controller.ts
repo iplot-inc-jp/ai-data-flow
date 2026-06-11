@@ -191,6 +191,16 @@ class UpdateFlowNodeDto {
   @IsNumber()
   positionY?: number;
 
+  @ApiProperty({ description: 'ノード幅（手動リサイズの永続化）', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  width?: number | null;
+
+  @ApiProperty({ description: 'ノード高さ（手動リサイズの永続化）', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  height?: number | null;
+
   @IsOptional()
   @IsString()
   roleId?: string;
@@ -600,6 +610,16 @@ class CreateFlowAnnotationDto {
   @IsNumber()
   positionY?: number;
 
+  @ApiProperty({ description: '幅（手動リサイズの永続化）', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  width?: number | null;
+
+  @ApiProperty({ description: '高さ（手動リサイズの永続化）', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  height?: number | null;
+
   @ApiProperty({ description: '色（任意）', required: false, nullable: true })
   @IsOptional()
   @IsString()
@@ -628,6 +648,16 @@ class UpdateFlowAnnotationDto {
   @IsOptional()
   @IsNumber()
   positionY?: number;
+
+  @ApiProperty({ description: '幅（手動リサイズの永続化）', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  width?: number | null;
+
+  @ApiProperty({ description: '高さ（手動リサイズの永続化）', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  height?: number | null;
 
   @ApiProperty({ description: '色（任意）', required: false, nullable: true })
   @IsOptional()
@@ -749,6 +779,8 @@ export class BusinessFlowController {
         description: n.description,
         positionX: n.positionX,
         positionY: n.positionY,
+        width: n.width,
+        height: n.height,
         order: n.order,
         roleId: n.roleId,
         role: n.role
@@ -1010,6 +1042,12 @@ export class BusinessFlowController {
     if (dto.description !== undefined) node.updateDescription(dto.description);
     if (dto.positionX !== undefined && dto.positionY !== undefined) {
       node.updatePosition(dto.positionX, dto.positionY);
+    }
+    if (dto.width !== undefined || dto.height !== undefined) {
+      node.updateSize(
+        dto.width !== undefined ? dto.width : node.width,
+        dto.height !== undefined ? dto.height : node.height,
+      );
     }
     if (dto.type) node.updateType(dto.type as any);
     if (dto.roleId !== undefined) node.assignRole(dto.roleId);
@@ -1552,6 +1590,8 @@ export class BusinessFlowController {
         text: dto.text ?? '',
         positionX: dto.positionX ?? 0,
         positionY: dto.positionY ?? 0,
+        width: dto.width ?? null,
+        height: dto.height ?? null,
         color: dto.color ?? null,
         icon: dto.icon ?? null,
       },
@@ -1576,6 +1616,8 @@ export class BusinessFlowController {
       text?: string;
       positionX?: number;
       positionY?: number;
+      width?: number | null;
+      height?: number | null;
       color?: string | null;
       icon?: string | null;
     } = {};
@@ -1583,6 +1625,8 @@ export class BusinessFlowController {
     if (dto.text !== undefined) data.text = dto.text;
     if (dto.positionX !== undefined) data.positionX = dto.positionX;
     if (dto.positionY !== undefined) data.positionY = dto.positionY;
+    if (dto.width !== undefined) data.width = dto.width;
+    if (dto.height !== undefined) data.height = dto.height;
     if (dto.color !== undefined) data.color = dto.color;
     if (dto.icon !== undefined) data.icon = dto.icon;
 
@@ -1614,6 +1658,8 @@ export class BusinessFlowController {
     text: string;
     positionX: number;
     positionY: number;
+    width: number | null;
+    height: number | null;
     color: string | null;
     icon: string | null;
     order: number;
@@ -1626,6 +1672,8 @@ export class BusinessFlowController {
       text: a.text,
       positionX: a.positionX,
       positionY: a.positionY,
+      width: a.width,
+      height: a.height,
       color: a.color,
       icon: a.icon,
       order: a.order,
@@ -1980,6 +2028,8 @@ export class BusinessFlowController {
       description: node.description,
       positionX: node.positionX,
       positionY: node.positionY,
+      width: node.width,
+      height: node.height,
       roleId: node.roleId,
       childFlowId: node.childFlowId,
       hasChildFlow: node.hasChildFlow,

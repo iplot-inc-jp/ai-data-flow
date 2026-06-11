@@ -55,6 +55,10 @@ export type FlowDataNode = {
   description?: string;
   positionX: number;
   positionY: number;
+  /** ノードの描画幅（手動リサイズの永続化）。未設定なら既定 NODE_W。 */
+  width?: number | null;
+  /** ノードの描画高さ（手動リサイズの永続化）。未設定なら既定 NODE_H。 */
+  height?: number | null;
   order?: number;
   roleId?: string;
   role?: Role;
@@ -153,6 +157,10 @@ export type FlowAnnotation = {
   text: string;
   positionX: number;
   positionY: number;
+  /** 付箋/コメント/アイコンの描画幅（手動リサイズの永続化）。未設定なら既定サイズ。 */
+  width?: number | null;
+  /** 付箋/コメント/アイコンの描画高さ（手動リサイズの永続化）。未設定なら既定サイズ。 */
+  height?: number | null;
   color?: string | null;
   /** kind==='ICON' のとき表示する lucide アイコン名（ICON_MAP のキー）。 */
   icon?: string | null;

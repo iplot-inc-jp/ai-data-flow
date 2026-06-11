@@ -328,6 +328,9 @@ model FlowAnnotation {
   text      String             @default("") @db.Text
   positionX Float              @default(0) @map("position_x")
   positionY Float              @default(0) @map("position_y")
+  // 付箋・アイコンのサイズ（手動リサイズの永続化）。null=従来固定サイズ扱い
+  width     Float?             @map("width")
+  height    Float?             @map("height")
   color     String?
   icon      String?            // kind=ICON のとき lucide アイコン名
   order     Int                @default(0)
@@ -373,6 +376,9 @@ model FlowNode {
   description String?
   positionX   Float        @map("position_x")
   positionY   Float        @map("position_y")
+  // ノードのサイズ（手動リサイズの永続化）。null=従来固定サイズ扱い
+  width       Float?       @map("width")
+  height      Float?       @map("height")
   // 時系列順（構造ベース自動レイアウトのタイブレーク。layerはエッジから導出）
   order       Int          @default(0)
   roleId      String?      @map("role_id")

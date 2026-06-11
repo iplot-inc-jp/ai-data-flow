@@ -45,6 +45,8 @@ export class PrismaFlowNodeRepository implements IFlowNodeRepository {
       description: node.description,
       positionX: node.positionX,
       positionY: node.positionY,
+      width: node.width,
+      height: node.height,
       roleId: node.roleId,
       childFlowId: node.childFlowId,
       processingTime: node.processingTime,
@@ -74,6 +76,8 @@ export class PrismaFlowNodeRepository implements IFlowNodeRepository {
     description: string | null;
     positionX: number;
     positionY: number;
+    width: number | null;
+    height: number | null;
     roleId: string | null;
     childFlowId: string | null;
     processingTime: string | null;
@@ -91,6 +95,8 @@ export class PrismaFlowNodeRepository implements IFlowNodeRepository {
       description: record.description,
       positionX: record.positionX,
       positionY: record.positionY,
+      width: record.width,
+      height: record.height,
       roleId: record.roleId,
       childFlowId: record.childFlowId,
       processingTime: record.processingTime,

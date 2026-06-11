@@ -17,6 +17,17 @@ const roles: LayoutRole[] = [
   { id: 'r-system', name: 'システム', color: '#8b5cf6' },
 ];
 
+/**
+ * 既定サイズノード同士の、隣接タイムライン列の中心間ピッチ。
+ * 仕様: max(columnWidth, 前ノード半分 + 後ノード半分 + edgeLabelGap)。
+ * 既定値（nodeWidth=156, edgeLabelGap=120, columnWidth=210）では
+ * 156 + 120 = 276 が columnWidth を上回るので 276 になる。
+ */
+function expectedDefaultPitch(): number {
+  const { nodeWidth, edgeLabelGap, columnWidth } = DEFAULT_LAYOUT_OPTIONS;
+  return Math.max(columnWidth, nodeWidth / 2 + nodeWidth / 2 + edgeLabelGap);
+}
+
 // ===========================================
 // computeLayers（補助ユーティリティ: 最長経路）
 // ===========================================
@@ -425,10 +436,12 @@ describe('computeFlowLayout (edge-precedence timeline)', () => {
       orientation: 'horizontal',
     });
     const byId = (id: string) => layout.nodes.find((n) => n.id === id)!;
-    // 列幅（columnWidth）は一定なので、x の差は列差に比例
-    const cw = DEFAULT_LAYOUT_OPTIONS.columnWidth;
-    expect(byId('b').x - byId('a').x).toBeCloseTo(cw);
-    expect(byId('c').x - byId('b').x).toBeCloseTo(cw);
+    // 隣接列の中心間ピッチは max(columnWidth, ノード半分×2 + edgeLabelGap)。
+    // 既定（156px ノード, edgeLabelGap=120）では 156 + 120 = 276 が columnWidth(210)
+    // を上回るので、エッジ上の情報チップ余白ぶん広い 276px が採用される。
+    const pitch = expectedDefaultPitch();
+    expect(byId('b').x - byId('a').x).toBeCloseTo(pitch);
+    expect(byId('c').x - byId('b').x).toBeCloseTo(pitch);
   });
 
   it('合流は最長経路を採用する（a→b→d と a→d で d は 2 列右）', () => {
@@ -446,10 +459,10 @@ describe('computeFlowLayout (edge-precedence timeline)', () => {
       orientation: 'horizontal',
     });
     const byId = (id: string) => layout.nodes.find((n) => n.id === id)!;
-    const cw = DEFAULT_LAYOUT_OPTIONS.columnWidth;
-    // 最長経路 a(0)→b(1)→d(2): d は a より 2 列右
-    expect(byId('d').x - byId('a').x).toBeCloseTo(cw * 2);
-    expect(byId('b').x - byId('a').x).toBeCloseTo(cw);
+    const pitch = expectedDefaultPitch();
+    // 最長経路 a(0)→b(1)→d(2): d は a より 2 列右（各列間ピッチ pitch ぶん）
+    expect(byId('d').x - byId('a').x).toBeCloseTo(pitch * 2);
+    expect(byId('b').x - byId('a').x).toBeCloseTo(pitch);
   });
 
   it('同 order の UNCONNECTED ノードは同じ列を共有して積み上がる（horizontal）', () => {
@@ -559,6 +572,150 @@ describe('computeFlowLayout (nearest-side edge handles)', () => {
       orientation: 'horizontal',
     });
     expect(layout.edges.map((e) => e.id)).toEqual(['e1']);
+  });
+});
+
+// ===========================================
+// computeFlowLayout — ノード個別サイズ対応
+// ===========================================
+describe('computeFlowLayout (per-node sizes)', () => {
+  it('個別 width/height を指定したノードはその実サイズで返る（horizontal）', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0, width: 240, height: 120 },
+      { id: 'b', roleId: 'r-customer', order: 1 }, // 既定サイズ
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+    });
+    const a = layout.nodes.find((n) => n.id === 'a')!;
+    const b = layout.nodes.find((n) => n.id === 'b')!;
+    // 個別サイズがそのまま PositionedNode.width/height に反映される
+    expect(a.width).toBe(240);
+    expect(a.height).toBe(120);
+    // 未指定ノードは opt のデフォルト
+    expect(b.width).toBe(DEFAULT_LAYOUT_OPTIONS.nodeWidth);
+    expect(b.height).toBe(DEFAULT_LAYOUT_OPTIONS.nodeHeight);
+  });
+
+  it('幅広ノードと既定ノードの主軸間隔は実サイズ（半分ずつ）を考慮して広がる（horizontal）', () => {
+    // a は幅 320。a→b の中心間ピッチは少なくとも 320/2 + 156/2 + edgeLabelGap。
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0, width: 320, height: 52 },
+      { id: 'b', roleId: 'r-customer', order: 1, width: 156, height: 52 },
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+    });
+    const a = layout.nodes.find((n) => n.id === 'a')!;
+    const b = layout.nodes.find((n) => n.id === 'b')!;
+    const expectedPitch = Math.max(
+      DEFAULT_LAYOUT_OPTIONS.columnWidth,
+      320 / 2 + 156 / 2 + DEFAULT_LAYOUT_OPTIONS.edgeLabelGap,
+    );
+    expect(b.x - a.x).toBeCloseTo(expectedPitch);
+    // 端どうしの隙間は edgeLabelGap ぶん（チップが収まる余白）が確保される
+    const gapBetweenEdges = b.x - b.width / 2 - (a.x + a.width / 2);
+    expect(gapBetweenEdges).toBeCloseTo(DEFAULT_LAYOUT_OPTIONS.edgeLabelGap);
+  });
+
+  it('縦長ノードを積むとレーンが実サイズぶん厚くなり、ノード矩形が重ならない（horizontal）', () => {
+    // 同一セル（同 order・同レーン）に背の高いノードを積む。
+    const nodes: LayoutInputNode[] = [
+      { id: 'b1', roleId: 'r-approver', order: 0, width: 156, height: 120 },
+      { id: 'b2', roleId: 'r-approver', order: 0, width: 156, height: 80 },
+      { id: 'b3', roleId: 'r-approver', order: 0, width: 156, height: 52 },
+    ];
+    const layout = computeFlowLayout(nodes, [], roles, {
+      orientation: 'horizontal',
+    });
+    const approverLane = layout.lanes.find((l) => l.roleId === 'r-approver')!;
+    // レーン厚は積んだ実高さの合計 + ギャップ + パディング以上
+    const stack =
+      120 + 80 + 52 + 2 * DEFAULT_LAYOUT_OPTIONS.verticalGap;
+    expect(approverLane.height).toBeGreaterThanOrEqual(stack);
+    // 積んだ 3 ノードはクロス軸（Y）で実サイズ分離し、矩形が重ならない
+    const [n1, n2, n3] = ['b1', 'b2', 'b3'].map(
+      (id) => layout.nodes.find((n) => n.id === id)!,
+    );
+    expect(n1.y + n1.height / 2).toBeLessThanOrEqual(n2.y - n2.height / 2);
+    expect(n2.y + n2.height / 2).toBeLessThanOrEqual(n3.y - n3.height / 2);
+    // すべて自レーン帯内に収まる
+    for (const n of [n1, n2, n3]) {
+      expect(n.y - n.height / 2).toBeGreaterThanOrEqual(approverLane.top);
+      expect(n.y + n.height / 2).toBeLessThanOrEqual(
+        approverLane.top + approverLane.height,
+      );
+    }
+  });
+
+  it('vertical では width が主軸/ height がクロス軸に効く（個別サイズ）', () => {
+    // vertical: 主軸=y（高さで間隔）, クロス軸=x（幅でレーン厚）
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0, width: 156, height: 200 },
+      { id: 'b', roleId: 'r-customer', order: 1, width: 156, height: 52 },
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'vertical',
+    });
+    const a = layout.nodes.find((n) => n.id === 'a')!;
+    const b = layout.nodes.find((n) => n.id === 'b')!;
+    expect(a.height).toBe(200);
+    const expectedPitch = Math.max(
+      DEFAULT_LAYOUT_OPTIONS.columnWidth,
+      200 / 2 + 52 / 2 + DEFAULT_LAYOUT_OPTIONS.edgeLabelGap,
+    );
+    // 主軸（y）方向の中心間ピッチが高さを考慮して広がる
+    expect(b.y - a.y).toBeCloseTo(expectedPitch);
+  });
+});
+
+// ===========================================
+// computeFlowLayout — 運ぶ情報チップ用の主軸余白（edgeLabelGap）
+// ===========================================
+describe('computeFlowLayout (edgeLabelGap)', () => {
+  it('edgeLabelGap を大きくすると主軸ピッチが広がる（チップ余白の確保）', () => {
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-customer', order: 1 },
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+    const small = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+      edgeLabelGap: 40,
+    });
+    const large = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+      edgeLabelGap: 240,
+    });
+    const dx = (l: ReturnType<typeof computeFlowLayout>) => {
+      const a = l.nodes.find((n) => n.id === 'a')!;
+      const b = l.nodes.find((n) => n.id === 'b')!;
+      return b.x - a.x;
+    };
+    expect(dx(large)).toBeGreaterThan(dx(small));
+  });
+
+  it('edgeLabelGap が小さく columnWidth に収まる場合は等ピッチ（columnWidth）になる', () => {
+    // 156 + edgeLabelGap(20) = 176 < columnWidth(210) → ピッチは columnWidth に張り付く
+    const nodes: LayoutInputNode[] = [
+      { id: 'a', roleId: 'r-customer', order: 0 },
+      { id: 'b', roleId: 'r-customer', order: 1 },
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+    const layout = computeFlowLayout(nodes, edges, roles, {
+      orientation: 'horizontal',
+      edgeLabelGap: 20,
+    });
+    const a = layout.nodes.find((n) => n.id === 'a')!;
+    const b = layout.nodes.find((n) => n.id === 'b')!;
+    expect(b.x - a.x).toBeCloseTo(DEFAULT_LAYOUT_OPTIONS.columnWidth);
+  });
+
+  it('DEFAULT_LAYOUT_OPTIONS は edgeLabelGap を持つ（既定 120）', () => {
+    expect(DEFAULT_LAYOUT_OPTIONS.edgeLabelGap).toBe(120);
   });
 });
 

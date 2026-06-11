@@ -17,6 +17,8 @@ export class FlowNode extends BaseEntity {
   private _description: string | null;
   private _positionX: number;
   private _positionY: number;
+  private _width: number | null;
+  private _height: number | null;
   private _roleId: string | null;
   private _childFlowId: string | null;
   private _processingTime: string | null;
@@ -32,6 +34,8 @@ export class FlowNode extends BaseEntity {
     description?: string | null;
     positionX: number;
     positionY: number;
+    width?: number | null;
+    height?: number | null;
     roleId?: string | null;
     childFlowId?: string | null;
     processingTime?: string | null;
@@ -49,6 +53,8 @@ export class FlowNode extends BaseEntity {
     this._description = props.description ?? null;
     this._positionX = props.positionX;
     this._positionY = props.positionY;
+    this._width = props.width ?? null;
+    this._height = props.height ?? null;
     this._roleId = props.roleId ?? null;
     this._childFlowId = props.childFlowId ?? null;
     this._processingTime = props.processingTime ?? null;
@@ -79,6 +85,14 @@ export class FlowNode extends BaseEntity {
 
   get positionY(): number {
     return this._positionY;
+  }
+
+  get width(): number | null {
+    return this._width;
+  }
+
+  get height(): number | null {
+    return this._height;
   }
 
   get roleId(): string | null {
@@ -129,6 +143,11 @@ export class FlowNode extends BaseEntity {
     this._positionY = y;
   }
 
+  updateSize(width: number | null, height: number | null): void {
+    this._width = width;
+    this._height = height;
+  }
+
   updateType(type: FlowNodeType): void {
     this._type = type;
   }
@@ -172,6 +191,8 @@ export class FlowNode extends BaseEntity {
     description?: string | null;
     positionX: number;
     positionY: number;
+    width?: number | null;
+    height?: number | null;
     roleId?: string | null;
     processingTime?: string | null;
     handledCount?: string | null;
