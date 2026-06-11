@@ -22,7 +22,6 @@ import {
   Network,
   Share2,
   GitCompare,
-  Folder,
   Layers,
   Github,
   Building2,
@@ -119,9 +118,11 @@ function useCurrentUser() {
 }
 
 // 業務フローツリー用の型
+// 領域（SubProject）は parentId で 領域→サブ領域 の入れ子を持つ。
 type SubProject = {
   id: string
   name: string
+  parentId?: string | null
   order?: number
 }
 
@@ -130,27 +131,17 @@ type BusinessFlow = {
   name: string
   kind: 'ASIS' | 'TOBE'
   subProjectId?: string | null
-  folderId?: string | null
 }
 
-type FlowFolder = {
-  id: string
-  parentId?: string | null
-  name: string
-  order?: number
-}
-
-// サブプロジェクト・フォルダ・フローを取得するhook（projectId変更時のみ）
+// 領域（SubProject）・フローを取得するhook（projectId変更時のみ）
 function useFlowTree(projectId: string | null) {
   const [subProjects, setSubProjects] = useState<SubProject[]>([])
   const [flows, setFlows] = useState<BusinessFlow[]>([])
-  const [folders, setFolders] = useState<FlowFolder[]>([])
 
   useEffect(() => {
     if (!projectId) {
       setSubProjects([])
       setFlows([])
-      setFolders([])
       return
     }
 
@@ -158,14 +149,11 @@ function useFlowTree(projectId: string | null) {
 
     const fetchTree = async () => {
       try {
-        const [subRes, flowRes, folderRes] = await Promise.all([
+        const [subRes, flowRes] = await Promise.all([
           fetch(`${API_URL}/api/projects/${projectId}/sub-projects`, {
             headers: authHeaders(),
           }),
           fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, {
-            headers: authHeaders(),
-          }),
-          fetch(`${API_URL}/api/projects/${projectId}/flow-folders`, {
             headers: authHeaders(),
           }),
         ])
@@ -177,10 +165,6 @@ function useFlowTree(projectId: string | null) {
         if (!cancelled && flowRes.ok) {
           const flowData = await flowRes.json()
           setFlows(Array.isArray(flowData) ? flowData : [])
-        }
-        if (!cancelled && folderRes.ok) {
-          const folderData = await folderRes.json()
-          setFolders(Array.isArray(folderData) ? folderData : [])
         }
       } catch (err) {
         console.error('Failed to fetch flow tree:', err)
@@ -194,7 +178,7 @@ function useFlowTree(projectId: string | null) {
     }
   }, [projectId])
 
-  return { subProjects, flows, folders }
+  return { subProjects, flows }
 }
 
 // ASIS/TOBE サブグループ
@@ -263,40 +247,70 @@ function FlowKindGroup({
   )
 }
 
-// サブプロジェクトノード（展開可能）
+// 領域（SubProject）ノード（入れ子サブ領域 → 配下の ASIS/TOBE フロー）
+// parentId による 領域→サブ領域 の入れ子をそのまま描画する。
 function SubProjectNode({
-  label,
-  icon: Icon,
-  flows,
+  subProject,
+  childSubProjectsByParent,
+  flowsBySubProject,
   projectId,
   pathname,
   onNavigate,
-  defaultOpen,
 }: {
-  label: string
-  icon: typeof Folder
-  flows: BusinessFlow[]
+  subProject: SubProject
+  childSubProjectsByParent: Map<string | null, SubProject[]>
+  flowsBySubProject: Map<string | null, BusinessFlow[]>
   projectId: string
   pathname: string
   onNavigate: () => void
-  defaultOpen?: boolean
 }) {
-  // このサブプロジェクト内に現在開いているフローがあれば初期展開
-  const containsActive = flows.some(
-    (f) => pathname === `/dashboard/projects/${projectId}/flows/${f.id}`
-  )
-  const [open, setOpen] = useState(defaultOpen ?? containsActive)
+  const childSubProjects = childSubProjectsByParent.get(subProject.id) ?? []
+  const ownFlows = flowsBySubProject.get(subProject.id) ?? []
 
-  if (flows.length === 0) return null
+  // 配下（自領域 + 子孫サブ領域）に現在開いているフローがあれば初期展開
+  const containsActive = useMemo(() => {
+    const matches = (flows: BusinessFlow[]) =>
+      flows.some((f) => pathname === `/dashboard/projects/${projectId}/flows/${f.id}`)
+    if (matches(ownFlows)) return true
+    const stack = [...childSubProjects]
+    const seen = new Set<string>() // 循環(parentId ループ)で無限ループしないよう防止
+    while (stack.length) {
+      const c = stack.pop()!
+      if (seen.has(c.id)) continue
+      seen.add(c.id)
+      if (matches(flowsBySubProject.get(c.id) ?? [])) return true
+      stack.push(...(childSubProjectsByParent.get(c.id) ?? []))
+    }
+    return false
+  }, [ownFlows, childSubProjects, childSubProjectsByParent, flowsBySubProject, pathname, projectId])
 
-  const asisFlows = flows.filter((f) => f.kind === 'ASIS')
-  const tobeFlows = flows.filter((f) => f.kind === 'TOBE')
+  const [open, setOpen] = useState(containsActive)
+
+  // フローもサブ領域も無い空の領域は表示しない
+  if (childSubProjects.length === 0 && ownFlows.length === 0) return null
+
+  const totalCount = (() => {
+    let n = ownFlows.length
+    const stack = [...childSubProjects]
+    const seen = new Set<string>() // 循環(parentId ループ)で無限ループしないよう防止
+    while (stack.length) {
+      const c = stack.pop()!
+      if (seen.has(c.id)) continue
+      seen.add(c.id)
+      n += (flowsBySubProject.get(c.id) ?? []).length
+      stack.push(...(childSubProjectsByParent.get(c.id) ?? []))
+    }
+    return n
+  })()
+
+  const asisFlows = ownFlows.filter((f) => f.kind === 'ASIS')
+  const tobeFlows = ownFlows.filter((f) => f.kind === 'TOBE')
 
   return (
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
-        title={label}
+        title={subProject.name}
         className={cn(
           'flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
           'text-foreground/80 hover:text-foreground hover:bg-secondary'
@@ -307,12 +321,25 @@ function SubProjectNode({
         ) : (
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
         )}
-        <Icon className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
-        <span className="truncate">{label}</span>
-        <span className="ml-auto text-[10px] text-muted-foreground/70">{flows.length}</span>
+        <Layers className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
+        <span className="truncate">{subProject.name}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground/70">{totalCount}</span>
       </button>
       {open && (
-        <div className="pl-3 mt-0.5 space-y-0.5">
+        <div className="pl-3 mt-0.5 space-y-0.5 border-l border-border/60 ml-2">
+          {/* 子領域（サブ領域・入れ子） */}
+          {childSubProjects.map((child) => (
+            <SubProjectNode
+              key={child.id}
+              subProject={child}
+              childSubProjectsByParent={childSubProjectsByParent}
+              flowsBySubProject={flowsBySubProject}
+              projectId={projectId}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
+          ))}
+          {/* この領域直下のフロー（ASIS/TOBE 構造） */}
           <FlowKindGroup
             label="ASIS"
             flows={asisFlows}
@@ -333,109 +360,33 @@ function SubProjectNode({
   )
 }
 
-// サブプロジェクト → ASIS/TOBE → フロー の構造（フォルダ内 / フォルダ無しで再利用）
-function SubProjectTree({
-  subProjects,
+// 領域なし（領域未割当）のフローノード（ASIS/TOBE 構造）
+function UnassignedNode({
   flows,
   projectId,
   pathname,
   onNavigate,
 }: {
-  subProjects: SubProject[]
   flows: BusinessFlow[]
   projectId: string
   pathname: string
   onNavigate: () => void
 }) {
-  const unassignedFlows = flows.filter((f) => !f.subProjectId)
-
-  return (
-    <>
-      {subProjects.map((sp) => {
-        const spFlows = flows.filter((f) => f.subProjectId === sp.id)
-        if (spFlows.length === 0) return null
-        return (
-          <SubProjectNode
-            key={sp.id}
-            label={sp.name}
-            icon={Folder}
-            flows={spFlows}
-            projectId={projectId}
-            pathname={pathname}
-            onNavigate={onNavigate}
-          />
-        )
-      })}
-      {unassignedFlows.length > 0 && (
-        <SubProjectNode
-          label="(未分類)"
-          icon={Layers}
-          flows={unassignedFlows}
-          projectId={projectId}
-          pathname={pathname}
-          onNavigate={onNavigate}
-        />
-      )}
-    </>
+  const containsActive = flows.some(
+    (f) => pathname === `/dashboard/projects/${projectId}/flows/${f.id}`
   )
-}
-
-// フォルダノード（入れ子フォルダ → 配下の SubProject/ASIS-TOBE 構造）
-function FolderTreeNode({
-  folder,
-  childFoldersByParent,
-  flowsByFolder,
-  subProjects,
-  projectId,
-  pathname,
-  onNavigate,
-}: {
-  folder: FlowFolder
-  childFoldersByParent: Map<string | null, FlowFolder[]>
-  flowsByFolder: Map<string | null, BusinessFlow[]>
-  subProjects: SubProject[]
-  projectId: string
-  pathname: string
-  onNavigate: () => void
-}) {
-  const childFolders = childFoldersByParent.get(folder.id) ?? []
-  const folderFlows = flowsByFolder.get(folder.id) ?? []
-
-  // 配下（自フォルダ + 子孫フォルダ）に現在開いているフローがあれば初期展開
-  const containsActive = useMemo(() => {
-    const matches = (flows: BusinessFlow[]) =>
-      flows.some((f) => pathname === `/dashboard/projects/${projectId}/flows/${f.id}`)
-    if (matches(folderFlows)) return true
-    const stack = [...childFolders]
-    while (stack.length) {
-      const c = stack.pop()!
-      if (matches(flowsByFolder.get(c.id) ?? [])) return true
-      stack.push(...(childFoldersByParent.get(c.id) ?? []))
-    }
-    return false
-  }, [folderFlows, childFolders, childFoldersByParent, flowsByFolder, pathname, projectId])
-
   const [open, setOpen] = useState(containsActive)
 
-  // フローも子フォルダも無い空フォルダは表示しない
-  if (childFolders.length === 0 && folderFlows.length === 0) return null
+  if (flows.length === 0) return null
 
-  const totalCount = (() => {
-    let n = folderFlows.length
-    const stack = [...childFolders]
-    while (stack.length) {
-      const c = stack.pop()!
-      n += (flowsByFolder.get(c.id) ?? []).length
-      stack.push(...(childFoldersByParent.get(c.id) ?? []))
-    }
-    return n
-  })()
+  const asisFlows = flows.filter((f) => f.kind === 'ASIS')
+  const tobeFlows = flows.filter((f) => f.kind === 'TOBE')
 
   return (
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
-        title={folder.name}
+        title="領域なし"
         className={cn(
           'flex items-center gap-1.5 w-full px-2 py-1.5 rounded-md text-xs font-medium transition-colors',
           'text-foreground/80 hover:text-foreground hover:bg-secondary'
@@ -446,29 +397,22 @@ function FolderTreeNode({
         ) : (
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
         )}
-        <Folder className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
-        <span className="truncate">{folder.name}</span>
-        <span className="ml-auto text-[10px] text-muted-foreground/70">{totalCount}</span>
+        <Layers className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
+        <span className="truncate">領域なし</span>
+        <span className="ml-auto text-[10px] text-muted-foreground/70">{flows.length}</span>
       </button>
       {open && (
         <div className="pl-3 mt-0.5 space-y-0.5 border-l border-border/60 ml-2">
-          {/* 子フォルダ（入れ子） */}
-          {childFolders.map((child) => (
-            <FolderTreeNode
-              key={child.id}
-              folder={child}
-              childFoldersByParent={childFoldersByParent}
-              flowsByFolder={flowsByFolder}
-              subProjects={subProjects}
-              projectId={projectId}
-              pathname={pathname}
-              onNavigate={onNavigate}
-            />
-          ))}
-          {/* このフォルダ直下のフロー（SubProject/ASIS-TOBE 構造） */}
-          <SubProjectTree
-            subProjects={subProjects}
-            flows={folderFlows}
+          <FlowKindGroup
+            label="ASIS"
+            flows={asisFlows}
+            projectId={projectId}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+          <FlowKindGroup
+            label="TOBE"
+            flows={tobeFlows}
             projectId={projectId}
             pathname={pathname}
             onNavigate={onNavigate}
@@ -479,69 +423,66 @@ function FolderTreeNode({
   )
 }
 
-// 業務フローツリー全体（フォルダ層 → SubProject/ASIS-TOBE 層）
+// 業務フローツリー全体（領域 → サブ領域 → ASIS/TOBE → フロー）
 function FlowTree({
   projectId,
   subProjects,
   flows,
-  folders,
   pathname,
   onNavigate,
 }: {
   projectId: string
   subProjects: SubProject[]
   flows: BusinessFlow[]
-  folders: FlowFolder[]
   pathname: string
   onNavigate: () => void
 }) {
-  if (flows.length === 0 && subProjects.length === 0 && folders.length === 0) return null
+  if (flows.length === 0 && subProjects.length === 0) return null
 
-  // フォルダの親子インデックス（孤児はルート扱い）
-  const validFolderIds = new Set(folders.map((f) => f.id))
-  const childFoldersByParent = new Map<string | null, FlowFolder[]>()
-  for (const f of folders) {
-    const parent = f.parentId && validFolderIds.has(f.parentId) ? f.parentId : null
-    const list = childFoldersByParent.get(parent) ?? []
-    list.push(f)
-    childFoldersByParent.set(parent, list)
+  // 領域の親子インデックス（孤児はルート扱い）
+  const validSubProjectIds = new Set(subProjects.map((s) => s.id))
+  const childSubProjectsByParent = new Map<string | null, SubProject[]>()
+  for (const s of subProjects) {
+    const parent = s.parentId && validSubProjectIds.has(s.parentId) ? s.parentId : null
+    const list = childSubProjectsByParent.get(parent) ?? []
+    list.push(s)
+    childSubProjectsByParent.set(parent, list)
   }
-  const sortFolders = (a: FlowFolder, b: FlowFolder) =>
+  const sortSubProjects = (a: SubProject, b: SubProject) =>
     (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'ja')
-  childFoldersByParent.forEach((list) => list.sort(sortFolders))
+  childSubProjectsByParent.forEach((list) => list.sort(sortSubProjects))
 
-  // フォルダIDごとのフロー（無効フォルダ参照は未分類扱い）
-  const flowsByFolder = new Map<string | null, BusinessFlow[]>()
+  // 領域IDごとのフロー（無効な領域参照は領域なし扱い）
+  const flowsBySubProject = new Map<string | null, BusinessFlow[]>()
   for (const flow of flows) {
-    const fid = flow.folderId && validFolderIds.has(flow.folderId) ? flow.folderId : null
-    const list = flowsByFolder.get(fid) ?? []
+    const sid =
+      flow.subProjectId && validSubProjectIds.has(flow.subProjectId) ? flow.subProjectId : null
+    const list = flowsBySubProject.get(sid) ?? []
     list.push(flow)
-    flowsByFolder.set(fid, list)
+    flowsBySubProject.set(sid, list)
   }
 
-  const rootFolders = childFoldersByParent.get(null) ?? []
-  const unfolderedFlows = flowsByFolder.get(null) ?? []
+  const rootSubProjects = childSubProjectsByParent.get(null) ?? []
+  const unassignedFlows = flowsBySubProject.get(null) ?? []
 
   return (
     <div className="mt-1 ml-2 pl-2 border-l border-border space-y-1 max-h-[40vh] overflow-y-auto">
-      {/* フォルダ層 */}
-      {rootFolders.map((folder) => (
-        <FolderTreeNode
-          key={folder.id}
-          folder={folder}
-          childFoldersByParent={childFoldersByParent}
-          flowsByFolder={flowsByFolder}
-          subProjects={subProjects}
+      {/* 領域層（領域 → サブ領域 → ASIS/TOBE → フロー） */}
+      {rootSubProjects.map((sp) => (
+        <SubProjectNode
+          key={sp.id}
+          subProject={sp}
+          childSubProjectsByParent={childSubProjectsByParent}
+          flowsBySubProject={flowsBySubProject}
           projectId={projectId}
           pathname={pathname}
           onNavigate={onNavigate}
         />
       ))}
 
-      {/* フォルダ未割当のフロー（既存の SubProject/ASIS-TOBE 構造をそのまま維持） */}
-      <SubProjectTree
-        subProjects={subProjects}
-        flows={unfolderedFlows}
+      {/* 領域未割当のフロー（領域なし） */}
+      <UnassignedNode
+        flows={unassignedFlows}
         projectId={projectId}
         pathname={pathname}
         onNavigate={onNavigate}
@@ -562,7 +503,7 @@ export default function DashboardLayout({
 
   const projectId = useMemo(() => extractProjectId(pathname), [pathname])
   const projectName = useProjectName(projectId)
-  const { subProjects, flows, folders } = useFlowTree(projectId)
+  const { subProjects, flows } = useFlowTree(projectId)
   const { isSuperAdmin } = useCurrentUser()
 
   // プロジェクト非依存のトップナビ（フラット）
@@ -770,7 +711,6 @@ export default function DashboardLayout({
                   projectId={projectId}
                   subProjects={subProjects}
                   flows={flows}
-                  folders={folders}
                   pathname={pathname}
                   onNavigate={() => setSidebarOpen(false)}
                 />
