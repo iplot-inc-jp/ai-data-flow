@@ -11,7 +11,6 @@ import {
   Database,
   GitCompare,
   ClipboardList,
-  Folder,
   Layers,
   ChevronRight,
 } from 'lucide-react';
@@ -45,14 +44,12 @@ type BusinessFlow = {
   id: string;
   name: string;
   kind: FlowKind;
-  folderId?: string | null;
   subProjectId?: string | null;
   description?: string | null;
 };
 
 // 領域（SubProject）は TOBE と共通の SubProject マスタ。parentId で 領域→サブ領域 の入れ子を持つ。
 type SubProject = SubProjectMaster;
-type FlowFolder = { id: string; name: string };
 
 // 「未分類」セレクト用のセンチネル（空文字を value にすると未選択と区別しにくいため）。
 const UNASSIGNED = '__none__';
@@ -112,6 +109,31 @@ const priorityBadge: Record<GapItem['priority'], string> = {
   LOW: 'text-green-700 bg-green-50 border-green-300',
 };
 
+// 領域でグループ化したので、カードは領域バッジを省略しフロー名のみを表示する。
+function FlowCard({
+  flow,
+  onOpen,
+}: {
+  flow: BusinessFlow;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group flex w-full flex-col items-start gap-2 rounded-lg border border-gray-200 bg-white p-4 text-left transition-colors hover:border-amber-400 hover:bg-amber-50/40"
+    >
+      <div className="flex w-full items-start justify-between gap-2">
+        <span className="flex items-center gap-2 font-medium text-foreground">
+          <GitBranch className="h-4 w-4 shrink-0 text-amber-600" />
+          <span className="truncate">{flow.name}</span>
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 group-hover:text-amber-600" />
+      </div>
+    </button>
+  );
+}
+
 export default function AsisManagementPage() {
   const params = useParams();
   const router = useRouter();
@@ -119,7 +141,6 @@ export default function AsisManagementPage() {
 
   const [flows, setFlows] = useState<BusinessFlow[]>([]);
   const [subProjects, setSubProjects] = useState<SubProject[]>([]);
-  const [folders, setFolders] = useState<FlowFolder[]>([]);
   const [gapItems, setGapItems] = useState<GapItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,14 +158,11 @@ export default function AsisManagementPage() {
     setError(null);
     try {
       // 領域（SubProject）は TOBE と共通の subProjectApi.list で取得する。
-      const [flowRes, subProjectsData, folderRes, gapRes] = await Promise.all([
+      const [flowRes, subProjectsData, gapRes] = await Promise.all([
         fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, {
           headers: authHeaders(),
         }),
         subProjectApi.list(projectId).catch(() => [] as SubProject[]),
-        fetch(`${API_URL}/api/projects/${projectId}/flow-folders`, {
-          headers: authHeaders(),
-        }),
         fetch(`${API_URL}/api/projects/${projectId}/gap-items`, {
           headers: authHeaders(),
         }),
@@ -157,10 +175,6 @@ export default function AsisManagementPage() {
         setError('業務フローの読み込みに失敗しました');
       }
       setSubProjects(Array.isArray(subProjectsData) ? subProjectsData : []);
-      if (folderRes.ok) {
-        const data = await folderRes.json();
-        setFolders(Array.isArray(data) ? data : []);
-      }
       if (gapRes.ok) {
         const data = await gapRes.json();
         setGapItems(Array.isArray(data) ? data : []);
@@ -188,14 +202,25 @@ export default function AsisManagementPage() {
     [subProjects]
   );
 
-  const subProjectName = useCallback(
-    (id?: string | null) => subProjects.find((s) => s.id === id)?.name ?? null,
-    [subProjects]
-  );
-  const folderName = useCallback(
-    (id?: string | null) => folders.find((f) => f.id === id)?.name ?? null,
-    [folders]
-  );
+  // 領域でグループ分割した一覧を作る。flatSubProjects の順に各領域の配下フローを集め、
+  // 最後に「未分類（領域なし）」を置く。フローが 0 件の領域セクションは出さない。
+  const flowGroups = useMemo(() => {
+    const assigned = new Set<string>();
+    const groups = flatSubProjects
+      .map(({ sub, depth }) => ({
+        sub,
+        depth,
+        flows: asisFlows.filter((f) => {
+          const match = f.subProjectId === sub.id;
+          if (match) assigned.add(f.id);
+          return match;
+        }),
+      }))
+      .filter((g) => g.flows.length > 0);
+    // 領域が無い / 一覧に存在しない領域を指すフローは「未分類」へ。
+    const unassigned = asisFlows.filter((f) => !assigned.has(f.id));
+    return { groups, unassigned };
+  }, [flatSubProjects, asisFlows]);
 
   const openFlow = (id: string) =>
     router.push(`/dashboard/projects/${projectId}/flows/${id}`);
@@ -293,11 +318,11 @@ export default function AsisManagementPage() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Link href={`/dashboard/projects/${projectId}/flows`}>
-                  <Button variant="outline" size="sm" className="gap-1.5">
-                    <Folder className="h-4 w-4" />
-                    フォルダ
-                  </Button>
+                <Link
+                  href={`/dashboard/projects/${projectId}/domains`}
+                  className="text-xs text-amber-600 hover:underline"
+                >
+                  領域を管理
                 </Link>
                 <Link href={`/dashboard/projects/${projectId}/flows/hierarchy`}>
                   <Button variant="outline" size="sm" className="gap-1.5">
@@ -325,43 +350,57 @@ export default function AsisManagementPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {asisFlows.map((flow) => {
-                  const sp = subProjectName(flow.subProjectId);
-                  const fd = folderName(flow.folderId);
-                  return (
-                    <button
-                      key={flow.id}
-                      type="button"
-                      onClick={() => openFlow(flow.id)}
-                      className="group flex w-full flex-col items-start gap-2 rounded-lg border border-gray-200 bg-white p-4 text-left transition-colors hover:border-amber-400 hover:bg-amber-50/40"
+              <div className="space-y-6">
+                {/* 領域（SubProject）ごとにグループ分割して表示する。 */}
+                {flowGroups.groups.map(({ sub, depth, flows: groupFlows }) => (
+                  <div key={sub.id} className="space-y-3">
+                    <h3
+                      className="flex items-center gap-2 text-sm font-semibold text-foreground"
+                      // depth に応じて左インデント（サブ領域を一段下げる）。
+                      style={{ paddingLeft: `${depth * 1.25}rem` }}
                     >
-                      <div className="flex w-full items-start justify-between gap-2">
-                        <span className="flex items-center gap-2 font-medium text-foreground">
-                          <GitBranch className="h-4 w-4 shrink-0 text-amber-600" />
-                          <span className="truncate">{flow.name}</span>
-                        </span>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 group-hover:text-amber-600" />
-                      </div>
-                      {(sp || fd) && (
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                          {fd && (
-                            <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5">
-                              <Folder className="h-3 w-3" />
-                              {fd}
-                            </span>
-                          )}
-                          {sp && (
-                            <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5">
-                              <Layers className="h-3 w-3" />
-                              {sp}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
+                      <Layers className="h-4 w-4 shrink-0 text-amber-600" />
+                      {sub.name}
+                      <span className="text-xs font-normal text-muted-foreground">
+                        （{groupFlows.length}）
+                      </span>
+                    </h3>
+                    <div
+                      className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                      style={{ paddingLeft: `${depth * 1.25}rem` }}
+                    >
+                      {groupFlows.map((flow) => (
+                        <FlowCard
+                          key={flow.id}
+                          flow={flow}
+                          onOpen={() => openFlow(flow.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {/* 未分類（領域なし／一覧に無い領域を指すフロー）。0 件なら出さない。 */}
+                {flowGroups.unassigned.length > 0 && (
+                  <div className="space-y-3">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                      <Layers className="h-4 w-4 shrink-0 text-gray-400" />
+                      未分類（領域なし）
+                      <span className="text-xs font-normal text-muted-foreground">
+                        （{flowGroups.unassigned.length}）
+                      </span>
+                    </h3>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {flowGroups.unassigned.map((flow) => (
+                        <FlowCard
+                          key={flow.id}
+                          flow={flow}
+                          onOpen={() => openFlow(flow.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </section>
