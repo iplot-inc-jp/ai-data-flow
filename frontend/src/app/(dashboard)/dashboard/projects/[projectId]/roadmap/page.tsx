@@ -5,17 +5,16 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
-import { Loader2, Map, GitCompareArrows, Check, Save } from 'lucide-react';
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  type DropResult,
+} from '@hello-pangea/dnd';
+import { Loader2, Map, GitCompareArrows, Check, Save, GripVertical } from 'lucide-react';
 import { gapLedgerApi } from '@/lib/gap-ledger';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
@@ -191,6 +190,21 @@ export default function RoadmapPage() {
     [persist],
   );
 
+  // カンバン：カードを別フェーズ列へドロップしたとき、そのGAPの phase を
+  // destination のフェーズに更新してオートセーブ（updateAssignment 経由 → gapLedgerApi.save）。
+  const handleDragEnd = useCallback(
+    (result: DropResult) => {
+      const { destination, source, draggableId } = result;
+      if (!destination) return; // 列外へのドロップは無視
+      const newPhase = destination.droppableId;
+      if (!PHASES.includes(newPhase)) return;
+      // 同一フェーズ列内（並べ替えのみ）は永続化しても意味がないので no-op
+      if (destination.droppableId === source.droppableId) return;
+      updateAssignment(draggableId, { phase: newPhase });
+    },
+    [updateAssignment],
+  );
+
   // 全件まとめて保存（保存ボタン）
   const handleSaveAll = useCallback(() => {
     void persist(assignments);
@@ -231,8 +245,8 @@ export default function RoadmapPage() {
             ロードマップ
           </span>
         }
-        description="GAP（課題）をフェーズ別に並べて推進計画を作る"
-        help="GAP（課題）をフェーズに割り当てて段階的なロードマップ化します。各カードのフェーズを選び直すと、その課題を Quick Win / Phase2 / Phase3 に振り分けて推進計画にできます。"
+        description="GAP（課題）をフェーズ別に並べて推進計画を作る（カンバン）"
+        help="GAP（課題）をフェーズに割り当てて段階的なロードマップ化します。各カードを別のフェーズ列へドラッグすると、その課題を Quick Win / Phase2 / Phase3 に振り分けて推進計画にできます。"
         backHref={`/dashboard/projects/${projectId}`}
         actions={
           <>
@@ -241,7 +255,7 @@ export default function RoadmapPage() {
               onOpenChange={setHowToOpen}
               steps={[
                 'このページは GAP（課題一覧）からロードマップを作ります（GAPからロードマップ作り）。',
-                '各カードはひとつの GAP。カード上の「フェーズ」を選ぶと、3ヶ月以内(Quick Win)／1年以内(Phase2)／3年以内(Phase3) の列に移動します。',
+                '各カードはひとつの GAP。カードを別の列へドラッグ＆ドロップすると、3ヶ月以内(Quick Win)／1年以内(Phase2)／3年以内(Phase3) のフェーズに振り分けられます。',
                 '期日/目標（target）とメモを入力して、いつまでに何を実現するかを書き込みます。',
                 'カードは各列で 優先度（高→中→低）→ 並び順 でソートされます。',
                 '変更は自動保存されます。手動で保存したいときは「保存」を押してください。',
@@ -303,104 +317,125 @@ export default function RoadmapPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {PHASES.map((phase) => {
-            const cards = columns[phase] ?? [];
-            const style = phaseStyle[phase] ?? phaseStyle[UNASSIGNED];
-            return (
-              <div key={phase} className="flex flex-col">
-                {/* 列ヘッダー */}
-                <div
-                  className={`flex items-center justify-between rounded-t-lg border px-3 py-2 ${style.head}`}
-                >
-                  <span className="flex items-center gap-2 text-sm font-semibold">
-                    <span className={`h-2 w-2 rounded-full ${style.dot}`} />
-                    {phase}
-                  </span>
-                  <span className="text-xs font-medium opacity-80">{cards.length}件</span>
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {PHASES.map((phase) => {
+              const cards = columns[phase] ?? [];
+              const style = phaseStyle[phase] ?? phaseStyle[UNASSIGNED];
+              return (
+                <div key={phase} className="flex flex-col">
+                  {/* 列ヘッダー */}
+                  <div
+                    className={`flex items-center justify-between rounded-t-lg border px-3 py-2 ${style.head}`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold">
+                      <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+                      {phase}
+                    </span>
+                    <span className="text-xs font-medium opacity-80">{cards.length}件</span>
+                  </div>
+                  {/* 列ボディ（ドロップ先） */}
+                  <Droppable droppableId={phase}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className={`flex-1 space-y-3 rounded-b-lg border border-t-0 p-3 min-h-[120px] transition-colors ${
+                          snapshot.isDraggingOver
+                            ? 'border-blue-300 bg-blue-50/60'
+                            : 'border-gray-200 bg-gray-50/50'
+                        }`}
+                      >
+                        {cards.length === 0 && !snapshot.isDraggingOver && (
+                          <p className="py-6 text-center text-xs text-gray-400">
+                            ここにカードをドラッグ
+                          </p>
+                        )}
+                        {cards.map(({ gap, row }, index) => {
+                          const pm = priorityMeta[gap.priority] ?? priorityMeta.MEDIUM;
+                          return (
+                            <Draggable key={gap.id} draggableId={gap.id} index={index}>
+                              {(dragProvided, dragSnapshot) => (
+                                <Card
+                                  ref={dragProvided.innerRef}
+                                  {...dragProvided.draggableProps}
+                                  style={
+                                    dragProvided.draggableProps.style as React.CSSProperties
+                                  }
+                                  className={`bg-white shadow-sm transition-shadow ${
+                                    dragSnapshot.isDragging
+                                      ? 'border-blue-300 shadow-md ring-1 ring-blue-200'
+                                      : 'border-gray-200'
+                                  }`}
+                                >
+                                  <CardContent className="p-3 space-y-2">
+                                    {/* タイトル + ドラッグハンドル + 優先度バッジ */}
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex items-start gap-1.5 min-w-0">
+                                        <span
+                                          {...dragProvided.dragHandleProps}
+                                          className="mt-0.5 -ml-1 shrink-0 cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing"
+                                          title="ドラッグして別フェーズへ移動"
+                                        >
+                                          <GripVertical className="h-4 w-4" />
+                                        </span>
+                                        <p className="text-sm font-medium text-gray-900 leading-snug">
+                                          {gap.businessArea}
+                                        </p>
+                                      </div>
+                                      <span
+                                        className={`flex-shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${pm.badge}`}
+                                      >
+                                        {pm.label}
+                                      </span>
+                                    </div>
+                                    {gap.gapDescription && (
+                                      <p className="text-xs text-gray-500 leading-snug line-clamp-3">
+                                        {gap.gapDescription}
+                                      </p>
+                                    )}
+
+                                    {/* 期日/目標（target） */}
+                                    <input
+                                      defaultValue={row.target}
+                                      placeholder="期日/目標（例: 9月末までに自動化）"
+                                      onBlur={(e) => {
+                                        const v = e.target.value;
+                                        if (v !== (row.target ?? '')) {
+                                          updateAssignment(gap.id, { target: v });
+                                        }
+                                      }}
+                                      className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 outline-none focus:ring-1 focus:ring-blue-300 placeholder:text-gray-300"
+                                    />
+
+                                    {/* メモ */}
+                                    <textarea
+                                      defaultValue={row.note}
+                                      placeholder="メモ"
+                                      rows={2}
+                                      onBlur={(e) => {
+                                        const v = e.target.value;
+                                        if (v !== (row.note ?? '')) {
+                                          updateAssignment(gap.id, { note: v });
+                                        }
+                                      }}
+                                      className="w-full resize-none rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 outline-none focus:ring-1 focus:ring-blue-300 placeholder:text-gray-300"
+                                    />
+                                  </CardContent>
+                                </Card>
+                              )}
+                            </Draggable>
+                          );
+                        })}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
                 </div>
-                {/* 列ボディ */}
-                <div className="flex-1 space-y-3 rounded-b-lg border border-t-0 border-gray-200 bg-gray-50/50 p-3 min-h-[120px]">
-                  {cards.length === 0 ? (
-                    <p className="py-6 text-center text-xs text-gray-400">
-                      ここにカードはありません
-                    </p>
-                  ) : (
-                    cards.map(({ gap, row }) => {
-                      const pm = priorityMeta[gap.priority] ?? priorityMeta.MEDIUM;
-                      return (
-                        <Card key={gap.id} className="bg-white border-gray-200 shadow-sm">
-                          <CardContent className="p-3 space-y-2">
-                            {/* タイトル + 優先度バッジ */}
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="text-sm font-medium text-gray-900 leading-snug">
-                                {gap.businessArea}
-                              </p>
-                              <span
-                                className={`flex-shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${pm.badge}`}
-                              >
-                                {pm.label}
-                              </span>
-                            </div>
-                            {gap.gapDescription && (
-                              <p className="text-xs text-gray-500 leading-snug line-clamp-3">
-                                {gap.gapDescription}
-                              </p>
-                            )}
-
-                            {/* 期日/目標（target） */}
-                            <input
-                              defaultValue={row.target}
-                              placeholder="期日/目標（例: 9月末までに自動化）"
-                              onBlur={(e) => {
-                                const v = e.target.value;
-                                if (v !== (row.target ?? '')) {
-                                  updateAssignment(gap.id, { target: v });
-                                }
-                              }}
-                              className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 outline-none focus:ring-1 focus:ring-blue-300 placeholder:text-gray-300"
-                            />
-
-                            {/* メモ */}
-                            <textarea
-                              defaultValue={row.note}
-                              placeholder="メモ"
-                              rows={2}
-                              onBlur={(e) => {
-                                const v = e.target.value;
-                                if (v !== (row.note ?? '')) {
-                                  updateAssignment(gap.id, { note: v });
-                                }
-                              }}
-                              className="w-full resize-none rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 outline-none focus:ring-1 focus:ring-blue-300 placeholder:text-gray-300"
-                            />
-
-                            {/* フェーズ移動 */}
-                            <Select
-                              value={row.phase}
-                              onValueChange={(v) => updateAssignment(gap.id, { phase: v })}
-                            >
-                              <SelectTrigger className="h-8 bg-white border-gray-300 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent className="bg-white">
-                                {PHASES.map((p) => (
-                                  <SelectItem key={p} value={p} className="text-xs">
-                                    {p}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </CardContent>
-                        </Card>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </DragDropContext>
       )}
     </div>
   );
