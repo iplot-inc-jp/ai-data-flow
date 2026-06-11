@@ -17,6 +17,9 @@ export default class Gantt {
         // 変更（vendor）: destroy() で解除するクリーンアップ関数の置き場
         // （document など外部に登録するリスナーの解除用）。
         this.$destroy_fns = [];
+        // 変更（vendor）: 接続ドラッグ（依存矢印をマウスで引く）の進行状態。
+        // null 以外のとき接続ドラッグ中（bar.js がホバーポップアップを抑止する）。
+        this.connect_drag = null;
         this.setup_wrapper(wrapper);
         this.setup_options(options);
         this.setup_tasks(tasks);
@@ -1565,15 +1568,98 @@ export default class Gantt {
         this.bind_bar_progress();
     }
 
+    // 変更（vendor）: 接続ドラッグの開始。bar.js の接続ハンドル
+    // （バー右端の外側の円）の mousedown から呼ばれる。
+    // SVG 上にマウス追従の一時パス（点線ベジェ: from バー右端中央 → カーソル）を
+    // 描画し、mouseup がいずれかのバー上なら trigger_event('connect',
+    // [fromTaskId, toTaskId]) を発火する。それ以外は一時パスを破棄するだけ。
+    // 自分自身への接続は無視する。Esc でキャンセルできる。
+    start_connect_drag(from_bar, e) {
+        if (this.options.readonly || this.connect_drag) return;
+        this.hide_popup();
+
+        const $from = from_bar.$bar;
+        const start_x = $from.getEndX();
+        const start_y = $from.getY() + $from.getHeight() / 2;
+
+        const path = createSVG('path', {
+            d: `M ${start_x} ${start_y}`,
+            class: 'connect-drag-path',
+            append_to: this.$svg,
+        });
+        this.connect_drag = { from_id: from_bar.task.id, path };
+        // ドラッグ中はハンドルを出しっぱなしにし、コンテナに目印クラスを付ける
+        // （CSS でカーソル crosshair・ドロップ先バーの強調に使う）。
+        from_bar.$connect_handle?.classList?.add('active');
+        this.$container.classList.add('connecting');
+
+        const update_path = (ev) => {
+            const rect = this.$svg.getBoundingClientRect();
+            const x = ev.clientX - rect.left;
+            const y = ev.clientY - rect.top;
+            const c = Math.min(Math.max(Math.abs(x - start_x) / 2, 20), 120);
+            path.setAttribute(
+                'd',
+                `M ${start_x} ${start_y} C ${start_x + c} ${start_y}, ${x - c} ${y}, ${x} ${y}`,
+            );
+        };
+        update_path(e);
+
+        const cleanup = () => {
+            document.removeEventListener('mousemove', on_move);
+            document.removeEventListener('mouseup', on_up);
+            document.removeEventListener('keydown', on_key);
+            path.remove();
+            this.connect_drag = null;
+            from_bar.$connect_handle?.classList?.remove('active');
+            this.$container.classList.remove('connecting');
+            const i = this.$destroy_fns.indexOf(cleanup);
+            if (i !== -1) this.$destroy_fns.splice(i, 1);
+        };
+        const on_move = (ev) => update_path(ev);
+        const on_up = (ev) => {
+            cleanup();
+            // 接続ドラッグの mouseup 直後に発火し得る click（mousedown と
+            // mouseup の共通祖先）でバーの on_click（詳細オープン）が
+            // 走らないよう、次の 1 回だけ抑止する。
+            this.suppress_bar_click = true;
+            // 一時パスとポップアップは pointer-events:none（CSS）なので
+            // elementFromPoint がドロップ先のバー要素を素直に返す。
+            const target = document.elementFromPoint(ev.clientX, ev.clientY);
+            const wrapper = target?.closest?.('.bar-wrapper');
+            const to_id = wrapper?.getAttribute?.('data-id');
+            if (to_id && to_id !== from_bar.task.id) {
+                this.trigger_event('connect', [from_bar.task.id, to_id]);
+            }
+        };
+        const on_key = (ev) => {
+            // preventDefault で「消費済み」を示し、ページ側の全画面 Esc（defaultPrevented
+            // ガード付き）が同時に発火して全画面まで解除されるのを防ぐ。
+            if (ev.key === 'Escape') {
+                ev.preventDefault();
+                cleanup();
+            }
+        };
+        document.addEventListener('mousemove', on_move);
+        document.addEventListener('mouseup', on_up);
+        document.addEventListener('keydown', on_key);
+        // ドラッグ保持中にアンマウントされてもリスナーが残らないようにする。
+        this.$destroy_fns.push(cleanup);
+    }
+
     bind_bar_progress() {
         let x_on_start = 0;
         let is_resizing = null;
         let bar = null;
         let $bar_progress = null;
         let $bar = null;
+        // 変更（vendor）: ドラッグ中に一度でも動いたか（finaldx が最終的に 0 に
+        // 戻っても「実ドラッグ」なら直後の click を抑止するための記録）。
+        let moved = false;
 
         $.on(this.$svg, 'mousedown', '.handle.progress', (e, handle) => {
             is_resizing = true;
+            moved = false;
             x_on_start = e.offsetX || e.layerX;
 
             const $bar_wrapper = $.closest('.bar-wrapper', handle);
@@ -1628,6 +1714,7 @@ export default class Gantt {
             if (dx < $bar_progress.min_dx) {
                 dx = $bar_progress.min_dx;
             }
+            if (dx !== 0) moved = true;
 
             $bar_progress.setAttribute('width', $bar_progress.owidth + dx);
             $.attr(bar.$handle_progress, 'cx', $bar_progress.getEndX());
@@ -1635,21 +1722,33 @@ export default class Gantt {
             $bar_progress.finaldx = dx;
         });
 
-        $.on(this.$svg, 'mouseup', () => {
+        // 変更（vendor）: 進捗ドラッグの確定は $svg 上ではなく document の
+        // mouseup で行う（SVG の外で離すと is_resizing / finaldx が残留し、
+        // 次のクリックを汚染して誤った progress_change（誤保存）が発火して
+        // いたのを解消）。リスナーは $destroy_fns で解除する。
+        const on_progress_mouseup = () => {
+            if (!is_resizing) return;
             is_resizing = false;
-            if (!($bar_progress && $bar_progress.finaldx)) return;
 
             // 変更（vendor）: 進捗ハンドルのドラッグ直後に発火する click でも
             // on_click（詳細オープン等）を発火させない（次の 1 回だけ抑止）。
-            this.suppress_bar_click = true;
+            // finaldx が 0 に戻っていても、実ドラッグなら抑止する。
+            if (moved) this.suppress_bar_click = true;
+            moved = false;
 
-            $bar_progress.finaldx = 0;
-            bar.progress_changed();
-            bar.set_action_completed();
+            if ($bar_progress && $bar_progress.finaldx) {
+                $bar_progress.finaldx = 0;
+                bar.progress_changed();
+                bar.set_action_completed();
+            }
             bar = null;
             $bar_progress = null;
             $bar = null;
-        });
+        };
+        document.addEventListener('mouseup', on_progress_mouseup);
+        this.$destroy_fns.push(() =>
+            document.removeEventListener('mouseup', on_progress_mouseup),
+        );
     }
 
     get_all_dependent_tasks(task_id) {

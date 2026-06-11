@@ -46,17 +46,43 @@
     ブラウザが発火する click で `on_click` が走らないよう、一回限りの抑止フラグ
     `suppress_bar_click` を追加。document mouseup（ドロップ確定）で
     「実ドラッグ（10px 超）またはスナップで位置/幅が変わった」場合、および
-    進捗ハンドルの mouseup（finaldx あり）で立て、bar.js の click ハンドラが
+    進捗ハンドルの mouseup（実ドラッグあり）で立て、bar.js の click ハンドラが
     冒頭で消費して return する。バーの mousedown で毎回リセットするため、
     click が発火しなかった場合（バー外で離した等）でも次の純クリックは通る。
-    これにより「移動なしの純クリック」のときだけ on_click（詳細オープン・
-    接続モードの 2 クリック接続）が発火する。
+    これにより「移動なしの純クリック」のときだけ on_click（詳細オープン）が
+    発火する。
+12. 接続ドラッグ（依存矢印のマウス作成）を追加: `start_connect_drag(bar, e)`。
+    bar.js の接続ハンドル（バー右端の外側の円）の mousedown から呼ばれ、
+    SVG 上にマウス追従の一時パス（点線ベジェ `.connect-drag-path`,
+    pointer-events:none）を描画する。document の mousemove で更新し、
+    mouseup が `document.elementFromPoint` でいずれかの `.bar-wrapper` 上なら
+    `trigger_event('connect', [fromTaskId, toTaskId])` を発火（`on_connect`
+    オプションで受ける）。それ以外は一時パスを破棄するだけ。自分自身への
+    接続は無視。Esc でキャンセル。ドラッグ中は `connect_drag` を立てて
+    bar.js のホバーポップアップを抑止し、`$container` に `connecting` クラスを
+    付ける（CSS で crosshair・ドロップ先強調）。mouseup では
+    `suppress_bar_click` も立ててバー click の誤発火を防ぐ。document への
+    リスナーは終了時に解除し、ドラッグ保持中のアンマウントに備えて
+    `$destroy_fns` にも解除関数を登録する。
+13. 進捗ドラッグの確定を `$svg` の mouseup ではなく document の mouseup で
+    行うよう変更（`$destroy_fns` で解除）。SVG の外で離すと is_resizing /
+    finaldx が残留し、次のクリックを汚染して誤った progress_change（誤保存）が
+    発火していたのを解消。また mousemove で一度でも動いた（`moved`）場合は
+    finaldx が 0 に戻っていても直後の click を 1 回だけ抑止する。
 
 ### bar.js
 - `update_bar_position()`: ドラッグ中（`gantt.dragging_in_progress`）は
   `date_changed()` を呼ばない（date_change はドロップ確定時に 1 回だけ発火）。
 - `setup_click_event()` の click ハンドラ: `gantt.suppress_bar_click` が
   立っていたら消費して return（上記 index.js 11. のドラッグ後 click 抑止）。
+- `draw_connect_handle()` を追加: バー右端の外側 6px（中心 = 右端 + 10px）に
+  直径 8px の円 `.connect-handle` を描画（hover で表示は CSS）。mousedown で
+  `e.stopPropagation()` してバー移動/リサイズを開始させず、
+  `gantt.start_connect_drag()`（index.js 12.）を呼ぶ。
+  `update_handle_position()` でバー移動/リサイズに追従させる。
+- `show_popup` 呼び出し（click / hover の両方）に `clientX` / `clientY` を追加
+  （popup.js のビューポート基準配置で使う）。接続ドラッグ中
+  （`gantt.connect_drag`）はホバーポップアップを出さない。
 
 ### arrow.js
 - `calculate_path()` を書き換え: 矢印は from バーの「右端中央」から出て
@@ -65,13 +91,31 @@
   下に膨らませる。`data-from` / `data-to` 属性と矢じり（m -5 -5 l 5 5 l -5 5）は
   従来どおり維持（ページ側の矢印クリック削除が依存）。
 
+### popup.js
+- `show()` の配置をビューポート基準に変更: bar.js から渡される
+  `clientX` / `clientY` を使い、CSS 側で `position:fixed` にした
+  `.popup-wrapper` の left/top を設定する。既定はカーソルの右上で、
+  右端/下端で画面からはみ出す場合は左/上に反転する。これにより
+  `.gantt-container` の overflow に切られない。サイズ計測のため
+  hide 解除 → 計測 → 配置の順に変更。
+
 ### defaults.js
 - `infinite_padding` の既定値を `true` → `false` に変更
   （端に近づくと列を継ぎ足して scrollLeft を付け替える挙動が
   「瞬間移動・ズレ」の原因だったため）。
 
+### ../frappe-gantt.vendor.css（追記分）
+- `.popup-wrapper` を `position:fixed; pointer-events:none; z-index:9999` で
+  上書き。pointer-events:none は「ポップアップがカーソル直下に出て
+  バーの mouseleave → 消える → mouseenter…」のチラつきループを断つ。
+- 接続ハンドル `.connect-handle`（バー hover かドラッグ中のみ表示、
+  cursor:crosshair）、接続ドラッグの一時パス `.connect-drag-path`
+  （点線・pointer-events:none）、ドラッグ中の `.gantt-container.connecting`
+  （crosshair＋ドロップ先バー強調）を追加。
+  旧「2クリック接続モード」用の `.connect-mode` / `.connect-source` は撤去。
+
 ### 変更なし
-- date_utils.js / svg_utils.js / popup.js は v1.2.2 のまま。
+- date_utils.js / svg_utils.js は v1.2.2 のまま。
 
 ## ライセンス（MIT）
 

@@ -101,6 +101,7 @@ export default class Bar {
         }
         this.draw_label();
         this.draw_resize_handles();
+        this.draw_connect_handle();
 
         if (this.task.thumbnail) {
             this.draw_thumbnail();
@@ -330,6 +331,36 @@ export default class Bar {
         }
     }
 
+    // 変更（vendor）: 依存（矢印）をドラッグで引くための接続ハンドル。
+    // バー右端の外側 6px（中心 = 右端 + 10px）に直径 8px の円を置き、
+    // hover で表示（CSS）。mousedown で接続ドラッグを開始する
+    // （stopPropagation で $svg 側の委譲 mousedown ＝バー移動/リサイズの
+    // 開始を抑止する）。既存のリサイズ右ハンドル（バー右端上の細長い rect）
+    // とは位置が重ならない。
+    draw_connect_handle() {
+        if (this.invalid || this.gantt.options.readonly) return;
+        const bar = this.$bar;
+        this.$connect_handle = createSVG('circle', {
+            cx: bar.getEndX() + 10,
+            cy: bar.getY() + this.height / 2,
+            r: 4,
+            class: 'connect-handle',
+            append_to: this.handle_group,
+        });
+        $.on(this.$connect_handle, 'mouseenter', () =>
+            this.$connect_handle.classList.add('active'),
+        );
+        $.on(this.$connect_handle, 'mouseleave', () =>
+            this.$connect_handle.classList.remove('active'),
+        );
+        $.on(this.$connect_handle, 'mousedown', (e) => {
+            if (e.button !== 0) return; // 左ボタンのみ（右/中クリックで接続を始めない）
+            e.stopPropagation();
+            e.preventDefault();
+            this.gantt.start_connect_drag(this, e);
+        });
+    }
+
     bind() {
         if (this.invalid) return;
         this.setup_click_event();
@@ -354,9 +385,13 @@ export default class Bar {
                     if (cx > posX - 1 && cx < posX + 1) return;
                     if (this.gantt.bar_being_dragged) return;
                 }
+                // 変更（vendor）: popup は position:fixed（ビューポート基準）で
+                // 出すため、カーソルの clientX/clientY も渡す（popup.js 参照）。
                 this.gantt.show_popup({
                     x: e.offsetX || e.layerX,
                     y: e.offsetY || e.layerY,
+                    clientX: e.clientX,
+                    clientY: e.clientY,
                     task: this.task,
                     target: this.$bar,
                 });
@@ -365,10 +400,16 @@ export default class Bar {
         let timeout;
         $.on(this.group, 'mouseenter', (e) => {
             timeout = setTimeout(() => {
-                if (this.gantt.options.popup_on === 'hover')
+                // 変更（vendor）: 接続ドラッグ中はホバーポップアップを出さない。
+                if (
+                    this.gantt.options.popup_on === 'hover' &&
+                    !this.gantt.connect_drag
+                )
                     this.gantt.show_popup({
                         x: e.offsetX || e.layerX,
                         y: e.offsetY || e.layerY,
+                        clientX: e.clientX,
+                        clientY: e.clientY,
                         task: this.task,
                         target: this.$bar,
                     });
@@ -743,6 +784,9 @@ export default class Bar {
             .setAttribute('x', bar.getEndX());
         const handle = this.group.querySelector('.handle.progress');
         handle && handle.setAttribute('cx', this.$bar_progress.getEndX());
+        // 変更（vendor）: 接続ハンドル（バー右端の外側の円）も追従させる。
+        const connect = this.group.querySelector('.connect-handle');
+        connect && connect.setAttribute('cx', bar.getEndX() + 10);
     }
 
     update_arrow_position() {

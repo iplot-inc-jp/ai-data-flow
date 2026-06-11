@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -28,11 +28,16 @@ import {
   Maximize2,
   Minimize2,
   ExternalLink,
+  ChevronDown,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import {
   tasksApi,
   buildTaskTree,
   computeWbsNumbers,
+  flattenTaskTree,
   collectDescendantIds,
   TASK_STATUSES,
   TASK_PRIORITIES,
@@ -42,6 +47,7 @@ import {
   type TaskDependency,
   type TaskStatus,
   type TaskPriority,
+  type TaskTreeNode,
 } from '@/lib/tasks';
 import {
   mapTasksToFrappe,
@@ -118,9 +124,11 @@ export default function GanttPage() {
   // 「先行に追加」プルダウンの選択値。
   const [pickPredId, setPickPredId] = useState<string>('');
 
-  // マウスでの依存（矢印）作成: 接続モードと、選択済みの先行タスク。
-  const [connectMode, setConnectMode] = useState(false);
-  const [pendingFromId, setPendingFromId] = useState<string | null>(null);
+  // WBS 左タスクツリーパネル: パネル自体の開閉と、折りたたみ中の親タスク id 集合。
+  const [wbsPanelOpen, setWbsPanelOpen] = useState(true);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  // 「表示階層」セレクタの表示値（'' は未選択）。
+  const [depthValue, setDepthValue] = useState('');
 
   // ガントカードの全画面表示トグル（他ページの全画面と同じ作法）。
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -130,6 +138,51 @@ export default function GanttPage() {
   const [sidebarForm, setSidebarForm] = useState<SidebarForm>(emptySidebarForm);
   const [sidebarSaving, setSidebarSaving] = useState(false);
   const [sidebarError, setSidebarError] = useState<string | null>(null);
+  // バックドロップの即閉じ（バーをダブルクリックした 2 打目で閉じる等）対策:
+  // 開いた直後 300ms は閉じない＋mousedown がバックドロップ上で始まったときだけ閉じる。
+  const sidebarOpenedAtRef = useRef(0);
+  const backdropMouseDownRef = useRef(false);
+
+  // ツリーの開閉状態は localStorage にプロジェクト毎キーで保持する。
+  const wbsCollapseStorageKey = `gantt-wbs-collapsed:${projectId}`;
+  const wbsPanelStorageKey = `gantt-wbs-panel:${projectId}`;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(wbsCollapseStorageKey);
+      if (raw) setCollapsedIds(new Set(JSON.parse(raw) as string[]));
+      const panel = localStorage.getItem(wbsPanelStorageKey);
+      if (panel != null) setWbsPanelOpen(panel !== 'closed');
+    } catch {
+      // localStorage 不可（プライベートモード等）は既定値のまま。
+    }
+  }, [wbsCollapseStorageKey, wbsPanelStorageKey]);
+
+  const updateCollapsed = useCallback(
+    (next: Set<string>) => {
+      setCollapsedIds(next);
+      try {
+        localStorage.setItem(
+          wbsCollapseStorageKey,
+          JSON.stringify(Array.from(next))
+        );
+      } catch {
+        // 保存失敗は無視（表示状態は維持される）。
+      }
+    },
+    [wbsCollapseStorageKey]
+  );
+
+  const toggleWbsPanel = useCallback(() => {
+    setWbsPanelOpen((open) => {
+      try {
+        localStorage.setItem(wbsPanelStorageKey, open ? 'closed' : 'open');
+      } catch {
+        // 保存失敗は無視。
+      }
+      return !open;
+    });
+  }, [wbsPanelStorageKey]);
 
   // ---------------------------------------------------------------------
   // データ取得
@@ -161,6 +214,99 @@ export default function GanttPage() {
   // WBS 番号・表示順（依存関係パネルのラベル・並び用）。
   const tree = useMemo(() => buildTaskTree(tasks), [tasks]);
   const wbs = useMemo(() => computeWbsNumbers(tree), [tree]);
+
+  // ---------------------------------------------------------------------
+  // WBS 左タスクツリー（折りたたみはツリーとガント両方に効く）
+  // ---------------------------------------------------------------------
+
+  // 折りたたまれた親の子孫 id（ツリーからもガントからも非表示にする）。
+  const hiddenTaskIds = useMemo(() => {
+    const hidden = new Set<string>();
+    collapsedIds.forEach((id) => {
+      collectDescendantIds(tasks, id).forEach((d) => hidden.add(d));
+    });
+    return hidden;
+  }, [tasks, collapsedIds]);
+
+  // ガントへ渡す表示タスク。非表示タスクは依存（矢印）の参照からも取り除く
+  // （vendor はドラッグ時に依存バーの位置を引くため、欠けた id 参照が残ると壊れる）。
+  const visibleFrappeTasks = useMemo(() => {
+    if (hiddenTaskIds.size === 0) return frappeTasks;
+    return frappeTasks
+      .filter((t) => !hiddenTaskIds.has(t.id))
+      .map((t) => {
+        const depsRaw = t.dependencies;
+        const deps =
+          typeof depsRaw === 'string'
+            ? depsRaw.split(',').filter(Boolean)
+            : depsRaw ?? [];
+        const kept = deps.filter((d) => !hiddenTaskIds.has(d));
+        if (kept.length === deps.length) return t;
+        return { ...t, dependencies: kept.join(',') };
+      });
+  }, [frappeTasks, hiddenTaskIds]);
+
+  // ツリーパネルに描画する行（折りたたまれた親の子孫は出さない）。
+  const wbsRows = useMemo(() => {
+    const rows: TaskTreeNode[] = [];
+    const walk = (nodes: TaskTreeNode[]) => {
+      for (const n of nodes) {
+        rows.push(n);
+        if (n.children.length > 0 && !collapsedIds.has(n.id)) walk(n.children);
+      }
+    };
+    walk(tree);
+    return rows;
+  }, [tree, collapsedIds]);
+
+  // 子を持つタスク id（すべて折りたたみ・表示階層の対象）。
+  const parentTaskIds = useMemo(
+    () =>
+      flattenTaskTree(tree)
+        .filter((n) => n.children.length > 0)
+        .map((n) => n.id),
+    [tree]
+  );
+
+  const expandAll = useCallback(() => {
+    setDepthValue('all');
+    updateCollapsed(new Set());
+  }, [updateCollapsed]);
+
+  const collapseAll = useCallback(() => {
+    setDepthValue('1');
+    updateCollapsed(new Set(parentTaskIds));
+  }, [parentTaskIds, updateCollapsed]);
+
+  // 表示階層セレクタ: 選んだ深さ（1/2/3/全部）まで展開し、それ以深は折りたたむ。
+  const applyDepth = useCallback(
+    (value: string) => {
+      setDepthValue(value);
+      if (value === 'all') {
+        updateCollapsed(new Set());
+        return;
+      }
+      const depth = Number(value);
+      if (!Number.isFinite(depth) || depth < 1) return;
+      const next = new Set(
+        flattenTaskTree(tree)
+          .filter((n) => n.children.length > 0 && n.depth >= depth - 1)
+          .map((n) => n.id)
+      );
+      updateCollapsed(next);
+    },
+    [tree, updateCollapsed]
+  );
+
+  const toggleCollapse = useCallback(
+    (id: string) => {
+      const next = new Set(Array.from(collapsedIds));
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      updateCollapsed(next);
+    },
+    [collapsedIds, updateCollapsed]
+  );
 
   // WBS 表示順に並べた一覧（id / 表示ラベル）。
   const orderedTaskList = useMemo(() => {
@@ -249,6 +395,7 @@ export default function GanttPage() {
           t.estimatedHours != null ? String(t.estimatedHours) : '',
       });
       setSidebarError(null);
+      sidebarOpenedAtRef.current = Date.now();
       setSelectedTaskId(id);
     },
     [tasks]
@@ -298,38 +445,27 @@ export default function GanttPage() {
     [tasks, selectedTaskId]
   );
 
-  // バークリック。接続モード OFF なら編集サイドバー、ON なら矢印を引く 2 クリック操作。
-  const handleClick = useCallback(
-    (id: string) => {
-      // 通常モード: 右側の編集サイドバーを開く（ページ遷移しない）。
-      if (!connectMode) {
-        openTaskSidebar(id);
-        return;
-      }
-      // 接続モード 1 クリック目: 先行タスクとして選択。
-      if (!pendingFromId) {
-        setPendingFromId(id);
-        return;
-      }
-      // 同じバーをもう一度クリック: 取消。
-      if (pendingFromId === id) {
-        setPendingFromId(null);
-        return;
-      }
-      // 2 クリック目（別バー）: 先行(pendingFromId)→後続(id) の依存を作成。
-      const from = pendingFromId;
-      const to = id;
-      setPendingFromId(null);
+  // 再取得の結果、編集中のタスク自体が消えていたら選択も解除する
+  // （selectedTaskId だけが残って次回の開閉判定を汚さないように）。
+  useEffect(() => {
+    if (selectedTaskId && !selectedTask) setSelectedTaskId(null);
+  }, [selectedTaskId, selectedTask]);
+
+  // 接続ドラッグ成立（バー右端の丸ハンドル→相手バーで離す）:
+  // 先行(fromId)→後続(toId) の依存を作成する。
+  const handleConnect = useCallback(
+    (fromId: string, toId: string) => {
+      if (fromId === toId) return;
       // 同一依存が既にあれば何もしない（重複防止）。逆向きの重複も防ぐ。
       const exists = dependencies.some(
         (d) =>
-          (d.predecessorId === from && d.successorId === to) ||
-          (d.predecessorId === to && d.successorId === from)
+          (d.predecessorId === fromId && d.successorId === toId) ||
+          (d.predecessorId === toId && d.successorId === fromId)
       );
       if (exists) return;
       void (async () => {
         try {
-          await tasksApi.addDep(to, from);
+          await tasksApi.addDep(toId, fromId);
           await fetchAll();
         } catch (err) {
           console.error('Failed to add dependency:', err);
@@ -337,16 +473,8 @@ export default function GanttPage() {
         }
       })();
     },
-    [connectMode, pendingFromId, dependencies, openTaskSidebar, fetchAll]
+    [dependencies, fetchAll]
   );
-
-  // 接続モードのトグル。OFF にするときは選択中の先行も解除する。
-  const toggleConnectMode = useCallback(() => {
-    setConnectMode((on) => {
-      if (on) setPendingFromId(null);
-      return !on;
-    });
-  }, []);
 
   // 矢印クリック -> その依存を削除（確認あり）。
   const handleArrowClick = useCallback(
@@ -382,24 +510,13 @@ export default function GanttPage() {
     [depTaskId, fetchAll]
   );
 
-  // ESC で接続モードを終了（選択中の先行も解除）。
-  useEffect(() => {
-    if (!connectMode) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setPendingFromId(null);
-        setConnectMode(false);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [connectMode]);
-
   // ESC で全画面を解除（入力欄フォーカス中は無視）。他ページの全画面と同じ作法。
   // 編集サイドバーが開いている間は、ESC はまずサイドバーを閉じる（下の effect）に譲る。
   useEffect(() => {
     if (!isFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
+      // Radix Select 等が処理済みの Esc（ドロップダウンを閉じる）とは衝突させない。
+      if (e.defaultPrevented) return;
       if (e.key !== 'Escape') return;
       if (selectedTaskId) return;
       const t = e.target as HTMLElement | null;
@@ -422,6 +539,8 @@ export default function GanttPage() {
   useEffect(() => {
     if (!selectedTaskId) return;
     const onKey = (e: KeyboardEvent) => {
+      // Radix Select の Esc（ドロップダウンを閉じる）とは衝突させない。
+      if (e.defaultPrevented) return;
       if (e.key !== 'Escape') return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
@@ -522,8 +641,8 @@ export default function GanttPage() {
             WBS / ガントチャート
           </span>
         }
-        description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗を編集できます（変更は即保存）。「依存を追加」ボタンの接続モードでバーを2回クリックすると矢印（依存）が引け、矢印クリックで削除できます。親子関係・依存は下のパネルでも編集できます。"
-        help="左の WBS 一覧と右のタイムラインが同じ行で並びます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。マウスでの依存編集は、(1)「依存を追加」ボタンで接続モードにし先行→後続の順にバーを2クリックして矢印を引く、(2) 矢印をクリックすると確認のうえ依存を削除、で行えます。通常モードではバークリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。親子関係（親タスク）は下のパネルのセレクトで変更できます。"
+        description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗を編集できます（変更は即保存）。バー右端の丸ハンドルをドラッグして相手のバーで離すと依存（矢印）が引け、矢印クリックで削除できます。左のタスクツリーで階層の展開/折りたたみもできます。"
+        help="左のタスクツリーと右のタイムラインで構成されます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。マウスでの依存編集は、(1) バー右端に表示される丸い接続ハンドルをドラッグし、先行→後続の向きで相手のバーの上で離すと矢印（依存）が引ける、(2) 矢印をクリックすると確認のうえ依存を削除、で行えます。バークリックやツリーの行クリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。親子関係（親タスク）は下のパネルのセレクトで変更できます。"
         backHref={`/dashboard/projects/${projectId}/tasks`}
         backLabel="タスク管理に戻る"
         actions={
@@ -533,27 +652,15 @@ export default function GanttPage() {
                 'バー本体を左右にドラッグすると、開始日と期限がスライドして即保存されます。',
                 'バーの左右の端を掴んでドラッグすると、開始日／期限だけを伸縮できます。',
                 'バー上の進捗ハンドル（バー右端の小さなつまみ）をドラッグすると進捗％が更新されます。',
-                '「依存を追加」ボタンで接続モードにし、先行タスク→後続タスクの順にバーを2回クリックすると依存（矢印）が引けます（ESC で終了）。',
+                'バー右端の丸い接続ハンドルをドラッグし、後続タスクのバーの上で離すと依存（矢印）が引けます（ESC で中断）。',
                 '依存の矢印をクリックすると、確認のうえその依存を削除できます。',
+                '左のタスクツリーで親タスクの展開/折りたたみができ、折りたたんだ子孫はガントからも隠れます（行クリックで編集サイドバー）。',
                 '親子関係は下のパネルの「親タスク」セレクトで変更できます（依存の追加・削除も同パネルで可能）。',
-                '通常モードではバー本体のクリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。',
+                'バー本体のクリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。',
                 '右上の「日 / 週 / 月」で目盛りの粒度を切り替えられます。',
               ]}
             />
             <ManualButton feature="tasks-gantt" />
-            <Button
-              type="button"
-              variant={connectMode ? 'default' : 'outline'}
-              onClick={toggleConnectMode}
-              className={`gap-1.5 ${
-                connectMode ? 'bg-blue-600 text-white hover:bg-blue-700' : ''
-              }`}
-              title="接続モード: 先行→後続の順にバーを2回クリックして依存（矢印）を引く"
-              aria-pressed={connectMode}
-            >
-              <Link2 className="h-4 w-4" />
-              依存を追加
-            </Button>
             <Link href={`/dashboard/projects/${projectId}/tasks`}>
               <Button variant="outline" className="gap-1.5">
                 <ListTodo className="h-4 w-4" />
@@ -600,16 +707,6 @@ export default function GanttPage() {
         </Card>
       ) : (
         <>
-          {/* 接続モードのヒントバナー */}
-          {connectMode && (
-            <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
-              <Link2 className="h-4 w-4 shrink-0" />
-              <span>
-                先行タスクのバー→後続タスクのバーの順にクリックすると依存(矢印)が引けます。もう一度同じバーで取消、ESC/もう一度ボタンで終了。
-              </span>
-            </div>
-          )}
-
           {/*
             ガントカード。frappe-gantt 自身が内部スクロール（.gantt-container）を
             持つため、外側カードでは overflow-auto を重ねない（二重スクロール＝
@@ -639,28 +736,164 @@ export default function GanttPage() {
             </button>
 
             {/*
-              frappe-gantt（クライアント専用・SSR 無効）。
-              全画面切替でコンテナ幅が変わるので key を変えて再マウントし、
-              新しい幅で確実に再描画させる。全画面時は残り高さいっぱいに広げ、
-              内側の .gantt-container がスクロールする。
+              左: WBS タスクツリーパネル（折りたたみ可） / 右: frappe-gantt。
+              全画面時は残り高さいっぱいに広げ、内側の .gantt-container が
+              スクロールする。ツリーの行とガントの行は独立リスト（1px 単位の
+              行揃えはしない）。
             */}
-            <div
-              key={isFullscreen ? 'fs' : 'normal'}
-              className={`gantt-host ${connectMode ? 'gantt-connect' : ''} ${
-                isFullscreen ? 'min-h-0 flex-1 overflow-auto' : ''
-              }`}
-              style={isFullscreen ? undefined : { minHeight: 420 }}
-            >
-              <FrappeGantt
-                tasks={frappeTasks}
-                viewMode={VIEW_MODE_MAP[zoom]}
-                onDateChange={handleDateChange}
-                onProgressChange={handleProgressChange}
-                onClick={handleClick}
-                onArrowClick={handleArrowClick}
-                mode={connectMode ? 'connect' : 'navigate'}
-                pendingFromId={pendingFromId}
-              />
+            <div className={isFullscreen ? 'flex min-h-0 flex-1' : 'flex'}>
+              {wbsPanelOpen ? (
+                <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50/60">
+                  {/* パネルヘッダー: タイトル＋パネル折りたたみ */}
+                  <div className="flex items-center justify-between gap-1 border-b border-gray-200 px-2 py-1.5">
+                    <span className="text-xs font-semibold text-gray-600">
+                      タスクツリー
+                    </span>
+                    <button
+                      type="button"
+                      onClick={toggleWbsPanel}
+                      className="flex h-6 w-6 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600"
+                      title="ツリーを折りたたむ"
+                      aria-label="ツリーを折りたたむ"
+                    >
+                      <PanelLeftClose className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {/* 展開/折りたたみ操作＋表示階層 */}
+                  <div className="flex flex-wrap items-center gap-1 border-b border-gray-200 px-2 py-1.5">
+                    <button
+                      type="button"
+                      onClick={expandAll}
+                      className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] text-gray-600 transition-colors hover:bg-gray-100"
+                    >
+                      すべて展開
+                    </button>
+                    <button
+                      type="button"
+                      onClick={collapseAll}
+                      className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] text-gray-600 transition-colors hover:bg-gray-100"
+                    >
+                      すべて折りたたみ
+                    </button>
+                    <label className="ml-auto flex items-center gap-1 text-[11px] text-gray-500">
+                      表示階層
+                      <select
+                        value={depthValue}
+                        onChange={(e) => applyDepth(e.target.value)}
+                        className="rounded border border-gray-200 bg-white px-1 py-0.5 text-[11px] text-gray-600"
+                        title="選んだ深さまで展開"
+                      >
+                        <option value="" disabled>
+                          --
+                        </option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="all">全部</option>
+                      </select>
+                    </label>
+                  </div>
+                  {/* ツリー本体 */}
+                  <div className="min-h-0 flex-1 overflow-y-auto py-1">
+                    {wbsRows.map((node) => {
+                      const hasChildren = node.children.length > 0;
+                      const collapsed = collapsedIds.has(node.id);
+                      const doneCount = hasChildren
+                        ? node.children.filter((c) => c.status === 'CLOSED')
+                            .length
+                        : 0;
+                      const num = wbs.get(node.id);
+                      return (
+                        <div
+                          key={node.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openTaskSidebar(node.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') openTaskSidebar(node.id);
+                          }}
+                          className={`flex cursor-pointer items-center gap-1 py-1 pr-2 text-sm transition-colors hover:bg-blue-50 ${
+                            selectedTaskId === node.id ? 'bg-blue-50' : ''
+                          }`}
+                          style={{ paddingLeft: 8 + node.depth * 14 }}
+                          title={node.title}
+                        >
+                          {hasChildren ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCollapse(node.id);
+                              }}
+                              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700"
+                              title={collapsed ? '展開' : '折りたたみ'}
+                              aria-label={collapsed ? '展開' : '折りたたみ'}
+                              aria-expanded={!collapsed}
+                            >
+                              {collapsed ? (
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              ) : (
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="h-4 w-4 shrink-0" />
+                          )}
+                          <span className="min-w-0 truncate text-gray-700">
+                            {num ? `${num} ` : ''}
+                            {node.title}
+                          </span>
+                          {hasChildren && (
+                            <span
+                              className="ml-auto shrink-0 rounded-full bg-gray-200 px-1.5 text-[10px] leading-4 text-gray-600"
+                              title={`直下の子タスク 完了 ${doneCount} / ${node.children.length}`}
+                            >
+                              {doneCount}/{node.children.length}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </aside>
+              ) : (
+                <div className="flex shrink-0 flex-col border-r border-gray-200 bg-gray-50/60">
+                  <button
+                    type="button"
+                    onClick={toggleWbsPanel}
+                    className="flex h-8 w-8 items-center justify-center text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600"
+                    title="タスクツリーを表示"
+                    aria-label="タスクツリーを表示"
+                  >
+                    <PanelLeftOpen className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {/*
+                frappe-gantt（クライアント専用・SSR 無効）。
+                全画面切替・ツリーパネル開閉でコンテナ幅が変わるので key を
+                変えて再マウントし、新しい幅で確実に再描画させる。
+              */}
+              <div
+                key={`${isFullscreen ? 'fs' : 'normal'}-${
+                  wbsPanelOpen ? 'wbs' : 'nowbs'
+                }`}
+                className={`gantt-host min-w-0 flex-1 ${
+                  isFullscreen ? 'min-h-0 overflow-auto' : ''
+                }`}
+                style={isFullscreen ? undefined : { minHeight: 420 }}
+              >
+                <FrappeGantt
+                  tasks={visibleFrappeTasks}
+                  viewMode={VIEW_MODE_MAP[zoom]}
+                  onDateChange={handleDateChange}
+                  onProgressChange={handleProgressChange}
+                  onClick={openTaskSidebar}
+                  onArrowClick={handleArrowClick}
+                  onConnect={handleConnect}
+                />
+              </div>
             </div>
           </Card>
 
@@ -816,10 +1049,25 @@ export default function GanttPage() {
       */}
       {selectedTask && (
         <>
-          {/* 背景クリックで閉じる薄いオーバーレイ */}
+          {/*
+            背景クリックで閉じる薄いオーバーレイ。
+            - mousedown がオーバーレイ上で始まったクリックだけを閉じる対象にする
+              （サイドバー内で押してドラッグし外で離した等では閉じない）。
+            - バーをダブルクリックしたときの 2 打目が開いた直後のオーバーレイに
+              落ちて即閉じしないよう、開後 300ms のクリックは無視する。
+          */}
           <div
             className="fixed inset-0 z-[55] bg-black/20"
-            onClick={closeSidebar}
+            onMouseDown={() => {
+              backdropMouseDownRef.current = true;
+            }}
+            onClick={() => {
+              const started = backdropMouseDownRef.current;
+              backdropMouseDownRef.current = false;
+              if (!started) return;
+              if (Date.now() - sidebarOpenedAtRef.current < 300) return;
+              closeSidebar();
+            }}
             aria-hidden="true"
           />
           <aside

@@ -11,9 +11,8 @@
 // ref 経由で最新の関数を呼ぶようにし、インスタンスを毎回作り直さなくても済むようにする。
 //
 // 依存（矢印）編集のため:
-//  - mode='connect' のときはコンテナに接続用クラスを付け、バークリックを接続ロジックに回す
-//    （実際のモード分岐はページ側 onClick が担う。ここでは見た目だけ切り替える）。
-//  - pendingFromId のバーをハイライト（接続元の見える化）。
+//  - バー右端の接続ハンドルをドラッグ→相手バーで離すと vendor が 'connect' を
+//    発火する。ここで on_connect → props.onConnect(fromId, toId) へ橋渡しする。
 //  - 矢印 <path data-from data-to> の委譲クリックで onArrowClick(from,to) を呼ぶ。
 
 import { useEffect, useRef } from 'react';
@@ -41,17 +40,9 @@ export interface FrappeGanttProps {
   onClick: (id: string) => void;
   /** 依存（矢印）クリック時。data-from=先行, data-to=後続。 */
   onArrowClick: (fromId: string, toId: string) => void;
-  /** 'navigate'=クリックで詳細へ / 'connect'=クリックで依存を引く接続モード。 */
-  mode: 'navigate' | 'connect';
-  /** 接続モードで選択済みの先行タスク id（未選択は null）。バーをハイライトする。 */
-  pendingFromId: string | null;
+  /** 接続ドラッグ（バー右端ハンドル→相手バーで離す）成立時。from=先行, to=後続。 */
+  onConnect: (fromId: string, toId: string) => void;
 }
-
-// frappe-gantt の内部 API（型定義が無い）に触れるための最小ナロー型。
-// bars: 各バーは .task.id と .group（SVG <g class="bar-wrapper">）を持つ。
-type GanttInternal = {
-  bars?: { task: { id: string }; group: SVGGElement }[];
-};
 
 export default function FrappeGantt({
   tasks,
@@ -60,8 +51,7 @@ export default function FrappeGantt({
   onProgressChange,
   onClick,
   onArrowClick,
-  mode,
-  pendingFromId,
+  onConnect,
 }: FrappeGanttProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const ganttRef = useRef<Gantt | null>(null);
@@ -70,8 +60,20 @@ export default function FrappeGantt({
   const skipNextRefreshRef = useRef(false);
 
   // コールバックは最新参照を ref に保持（インスタンスは初回のみ生成するため）。
-  const cbRef = useRef({ onDateChange, onProgressChange, onClick, onArrowClick });
-  cbRef.current = { onDateChange, onProgressChange, onClick, onArrowClick };
+  const cbRef = useRef({
+    onDateChange,
+    onProgressChange,
+    onClick,
+    onArrowClick,
+    onConnect,
+  });
+  cbRef.current = {
+    onDateChange,
+    onProgressChange,
+    onClick,
+    onArrowClick,
+    onConnect,
+  };
 
   // 初回マウント: Gantt インスタンス生成 + 矢印クリックの委譲リスナー登録。
   useEffect(() => {
@@ -99,6 +101,10 @@ export default function FrappeGantt({
       },
       on_click: (task) => {
         cbRef.current.onClick(String(task.id));
+      },
+      // 接続ドラッグ成立時（vendor 独自イベント）。from=先行, to=後続。
+      on_connect: (fromId: string, toId: string) => {
+        cbRef.current.onConnect(String(fromId), String(toId));
       },
     });
     ganttRef.current = gantt;
@@ -159,33 +165,6 @@ export default function FrappeGantt({
     viewModeRef.current = viewMode;
     gantt.change_view_mode(viewMode, true);
   }, [viewMode]);
-
-  // 接続モードの見た目（カーソル等）をコンテナのクラスで切り替える。
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.classList.toggle('connect-mode', mode === 'connect');
-  }, [mode]);
-
-  // 接続元バーのハイライト。pendingFromId が変わるたびに前回分をクリアして付け直す。
-  // refresh() でも DOM が作り直されるが、tasks 変化時はこの effect も pendingFromId
-  // を維持したまま再評価されないため、refresh 直後はハイライトが外れる場合がある。
-  // その場合 pendingFromId は接続成立時にクリアされる運用なので実害は無い。
-  useEffect(() => {
-    const gantt = ganttRef.current as (Gantt & GanttInternal) | null;
-    if (!gantt) return;
-    try {
-      // frappe 内部 API（bars）に触れるため try/catch で囲う。
-      const bars = gantt.bars ?? [];
-      bars.forEach((b) => b.group?.classList?.remove('connect-source'));
-      if (pendingFromId) {
-        const bar = bars.find((b) => b.task.id === pendingFromId);
-        bar?.group?.classList?.add('connect-source');
-      }
-    } catch (err) {
-      console.error('Failed to highlight connect source:', err);
-    }
-  }, [pendingFromId, tasks]);
 
   return <div ref={containerRef} className="frappe-gantt-host" />;
 }

@@ -1,3 +1,7 @@
+/*
+ * Vendored from frappe-gantt v1.2.2 (MIT) — 変更点は ./README.md を参照。
+ * show() をビューポート基準（position:fixed）の配置に変更している。
+ */
 export default class Popup {
     constructor(parent, popup_func, gantt) {
         this.parent = parent;
@@ -22,7 +26,11 @@ export default class Popup {
         this.actions = this.parent.querySelector('.actions');
     }
 
-    show({ x, y, task, target }) {
+    // 変更（vendor）: clientX/clientY（ビューポート基準のカーソル位置）を受け取り、
+    // CSS 側で position:fixed にした .popup-wrapper をビューポート基準で配置する。
+    // 既定はカーソルの右上。右端/下端で画面からはみ出す場合は左/上に反転する。
+    // これによりコンテナ（.gantt-container）の overflow に切られない。
+    show({ x, y, task, target, clientX, clientY }) {
         this.actions.innerHTML = '';
         let html = this.popup_func({
             task,
@@ -50,9 +58,25 @@ export default class Popup {
         if (this.actions.innerHTML === '') this.actions.remove();
         else this.parent.appendChild(this.actions);
 
-        this.parent.style.left = x + 10 + 'px';
-        this.parent.style.top = y - 10 + 'px';
+        // 変更（vendor）: 先に表示してサイズを測り、ビューポート基準で配置。
+        // clientX/clientY が来ない呼び出し（後方互換）は x/y を流用する。
         this.parent.classList.remove('hide');
+        const cx = clientX ?? x;
+        const cy = clientY ?? y;
+        const { width, height } = this.parent.getBoundingClientRect();
+        // 既定: カーソルの右上。
+        let left = cx + 12;
+        let top = cy - height - 10;
+        // 右端ではみ出すなら左に反転。
+        if (left + width > window.innerWidth - 4) left = cx - width - 12;
+        // 上端ではみ出すなら下に反転。
+        if (top < 4) top = cy + 12;
+        // 下端でもはみ出すならビューポート内に収める。
+        if (top + height > window.innerHeight - 4)
+            top = Math.max(4, window.innerHeight - height - 4);
+        if (left < 4) left = 4;
+        this.parent.style.left = left + 'px';
+        this.parent.style.top = top + 'px';
     }
 
     hide() {
