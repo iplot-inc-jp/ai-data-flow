@@ -2,12 +2,15 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
   Param,
   HttpCode,
   HttpStatus,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -18,7 +21,16 @@ import {
   ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsInt,
+  IsIn,
+  IsArray,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { randomUUID } from 'crypto';
 import {
   CreateStakeholderUseCase,
   GetStakeholdersUseCase,
@@ -26,10 +38,36 @@ import {
   DeleteStakeholderUseCase,
   StakeholderOutput,
 } from '../../application';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { ForbiddenError } from '../../domain';
 import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+
+/**
+ * 組織メンバーシップ認可（use-case 層の isMember と同じ判定）。
+ * 全体管理者（isSuperAdmin）は全組織のリソースにアクセス可能。
+ * メンバーでなければ ForbiddenError（403）を投げる。
+ */
+async function assertOrganizationMember(
+  prisma: PrismaService,
+  organizationId: string,
+  userId: string,
+): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isSuperAdmin: true },
+  });
+  if (user?.isSuperAdmin) return;
+
+  const count = await prisma.organizationMember.count({
+    where: { organizationId, userId },
+  });
+  if (count === 0) {
+    throw new ForbiddenError('You are not a member of this organization');
+  }
+}
 
 // ========== DTOs ==========
 
@@ -107,6 +145,14 @@ class CreateStakeholderDto {
   @IsOptional()
   @IsString()
   note?: string | null;
+
+  @ApiPropertyOptional({
+    description: '内部/外部区分',
+    enum: ['INTERNAL', 'EXTERNAL'],
+  })
+  @IsOptional()
+  @IsIn(['INTERNAL', 'EXTERNAL'])
+  side?: string | null;
 
   @ApiPropertyOptional({ description: '並び順' })
   @IsOptional()
@@ -190,10 +236,39 @@ class UpdateStakeholderDto {
   @IsString()
   note?: string | null;
 
+  @ApiPropertyOptional({
+    description: '内部/外部区分',
+    enum: ['INTERNAL', 'EXTERNAL'],
+  })
+  @IsOptional()
+  @IsIn(['INTERNAL', 'EXTERNAL'])
+  side?: string | null;
+
   @ApiPropertyOptional({ description: '並び順' })
   @IsOptional()
   @IsInt()
   order?: number;
+}
+
+class DomainAssignmentItemDto {
+  @ApiProperty({ description: 'サブプロジェクト（領域）ID' })
+  @IsString()
+  subProjectId: string;
+
+  @ApiProperty({ description: 'RACI', enum: ['R', 'A', 'C', 'I'] })
+  @IsIn(['R', 'A', 'C', 'I'])
+  raci: string;
+}
+
+class SetDomainAssignmentsDto {
+  @ApiProperty({
+    description: '割当一覧（まるごと置き換え）',
+    type: [DomainAssignmentItemDto],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DomainAssignmentItemDto)
+  items: DomainAssignmentItemDto[];
 }
 
 @ApiTags('ステークホルダー')
@@ -250,6 +325,7 @@ export class StakeholderController {
       asisHearing: dto.asisHearing,
       tobeSparring: dto.tobeSparring,
       note: dto.note,
+      side: dto.side,
       order: dto.order,
     });
   }
@@ -262,6 +338,7 @@ export class StakeholderByIdController {
   constructor(
     private readonly updateStakeholderUseCase: UpdateStakeholderUseCase,
     private readonly deleteStakeholderUseCase: DeleteStakeholderUseCase,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Patch(':id')
@@ -292,8 +369,103 @@ export class StakeholderByIdController {
       asisHearing: dto.asisHearing,
       tobeSparring: dto.tobeSparring,
       note: dto.note,
+      side: dto.side,
       order: dto.order,
     });
+  }
+
+  @Put(':id/domain-assignments')
+  @ApiOperation({
+    summary: '担当領域（サブプロジェクト×RACI）をまるごと置き換え',
+  })
+  @ApiParam({ name: 'id', description: 'ステークホルダーID' })
+  @ApiResponse({ status: 400, description: '別プロジェクトの領域が含まれています' })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: 'ステークホルダー/領域が見つかりません' })
+  async setDomainAssignments(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: SetDomainAssignmentsDto,
+  ): Promise<{
+    stakeholderId: string;
+    items: { subProjectId: string; raci: string | null }[];
+  }> {
+    const stakeholder = await this.prisma.stakeholder.findUnique({
+      where: { id },
+      select: { id: true, projectId: true },
+    });
+    if (!stakeholder) {
+      throw new NotFoundException(`Stakeholder not found: ${id}`);
+    }
+
+    // 組織メンバーシップ認可（stakeholder.projectId → project.organizationId）
+    const project = await this.prisma.project.findUnique({
+      where: { id: stakeholder.projectId },
+      select: { organizationId: true },
+    });
+    if (!project) {
+      throw new NotFoundException(`Project not found: ${stakeholder.projectId}`);
+    }
+    await assertOrganizationMember(this.prisma, project.organizationId, user.id);
+
+    // subProjectId の重複は後勝ちで畳む
+    const deduped = new Map<string, string>();
+    for (const item of dto.items) {
+      deduped.set(item.subProjectId, item.raci);
+    }
+    const subProjectIds = Array.from(deduped.keys());
+
+    // 存在＋同一プロジェクト検証
+    if (subProjectIds.length > 0) {
+      const subProjects = await this.prisma.subProject.findMany({
+        where: { id: { in: subProjectIds } },
+        select: { id: true, projectId: true },
+      });
+      const found = new Map(subProjects.map((s) => [s.id, s.projectId]));
+      for (const subProjectId of subProjectIds) {
+        const projectId = found.get(subProjectId);
+        if (projectId === undefined) {
+          throw new NotFoundException(`SubProject not found: ${subProjectId}`);
+        }
+        if (projectId !== stakeholder.projectId) {
+          throw new BadRequestException(
+            'SubProject does not belong to the same project as the stakeholder',
+          );
+        }
+      }
+    }
+
+    // join行の置き換え
+    await this.prisma.$transaction([
+      this.prisma.stakeholderSubProject.deleteMany({
+        where: { stakeholderId: id },
+      }),
+      ...(subProjectIds.length > 0
+        ? [
+            this.prisma.stakeholderSubProject.createMany({
+              data: subProjectIds.map((subProjectId) => ({
+                id: randomUUID(),
+                stakeholderId: id,
+                subProjectId,
+                raci: deduped.get(subProjectId),
+              })),
+              skipDuplicates: true,
+            }),
+          ]
+        : []),
+    ]);
+
+    const rows = await this.prisma.stakeholderSubProject.findMany({
+      where: { stakeholderId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+    return {
+      stakeholderId: id,
+      items: rows.map((r) => ({
+        subProjectId: r.subProjectId,
+        raci: r.raci,
+      })),
+    };
   }
 
   @Delete(':id')
@@ -311,5 +483,50 @@ export class StakeholderByIdController {
       id,
     });
     return { success: true };
+  }
+}
+
+@ApiTags('ステークホルダー')
+@ApiBearerAuth()
+@Controller('projects/:projectId/stakeholder-assignments')
+export class StakeholderAssignmentController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'プロジェクト全体のステークホルダー×領域 RACI 割当一覧',
+  })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
+  async list(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+  ): Promise<
+    {
+      stakeholderId: string;
+      subProjectId: string;
+      raci: string | null;
+    }[]
+  > {
+    // 組織メンバーシップ認可（projectId → project.organizationId）
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { organizationId: true },
+    });
+    if (!project) {
+      throw new NotFoundException(`Project not found: ${projectId}`);
+    }
+    await assertOrganizationMember(this.prisma, project.organizationId, user.id);
+
+    const rows = await this.prisma.stakeholderSubProject.findMany({
+      where: { stakeholder: { projectId } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((r) => ({
+      stakeholderId: r.stakeholderId,
+      subProjectId: r.subProjectId,
+      raci: r.raci,
+    }));
   }
 }

@@ -18,6 +18,7 @@ export interface CreateStakeholderProps {
   asisHearing?: string | null;
   tobeSparring?: string | null;
   note?: string | null;
+  side?: string | null;
   order?: number;
 }
 
@@ -39,6 +40,7 @@ export interface ReconstructStakeholderProps {
   asisHearing: string | null;
   tobeSparring: string | null;
   note: string | null;
+  side: string | null;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -60,6 +62,7 @@ export interface UpdateStakeholderProps {
   asisHearing?: string | null;
   tobeSparring?: string | null;
   note?: string | null;
+  side?: string | null;
   order?: number;
 }
 
@@ -84,6 +87,7 @@ export class Stakeholder extends BaseEntity {
   private _asisHearing: string | null;
   private _tobeSparring: string | null;
   private _note: string | null;
+  private _side: string | null;
   private _order: number;
 
   private constructor(
@@ -104,6 +108,7 @@ export class Stakeholder extends BaseEntity {
     asisHearing: string | null,
     tobeSparring: string | null,
     note: string | null,
+    side: string | null,
     order: number,
     createdAt: Date,
     updatedAt: Date,
@@ -125,6 +130,7 @@ export class Stakeholder extends BaseEntity {
     this._asisHearing = asisHearing;
     this._tobeSparring = tobeSparring;
     this._note = note;
+    this._side = side;
     this._order = order;
   }
 
@@ -163,6 +169,7 @@ export class Stakeholder extends BaseEntity {
       props.asisHearing?.trim() || null,
       props.tobeSparring?.trim() || null,
       props.note?.trim() || null,
+      props.side?.trim() || 'INTERNAL',
       props.order ?? 0,
       now,
       now,
@@ -191,6 +198,7 @@ export class Stakeholder extends BaseEntity {
       props.asisHearing,
       props.tobeSparring,
       props.note,
+      props.side,
       props.order,
       props.createdAt,
       props.updatedAt,
@@ -253,6 +261,9 @@ export class Stakeholder extends BaseEntity {
     }
     if (props.note !== undefined) {
       this._note = props.note?.trim() || null;
+    }
+    if (props.side !== undefined) {
+      this._side = props.side?.trim() || null;
     }
     if (props.order !== undefined) {
       this._order = props.order;
@@ -324,6 +335,10 @@ export class Stakeholder extends BaseEntity {
 
   get note(): string | null {
     return this._note;
+  }
+
+  get side(): string | null {
+    return this._side;
   }
 
   get order(): number {

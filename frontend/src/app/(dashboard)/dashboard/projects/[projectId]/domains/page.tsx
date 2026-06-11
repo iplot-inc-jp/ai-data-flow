@@ -22,6 +22,19 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
+import {
+  listStakeholders,
+  listAssignments,
+  normalizeSide,
+  sideMeta,
+  raciMeta,
+  pickRaci,
+  type DomainAssignment,
+  type Stakeholder,
+} from '@/lib/stakeholders';
+
+/** 領域行に出す担当者チップ1件（ステークホルダー × RACI）。 */
+type Assignee = { stakeholder: Stakeholder; raci: string | null };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -85,6 +98,9 @@ export default function DomainsPage() {
   const [items, setItems] = useState<SubProjectMaster[]>([]);
   // 各領域配下に表示する業務フロー（取得失敗時は空配列のまま＝領域一覧は動く）
   const [flows, setFlows] = useState<FlowLite[]>([]);
+  // 担当者チップの逆引き用（取得失敗時は空のまま＝領域一覧は動く）
+  const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
+  const [assignments, setAssignments] = useState<DomainAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,19 +131,38 @@ export default function DomainsPage() {
     }
   }, [projectId]);
 
+  // 担当者チップ用（ステークホルダー × 領域 RACI）。失敗しても領域一覧は壊さない。
+  const loadAssignees = useCallback(async () => {
+    try {
+      const [sh, asg] = await Promise.all([
+        listStakeholders(projectId),
+        listAssignments(projectId),
+      ]);
+      setStakeholders(sh);
+      setAssignments(asg);
+    } catch {
+      setStakeholders([]);
+      setAssignments([]);
+    }
+  }, [projectId]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // 領域一覧とフロー一覧を並行取得（フロー取得失敗は loadFlows 内で握りつぶす）
-      const [subProjects] = await Promise.all([subProjectApi.list(projectId), loadFlows()]);
+      // 領域一覧とフロー・担当者を並行取得（フロー/担当者の取得失敗は各 load 内で握りつぶす）
+      const [subProjects] = await Promise.all([
+        subProjectApi.list(projectId),
+        loadFlows(),
+        loadAssignees(),
+      ]);
       setItems(subProjects);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  }, [projectId, loadFlows]);
+  }, [projectId, loadFlows, loadAssignees]);
 
   useEffect(() => {
     void load();
@@ -170,6 +205,24 @@ export default function DomainsPage() {
   }, [newSubName, newSubParentId, projectId, load]);
 
   const treeRows = toTreeOrder(items);
+
+  // 担当者チップの逆引き（領域ID → ステークホルダー×RACI）。A→R→C→I の順に並べる。
+  const stakeholderById = new Map(stakeholders.map((s) => [s.id, s]));
+  const raciRank = (raci: string | null) => {
+    const r = pickRaci(raci);
+    return r === 'A' ? 0 : r === 'R' ? 1 : r === 'C' ? 2 : r === 'I' ? 3 : 4;
+  };
+  const assigneesBySubProject = new Map<string, Assignee[]>();
+  for (const a of assignments) {
+    const stakeholder = stakeholderById.get(a.stakeholderId);
+    if (!stakeholder) continue;
+    const list = assigneesBySubProject.get(a.subProjectId) ?? [];
+    list.push({ stakeholder, raci: a.raci });
+    assigneesBySubProject.set(a.subProjectId, list);
+  }
+  for (const list of Array.from(assigneesBySubProject.values())) {
+    list.sort((x, y) => raciRank(x.raci) - raciRank(y.raci));
+  }
 
   // 業務フローを subProjectId ごとに振り分け。存在しない/未割当の領域IDは「未分類」へ。
   const validSubProjectIds = new Set(items.map((i) => i.id));
@@ -287,6 +340,7 @@ export default function DomainsPage() {
                 depth={depth}
                 projectId={projectId}
                 flows={flowsBySubProject.get(row.id) ?? []}
+                assignees={assigneesBySubProject.get(row.id) ?? []}
                 onChanged={load}
               />
             ))}
@@ -358,12 +412,15 @@ function DomainRow({
   depth,
   projectId,
   flows,
+  assignees,
   onChanged,
 }: {
   item: SubProjectMaster;
   depth: number;
   projectId: string;
   flows: FlowLite[];
+  /** この領域の担当者（ステークホルダー×RACI の逆引き）。 */
+  assignees: Assignee[];
   onChanged: () => Promise<void> | void;
 }) {
   const [name, setName] = useState(item.name);
@@ -454,6 +511,37 @@ function DomainRow({
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </li>
+
+      {/* この領域の担当者チップ（ステークホルダー×RACI の逆引き）。
+          内部=emerald / 外部=blue、A（説明責任）は★で強調。
+          クリックでステークホルダーマネジメントへ。
+          親 ul の divide-y による上罫線を border-t-0 で消し、領域行と一体に見せる。 */}
+      {assignees.length > 0 && (
+        <li
+          className="flex flex-wrap items-center gap-1.5 border-t-0 pb-1.5"
+          style={{ paddingLeft: `${flowIndent}px` }}
+        >
+          {assignees.map(({ stakeholder, raci }) => {
+            const side = normalizeSide(stakeholder.side);
+            const r = pickRaci(raci);
+            return (
+              <Link
+                key={stakeholder.id}
+                href={`/dashboard/projects/${projectId}/stakeholder-management`}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${sideMeta[side].chip}`}
+                title={`${stakeholder.name}（${sideMeta[side].label}${
+                  r ? ` / ${r}: ${raciMeta[r].label}` : ''
+                }）— ステークホルダーマネジメントで管理`}
+              >
+                {r && (
+                  <span className="font-bold">{r === 'A' ? '★A' : r}</span>
+                )}
+                {stakeholder.name || '（無名）'}
+              </Link>
+            );
+          })}
+        </li>
+      )}
 
       {/* この領域に属する業務フロー（クリックで開ける）
           親 ul の divide-y による上罫線を border-t-0 で消し、領域行と一体に見せる。 */}

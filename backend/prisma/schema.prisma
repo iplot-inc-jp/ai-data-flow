@@ -1058,6 +1058,7 @@ model SubProject {
   tobeVisions      TobeVision[]
   tobeRoadmaps     TobeRoadmap[]
   risks            Risk[]
+  stakeholderAssignments StakeholderSubProject[]
 
   @@map("sub_projects")
 }
@@ -1395,17 +1396,37 @@ model Stakeholder {
   asisHearing     String?  @map("asis_hearing") @db.Text
   tobeSparring    String?  @map("tobe_sparring") @db.Text
   note            String?  @db.Text
+  side            String?  @default("INTERNAL") // INTERNAL=内部(自社) / EXTERNAL=外部(お客様・パートナー)
   order           Int      @default(0)
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  meetings        MeetingStakeholder[]
-  reportCalendars ReportCalendar[]
-  ownedMeetings   Meeting[]            @relation("MeetingOwner")
-  ownedRisks      Risk[]               @relation("RiskOwner")
+  project               Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meetings              MeetingStakeholder[]
+  reportCalendars       ReportCalendar[]
+  ownedMeetings         Meeting[]               @relation("MeetingOwner")
+  ownedRisks            Risk[]                  @relation("RiskOwner")
+  subProjectAssignments StakeholderSubProject[]
 
   @@map("stakeholders")
+}
+
+// ===========================================
+// ステークホルダー ↔ サブプロジェクト（多対多 + RACI）
+// ===========================================
+
+model StakeholderSubProject {
+  id            String   @id @default(uuid())
+  stakeholderId String   @map("stakeholder_id")
+  subProjectId  String   @map("sub_project_id")
+  raci          String?  @default("R") // R=実行責任 / A=説明責任 / C=協業 / I=報告先
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  stakeholder Stakeholder @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
+  subProject  SubProject  @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+
+  @@unique([stakeholderId, subProjectId])
+  @@map("stakeholder_sub_projects")
 }
 
 // ===========================================

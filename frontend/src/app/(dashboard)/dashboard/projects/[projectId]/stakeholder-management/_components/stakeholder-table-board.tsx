@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -14,18 +21,29 @@ import {
   UserCog,
   Users,
   Crown,
+  Eye,
+  Grid3x3,
 } from 'lucide-react';
 import {
   INFLUENCE_LEVELS,
   SUPPORT_LEVELS,
   pickLevel,
   buildInfluenceSupportGrid,
+  normalizeSide,
+  sideMeta,
+  raciMeta,
+  pickRaci,
+  orderDomainTree,
   type Influence,
   type Support,
+  type Side,
+  type Raci,
   type Stakeholder,
   type StakeholderInput,
   type Role,
   type Meeting,
+  type DomainAssignment,
+  type DomainAssignmentItem,
   listStakeholders,
   createStakeholder,
   updateStakeholder,
@@ -33,16 +51,23 @@ import {
   listRoles,
   updateRole,
   listMeetings,
+  listAssignments,
+  setDomainAssignments,
 } from '@/lib/stakeholders';
+import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
+import { listRisks, type Risk } from '@/lib/risks';
+import { RaciMatrix } from './raci-matrix';
+import { StakeholderDetailPanel } from './stakeholder-detail-panel';
 
 // 編集モーダルに出す全フィールド（表示順とラベル・複数行可否）。
 const STAKEHOLDER_FIELDS: {
   key: keyof StakeholderInput;
   label: string;
   multiline?: boolean;
-  kind?: 'influence' | 'support' | 'role' | 'text';
+  kind?: 'influence' | 'support' | 'role' | 'side' | 'text';
 }[] = [
   { key: 'name', label: '氏名' },
+  { key: 'side', label: '側（内部/外部）', kind: 'side' },
   { key: 'affiliation', label: '所属・役職' },
   { key: 'role', label: '役割', kind: 'role' },
   { key: 'interest', label: '関心事（成功と感じるもの）', multiline: true },
@@ -119,11 +144,16 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
     stakeholders,
     roles,
     meetings,
+    domains,
+    assignments,
+    assignmentsReady,
+    risks,
     loading,
     error,
     reload,
     setStakeholders,
     setRoles,
+    setAssignments,
   } = useStakeholderData(projectId);
 
   const [saving, setSaving] = useState(false);
@@ -133,6 +163,13 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({});
+  // 編集モーダル内の担当領域（subProjectId → RACI、'' は割当なし）
+  const [assignDraft, setAssignDraft] = useState<Record<string, Raci | ''>>({});
+  // 開いた時点の割当（変更がなければ保存時に PUT しない）
+  const [assignInitialJson, setAssignInitialJson] = useState('');
+
+  // 人単位ビュー（詳細サイドパネル）
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const byId = useMemo(
     () => new Map(stakeholders.map((s) => [s.id, s])),
@@ -180,9 +217,61 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
     [stakeholders],
   );
 
+  // 担当領域（RACI）の逆引き: stakeholderId → 割当リスト（行チップ・モーダル初期値）
+  const assignmentsByStakeholder = useMemo(() => {
+    const map = new Map<string, DomainAssignment[]>();
+    for (const a of assignments) {
+      const arr = map.get(a.stakeholderId) ?? [];
+      arr.push(a);
+      map.set(a.stakeholderId, arr);
+    }
+    return map;
+  }, [assignments]);
+
+  const domainById = useMemo(
+    () => new Map(domains.map((d) => [d.id, d])),
+    [domains],
+  );
+
+  // 領域の入れ子表示（循環ガード付きツリー順）
+  const domainTreeRows = useMemo(() => orderDomainTree(domains), [domains]);
+
+  // 一覧テーブルの2セクション（外部 → 内部）
+  const sections = useMemo(
+    () =>
+      (['EXTERNAL', 'INTERNAL'] as Side[]).map((side) => ({
+        side,
+        members: stakeholders.filter((s) => normalizeSide(s.side) === side),
+      })),
+    [stakeholders],
+  );
+
+  const draftFromAssignments = (
+    id: string | null,
+  ): Record<string, Raci | ''> => {
+    const d: Record<string, Raci | ''> = {};
+    if (!id) return d;
+    for (const a of assignmentsByStakeholder.get(id) ?? []) {
+      const r = pickRaci(a.raci);
+      if (r) d[a.subProjectId] = r;
+    }
+    return d;
+  };
+
+  // 比較用（割当なしを除き、subProjectId 昇順で安定化）
+  const serializeAssignDraft = (d: Record<string, Raci | ''>): string =>
+    JSON.stringify(
+      Object.entries(d)
+        .filter(([, v]) => v !== '')
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    );
+
   const openEdit = (id: string) => {
     setEditId(id);
     setDraft(stakeholderToDraft(byId.get(id) ?? null));
+    const ad = draftFromAssignments(id);
+    setAssignDraft(ad);
+    setAssignInitialJson(serializeAssignDraft(ad));
     setActionError(null);
     setModalOpen(true);
   };
@@ -193,6 +282,8 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
     if (inf) d.influence = inf;
     if (sup) d.support = sup;
     setDraft(d);
+    setAssignDraft({});
+    setAssignInitialJson(serializeAssignDraft({}));
     setActionError(null);
     setModalOpen(true);
   };
@@ -214,10 +305,18 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
     setSaving(true);
     setActionError(null);
     try {
-      if (editId) {
-        await updateStakeholder(editId, input);
-      } else {
-        await createStakeholder(projectId, input);
+      const saved = editId
+        ? await updateStakeholder(editId, input)
+        : await createStakeholder(projectId, input);
+      // 担当領域（RACI）: 変更があるときだけ replace-all 保存
+      if (
+        assignmentsReady &&
+        serializeAssignDraft(assignDraft) !== assignInitialJson
+      ) {
+        const items: DomainAssignmentItem[] = Object.entries(assignDraft)
+          .filter((e): e is [string, Raci] => e[1] !== '')
+          .map(([subProjectId, raci]) => ({ subProjectId, raci }));
+        await setDomainAssignments(saved.id, items);
       }
       await reload();
       closeModal();
@@ -226,6 +325,56 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  // 最新の assignments を同期参照する ref。
+  // 再レンダー前の連打（クロージャの古い assignments）対策として、
+  // handleRaciCell では state ではなくこの ref から次状態を導出する。
+  const assignmentsRef = useRef<DomainAssignment[]>(assignments);
+  useEffect(() => {
+    assignmentsRef.current = assignments;
+  }, [assignments]);
+
+  // ステークホルダー単位の保存直列化キュー。
+  // PUT は replace-all 仕様のため、先発 PUT が後発より遅く完了すると
+  // 先の割当が消える。前の PUT 完了を待ってから送信時点の最新状態を送る
+  // （last-write-wins）ことで UI と DB の乖離を防ぐ。
+  const raciSaveChain = useRef<Map<string, Promise<void>>>(new Map());
+
+  // RACI マトリクスのセル編集（楽観更新 + その人の割当を replace-all 保存）
+  const handleRaciCell = (
+    stakeholderId: string,
+    subProjectId: string,
+    raci: Raci | null,
+  ) => {
+    if (!assignmentsReady) return;
+    const next = assignmentsRef.current.filter(
+      (a) =>
+        !(a.stakeholderId === stakeholderId && a.subProjectId === subProjectId),
+    );
+    if (raci) next.push({ stakeholderId, subProjectId, raci });
+    assignmentsRef.current = next;
+    setAssignments(next);
+
+    const prev = raciSaveChain.current.get(stakeholderId) ?? Promise.resolve();
+    const run = prev
+      .then(async () => {
+        // 送信時点の最新状態からその人のペイロードを導出
+        const items: DomainAssignmentItem[] = [];
+        for (const a of assignmentsRef.current) {
+          if (a.stakeholderId !== stakeholderId) continue;
+          const r = pickRaci(a.raci);
+          if (r) items.push({ subProjectId: a.subProjectId, raci: r });
+        }
+        await setDomainAssignments(stakeholderId, items);
+      })
+      .catch(async (e: unknown) => {
+        setActionError(
+          e instanceof Error ? e.message : '担当領域の更新に失敗しました',
+        );
+        await reload();
+      });
+    raciSaveChain.current.set(stakeholderId, run);
   };
 
   const handleDelete = async (id: string) => {
@@ -345,90 +494,185 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                       {col.label}
                     </th>
                   ))}
+                  <th className="min-w-[160px] whitespace-nowrap bg-indigo-50 px-3 py-2 text-left text-xs font-semibold text-indigo-700">
+                    担当領域（RACI）
+                  </th>
                   <th className="min-w-[160px] whitespace-nowrap bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
                     参加会議
                   </th>
-                  <th className="w-12 px-2 py-2" aria-label="操作" />
+                  <th className="w-20 px-2 py-2" aria-label="操作" />
                 </tr>
               </thead>
               <tbody>
-                {stakeholders.map((s, i) => (
-                  <tr
-                    key={s.id}
-                    onClick={() => openEdit(s.id)}
-                    className="cursor-pointer border-b border-gray-100 hover:bg-blue-50/40"
-                    title="クリックして編集"
-                  >
-                    <td className="px-2 py-2 align-middle text-xs text-gray-400">
-                      {i + 1}
-                    </td>
-                    {TABLE_COLS.map((col) => (
-                      <td
-                        key={col.key as string}
-                        className="px-3 py-2 align-middle text-gray-900"
+                {sections.map(({ side, members }) => (
+                  <Fragment key={side}>
+                    {/* セクション見出し（外部 / 内部） */}
+                    {stakeholders.length > 0 && (
+                      <tr
+                        className={`border-b ${
+                          side === 'EXTERNAL'
+                            ? 'border-blue-100 bg-blue-50/60'
+                            : 'border-emerald-100 bg-emerald-50/60'
+                        }`}
                       >
-                        {col.key === 'name' ? (
-                          <span className="font-medium text-[#050f3e]">
-                            {s.name || '（無名）'}
-                          </span>
-                        ) : (
-                          ((s[col.key] as string | null) ?? '') || (
-                            <span className="text-gray-300">—</span>
-                          )
-                        )}
-                      </td>
-                    ))}
+                        <td
+                          colSpan={TABLE_COLS.length + 4}
+                          className={`px-3 py-1.5 text-xs font-semibold ${
+                            side === 'EXTERNAL'
+                              ? 'text-blue-700'
+                              : 'text-emerald-700'
+                          }`}
+                        >
+                          {sideMeta[side].label} {members.length} 名
+                        </td>
+                      </tr>
+                    )}
+                    {members.map((s, i) => (
+                      <tr
+                        key={s.id}
+                        onClick={() => openEdit(s.id)}
+                        className="cursor-pointer border-b border-gray-100 hover:bg-blue-50/40"
+                        title="クリックして編集"
+                      >
+                        <td className="px-2 py-2 align-middle text-xs text-gray-400">
+                          {i + 1}
+                        </td>
+                        {TABLE_COLS.map((col) => (
+                          <td
+                            key={col.key as string}
+                            className="px-3 py-2 align-middle text-gray-900"
+                          >
+                            {col.key === 'name' ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="font-medium text-[#050f3e]">
+                                  {s.name || '（無名）'}
+                                </span>
+                                <span
+                                  className={`rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${sideMeta[normalizeSide(s.side)].badge}`}
+                                >
+                                  {sideMeta[normalizeSide(s.side)].short}
+                                </span>
+                              </span>
+                            ) : (
+                              ((s[col.key] as string | null) ?? '') || (
+                                <span className="text-gray-300">—</span>
+                              )
+                            )}
+                          </td>
+                        ))}
 
-                    {/* 参加会議（会議マスタの逆引き。主催は王冠アイコン付き） */}
-                    <td
-                      className="bg-blue-50/40 px-3 py-2 align-middle"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex max-w-[260px] flex-wrap gap-1">
-                        {(meetingsByStakeholder.get(s.id) ?? []).map(
-                          ({ meeting, isOwner }) => (
-                            <Link
-                              key={meeting.id}
-                              href={`/dashboard/projects/${projectId}/meetings`}
-                              className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] text-blue-800 transition-colors hover:bg-blue-200"
-                              title={
-                                isOwner
-                                  ? `${meeting.name}（主催）— 会議マスタで管理`
-                                  : `${meeting.name} — 会議マスタで管理`
-                              }
+                        {/* 担当領域（領域×RACI の逆引きチップ。A は★で強調） */}
+                        <td
+                          className="bg-indigo-50/40 px-3 py-2 align-middle"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex max-w-[260px] flex-wrap gap-1">
+                            {(assignmentsByStakeholder.get(s.id) ?? []).flatMap(
+                              (a) => {
+                                const domain = domainById.get(a.subProjectId);
+                                const raci = pickRaci(a.raci);
+                                if (!domain || !raci) return [];
+                                return [
+                                  <button
+                                    key={a.subProjectId}
+                                    type="button"
+                                    onClick={() => setDetailId(s.id)}
+                                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${raciMeta[raci].chip}`}
+                                    title={`${domain.name}: ${raci}（${raciMeta[raci].label}）— クリックで詳細`}
+                                  >
+                                    <span className="font-bold">
+                                      {raci === 'A' ? '★A' : raci}
+                                    </span>
+                                    {domain.name}
+                                  </button>,
+                                ];
+                              },
+                            )}
+                            {(assignmentsByStakeholder.get(s.id) ?? []).filter(
+                              (a) =>
+                                domainById.has(a.subProjectId) &&
+                                pickRaci(a.raci),
+                            ).length === 0 && (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 参加会議（会議マスタの逆引き。主催は王冠アイコン付き） */}
+                        <td
+                          className="bg-blue-50/40 px-3 py-2 align-middle"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex max-w-[260px] flex-wrap gap-1">
+                            {(meetingsByStakeholder.get(s.id) ?? []).map(
+                              ({ meeting, isOwner }) => (
+                                <Link
+                                  key={meeting.id}
+                                  href={`/dashboard/projects/${projectId}/meetings`}
+                                  className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] text-blue-800 transition-colors hover:bg-blue-200"
+                                  title={
+                                    isOwner
+                                      ? `${meeting.name}（主催）— 会議マスタで管理`
+                                      : `${meeting.name} — 会議マスタで管理`
+                                  }
+                                >
+                                  {isOwner && (
+                                    <Crown className="h-3 w-3 text-amber-500" />
+                                  )}
+                                  {meeting.name || '（無題）'}
+                                </Link>
+                              ),
+                            )}
+                            {(meetingsByStakeholder.get(s.id) ?? []).length ===
+                              0 && (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                          </div>
+                        </td>
+
+                        <td
+                          className="px-2 py-2 text-center align-middle"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setDetailId(s.id)}
+                              className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                              title="この人の詳細（担当領域・リスク・会議）を見る"
+                              aria-label="この人の詳細を見る"
                             >
-                              {isOwner && (
-                                <Crown className="h-3 w-3 text-amber-500" />
-                              )}
-                              {meeting.name || '（無題）'}
-                            </Link>
-                          ),
-                        )}
-                        {(meetingsByStakeholder.get(s.id) ?? []).length ===
-                          0 && <span className="text-xs text-gray-300">—</span>}
-                      </div>
-                    </td>
-
-                    <td
-                      className="px-2 py-2 text-center align-middle"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(s.id)}
-                        className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                        title="このステークホルダーを削除"
-                        aria-label="このステークホルダーを削除"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
+                              <Eye className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(s.id)}
+                              className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                              title="このステークホルダーを削除"
+                              aria-label="このステークホルダーを削除"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {stakeholders.length > 0 && members.length === 0 && (
+                      <tr className="border-b border-gray-100">
+                        <td
+                          colSpan={TABLE_COLS.length + 4}
+                          className="px-4 py-3 text-xs text-gray-400"
+                        >
+                          {sideMeta[side].label}のステークホルダーはいません。
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
                 {stakeholders.length === 0 && (
                   <tr>
                     <td
-                      colSpan={TABLE_COLS.length + 3}
+                      colSpan={TABLE_COLS.length + 4}
                       className="px-4 py-10 text-center text-sm text-gray-400"
                     >
                       まだステークホルダーがいません。「ステークホルダーを追加」から始めましょう。
@@ -638,6 +882,33 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
         </Card>
       </div>
 
+      {/* RACI マトリクス（領域 × 人） */}
+      <div className="space-y-2">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[#050f3e]">
+          <Grid3x3 className="h-4 w-4 text-indigo-600" />
+          RACI マトリクス（領域 × 人）
+        </h3>
+        <p className="text-xs text-gray-500">
+          領域（サブプロジェクト）ごとに誰が
+          R(実行)/A(説明責任)/C(相談)/I(報告) かを割り当てます。セルをクリックすると
+          R→A→C→I→なし の順に切り替わり、そのまま保存されます。
+        </p>
+        {assignmentsReady ? (
+          <RaciMatrix
+            domains={domains}
+            stakeholders={stakeholders}
+            assignments={assignments}
+            onCellChange={handleRaciCell}
+          />
+        ) : (
+          <Card className="bg-white border-gray-200">
+            <CardContent className="py-8 text-center text-sm text-gray-400">
+              領域・担当割当の読み込みに失敗したため、RACI マトリクスは編集できません。再読み込みしてください。
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
       {/* 役割と責任（Role テーブル） */}
       <div className="space-y-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[#050f3e]">
@@ -796,6 +1067,34 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                     </div>
                   );
                 }
+                if (f.kind === 'side') {
+                  const current = normalizeSide(value || null);
+                  return (
+                    <div key={f.key as string} className="space-y-1">
+                      <label className="block text-[11px] font-medium text-gray-500">
+                        {f.label}
+                      </label>
+                      <div className="flex gap-1.5">
+                        {(['INTERNAL', 'EXTERNAL'] as Side[]).map((sd) => (
+                          <button
+                            key={sd}
+                            type="button"
+                            onClick={() => setDraftField(f.key as string, sd)}
+                            className={`flex-1 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-colors ${
+                              current === sd
+                                ? sd === 'INTERNAL'
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                  : 'border-blue-300 bg-blue-50 text-blue-800'
+                                : 'border-gray-200 bg-white text-gray-400 hover:bg-gray-50'
+                            }`}
+                          >
+                            {sideMeta[sd].label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
                 if (f.kind === 'role') {
                   return (
                     <div key={f.key as string} className="space-y-1">
@@ -852,6 +1151,71 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                   </div>
                 );
               })}
+              {/* 担当領域（RACI）。保存時に setDomainAssignments で replace-all */}
+              {assignmentsReady && domains.length > 0 && (
+                <div className="space-y-1.5 border-t border-gray-100 pt-3">
+                  <label className="block text-[11px] font-medium text-gray-500">
+                    担当領域（RACI）
+                  </label>
+                  <p className="text-[10px] text-gray-400">
+                    領域ごとに R(実行) / A(説明責任) / C(相談) / I(報告)
+                    を選びます（PMBOK: A は各領域に1人）。保存ボタンでまとめて反映されます。
+                  </p>
+                  <div className="space-y-1">
+                    {domainTreeRows.map(({ row: d, depth }) => {
+                      const cur = assignDraft[d.id] ?? '';
+                      return (
+                        <div
+                          key={d.id}
+                          className="flex items-center justify-between gap-2"
+                          style={{ paddingLeft: `${depth * 16}px` }}
+                        >
+                          <span
+                            className={`min-w-0 truncate text-xs ${
+                              depth > 0
+                                ? 'text-gray-600'
+                                : 'font-medium text-gray-800'
+                            }`}
+                            title={d.name}
+                          >
+                            {d.name}
+                          </span>
+                          <div className="flex shrink-0 gap-1">
+                            {(['', 'R', 'A', 'C', 'I'] as (Raci | '')[]).map(
+                              (r) => (
+                                <button
+                                  key={r || 'none'}
+                                  type="button"
+                                  onClick={() =>
+                                    setAssignDraft((prev) => ({
+                                      ...prev,
+                                      [d.id]: r,
+                                    }))
+                                  }
+                                  className={`h-6 min-w-[30px] rounded border px-1 text-[10px] font-bold transition-colors ${
+                                    cur === r
+                                      ? r === ''
+                                        ? 'border-gray-400 bg-gray-100 text-gray-600'
+                                        : raciMeta[r].chip
+                                      : 'border-gray-200 bg-white text-gray-400 hover:bg-gray-50'
+                                  }`}
+                                  title={
+                                    r === ''
+                                      ? '割当なし'
+                                      : `${r}（${raciMeta[r].label}）`
+                                  }
+                                >
+                                  {r === '' ? 'なし' : r === 'A' ? '★A' : r}
+                                </button>
+                              ),
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {actionError && (
                 <p className="text-xs text-rose-600">{actionError}</p>
               )}
@@ -882,6 +1246,24 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
           </div>
         </div>
       )}
+
+      {/* 人単位ビュー（詳細サイドパネル） */}
+      {detailId && byId.get(detailId) && (
+        <StakeholderDetailPanel
+          projectId={projectId}
+          stakeholder={byId.get(detailId)!}
+          domains={domains}
+          assignments={assignments}
+          risks={risks}
+          meetings={meetingsByStakeholder.get(detailId) ?? []}
+          onClose={() => setDetailId(null)}
+          onEdit={() => {
+            const id = detailId;
+            setDetailId(null);
+            openEdit(id);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -894,21 +1276,34 @@ function useStakeholderData(projectId: string) {
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [domains, setDomains] = useState<SubProjectMaster[]>([]);
+  const [assignments, setAssignments] = useState<DomainAssignment[]>([]);
+  // 領域＋割当が読めたときだけ RACI 編集（replace-all 保存）を許す。
+  // 読み込み失敗時に空配列で上書き保存して既存割当を消さないためのガード。
+  const [assignmentsReady, setAssignmentsReady] = useState(false);
+  const [risks, setRisks] = useState<Risk[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      // 会議は「参加会議」チップの逆引き用。失敗しても本体は出す。
-      const [sh, rl, mt] = await Promise.all([
+      // 会議・領域・割当・リスクは逆引き表示用。失敗しても本体は出す。
+      const [sh, rl, mt, dm, asg, rk] = await Promise.all([
         listStakeholders(projectId),
         listRoles(projectId),
         listMeetings(projectId).catch(() => [] as Meeting[]),
+        subProjectApi.list(projectId).catch(() => null),
+        listAssignments(projectId).catch(() => null),
+        listRisks(projectId).catch(() => [] as Risk[]),
       ]);
       setStakeholders(sh);
       setRoles(rl);
       setMeetings(mt);
+      setDomains(dm ?? []);
+      setAssignments(asg ?? []);
+      setAssignmentsReady(dm != null && asg != null);
+      setRisks(rk);
     } catch (e) {
       setError(e instanceof Error ? e.message : '読み込みに失敗しました');
     }
@@ -930,10 +1325,15 @@ function useStakeholderData(projectId: string) {
     stakeholders,
     roles,
     meetings,
+    domains,
+    assignments,
+    assignmentsReady,
+    risks,
     loading,
     error,
     reload,
     setStakeholders,
     setRoles,
+    setAssignments,
   };
 }

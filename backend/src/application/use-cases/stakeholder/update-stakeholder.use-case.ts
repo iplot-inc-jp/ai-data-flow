@@ -32,6 +32,7 @@ export interface UpdateStakeholderInput {
   asisHearing?: string | null;
   tobeSparring?: string | null;
   note?: string | null;
+  side?: string | null;
   order?: number;
 }
 
@@ -90,6 +91,7 @@ export class UpdateStakeholderUseCase {
       asisHearing: input.asisHearing,
       tobeSparring: input.tobeSparring,
       note: input.note,
+      side: input.side,
       order: input.order,
     });
 

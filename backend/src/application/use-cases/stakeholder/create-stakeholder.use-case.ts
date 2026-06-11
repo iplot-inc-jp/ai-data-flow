@@ -29,6 +29,7 @@ export interface CreateStakeholderInput {
   asisHearing?: string | null;
   tobeSparring?: string | null;
   note?: string | null;
+  side?: string | null;
   order?: number;
 }
 
@@ -50,6 +51,7 @@ export interface StakeholderOutput {
   asisHearing: string | null;
   tobeSparring: string | null;
   note: string | null;
+  side: string | null;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -74,6 +76,7 @@ export function toStakeholderOutput(stakeholder: Stakeholder): StakeholderOutput
     asisHearing: stakeholder.asisHearing,
     tobeSparring: stakeholder.tobeSparring,
     note: stakeholder.note,
+    side: stakeholder.side,
     order: stakeholder.order,
     createdAt: stakeholder.createdAt,
     updatedAt: stakeholder.updatedAt,
@@ -132,6 +135,7 @@ export class CreateStakeholderUseCase {
         asisHearing: input.asisHearing,
         tobeSparring: input.tobeSparring,
         note: input.note,
+        side: input.side,
         order: input.order,
       },
       id,

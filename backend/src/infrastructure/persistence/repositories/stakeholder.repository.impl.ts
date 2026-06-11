@@ -28,6 +28,7 @@ export class StakeholderRepositoryImpl implements IStakeholderRepository {
     asisHearing: string | null;
     tobeSparring: string | null;
     note: string | null;
+    side: string | null;
     order: number;
     createdAt: Date;
     updatedAt: Date;
@@ -50,6 +51,7 @@ export class StakeholderRepositoryImpl implements IStakeholderRepository {
       asisHearing: data.asisHearing,
       tobeSparring: data.tobeSparring,
       note: data.note,
+      side: data.side,
       order: data.order,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
@@ -88,6 +90,7 @@ export class StakeholderRepositoryImpl implements IStakeholderRepository {
       asisHearing: stakeholder.asisHearing,
       tobeSparring: stakeholder.tobeSparring,
       note: stakeholder.note,
+      side: stakeholder.side,
       order: stakeholder.order,
     };
 
