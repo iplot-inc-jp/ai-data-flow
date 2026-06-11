@@ -387,6 +387,14 @@ export default class Bar {
         });
 
         $.on(this.group, 'click', () => {
+            // 変更（vendor）: 直前にドラッグ/リサイズ/進捗ドラッグが行われていた
+            // 場合、mouseup 直後に発火するこの click は「操作の終わり」であって
+            // クリックではないので on_click を発火させない（フラグは 1 回で消費）。
+            // 移動なしの純クリックのときだけ on_click（詳細オープン/接続）が届く。
+            if (this.gantt.suppress_bar_click) {
+                this.gantt.suppress_bar_click = false;
+                return;
+            }
             this.gantt.trigger_event('click', [this.task]);
         });
 

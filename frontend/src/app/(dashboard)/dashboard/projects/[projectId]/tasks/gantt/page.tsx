@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
@@ -25,14 +27,21 @@ import {
   Plus,
   Maximize2,
   Minimize2,
+  ExternalLink,
 } from 'lucide-react';
 import {
   tasksApi,
   buildTaskTree,
   computeWbsNumbers,
   collectDescendantIds,
+  TASK_STATUSES,
+  TASK_PRIORITIES,
+  taskStatusLabels,
+  taskPriorityLabels,
   type Task,
   type TaskDependency,
+  type TaskStatus,
+  type TaskPriority,
 } from '@/lib/tasks';
 import {
   mapTasksToFrappe,
@@ -70,9 +79,33 @@ const ZOOM_OPTIONS: { mode: ZoomMode; label: string; title: string }[] = [
   { mode: 'month', label: '月', title: '月表示（縮小）' },
 ];
 
+// 右側の編集サイドバーのフォーム状態（tasks ページの編集ダイアログ FormState の簡易版）。
+type SidebarForm = {
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assigneeName: string;
+  startDate: string;
+  dueDate: string;
+  progress: number;
+  estimatedHours: string;
+};
+
+const emptySidebarForm: SidebarForm = {
+  title: '',
+  description: '',
+  status: 'OPEN',
+  priority: 'MEDIUM',
+  assigneeName: '',
+  startDate: '',
+  dueDate: '',
+  progress: 0,
+  estimatedHours: '',
+};
+
 export default function GanttPage() {
   const params = useParams();
-  const router = useRouter();
   const projectId = params.projectId as string;
 
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -91,6 +124,12 @@ export default function GanttPage() {
 
   // ガントカードの全画面表示トグル（他ページの全画面と同じ作法）。
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // バークリックで開く右側の編集サイドバー（ページ遷移はしない）。
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [sidebarForm, setSidebarForm] = useState<SidebarForm>(emptySidebarForm);
+  const [sidebarSaving, setSidebarSaving] = useState(false);
+  const [sidebarError, setSidebarError] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------
   // データ取得
@@ -192,12 +231,79 @@ export default function GanttPage() {
     [fetchAll]
   );
 
-  // バークリック。接続モード OFF なら詳細へ、ON なら矢印を引く 2 クリック操作。
+  // バークリック（通常モード）: 右側の編集サイドバーを開き、フォームへ現在値を流し込む。
+  const openTaskSidebar = useCallback(
+    (id: string) => {
+      const t = tasks.find((x) => x.id === id);
+      if (!t) return;
+      setSidebarForm({
+        title: t.title,
+        description: t.description ?? '',
+        status: t.status,
+        priority: t.priority,
+        assigneeName: t.assigneeName ?? '',
+        startDate: t.startDate ? t.startDate.slice(0, 10) : '',
+        dueDate: t.dueDate ? t.dueDate.slice(0, 10) : '',
+        progress: t.progress ?? 0,
+        estimatedHours:
+          t.estimatedHours != null ? String(t.estimatedHours) : '',
+      });
+      setSidebarError(null);
+      setSelectedTaskId(id);
+    },
+    [tasks]
+  );
+
+  const closeSidebar = useCallback(() => setSelectedTaskId(null), []);
+
+  // サイドバーの保存。成功後はタスク一覧を再取得してガントに反映し、サイドバーは開いたまま。
+  const handleSidebarSave = useCallback(async () => {
+    if (!selectedTaskId) return;
+    if (!sidebarForm.title.trim()) {
+      setSidebarError('タイトルは必須です');
+      return;
+    }
+    setSidebarSaving(true);
+    setSidebarError(null);
+    try {
+      await tasksApi.update(selectedTaskId, {
+        title: sidebarForm.title.trim(),
+        description: sidebarForm.description.trim() || null,
+        status: sidebarForm.status,
+        priority: sidebarForm.priority,
+        assigneeName: sidebarForm.assigneeName.trim() || null,
+        startDate: sidebarForm.startDate || null,
+        dueDate: sidebarForm.dueDate || null,
+        progress: Math.max(
+          0,
+          Math.min(100, Math.round(Number(sidebarForm.progress) || 0))
+        ),
+        estimatedHours:
+          sidebarForm.estimatedHours === ''
+            ? null
+            : Number(sidebarForm.estimatedHours),
+      });
+      await fetchAll();
+    } catch (err) {
+      console.error('Failed to update task:', err);
+      setSidebarError('保存に失敗しました');
+    } finally {
+      setSidebarSaving(false);
+    }
+  }, [selectedTaskId, sidebarForm, fetchAll]);
+
+  // サイドバーで編集中のタスク（再取得後も tasks から引き直す）。消えていたら閉じる扱い。
+  const selectedTask = useMemo(
+    () => tasks.find((t) => t.id === selectedTaskId) ?? null,
+    [tasks, selectedTaskId]
+  );
+
+  // バークリック。接続モード OFF なら編集サイドバー、ON なら矢印を引く 2 クリック操作。
   const handleClick = useCallback(
     (id: string) => {
-      // 通常モード: タスク詳細へ移動。
+      // 通常モード: 右側の編集サイドバーを開く（ページ遷移しない）。
       if (!connectMode) {
-        router.push(`/dashboard/projects/${projectId}/tasks/${id}`);
+        openTaskSidebar(id);
         return;
       }
       // 接続モード 1 クリック目: 先行タスクとして選択。
@@ -231,7 +337,7 @@ export default function GanttPage() {
         }
       })();
     },
-    [connectMode, pendingFromId, dependencies, router, projectId, fetchAll]
+    [connectMode, pendingFromId, dependencies, openTaskSidebar, fetchAll]
   );
 
   // 接続モードのトグル。OFF にするときは選択中の先行も解除する。
@@ -290,10 +396,12 @@ export default function GanttPage() {
   }, [connectMode]);
 
   // ESC で全画面を解除（入力欄フォーカス中は無視）。他ページの全画面と同じ作法。
+  // 編集サイドバーが開いている間は、ESC はまずサイドバーを閉じる（下の effect）に譲る。
   useEffect(() => {
     if (!isFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (selectedTaskId) return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
       if (
@@ -308,7 +416,28 @@ export default function GanttPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isFullscreen]);
+  }, [isFullscreen, selectedTaskId]);
+
+  // ESC で編集サイドバーを閉じる（入力欄フォーカス中は無視）。
+  useEffect(() => {
+    if (!selectedTaskId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        t?.isContentEditable
+      ) {
+        return;
+      }
+      setSelectedTaskId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedTaskId]);
 
   // ---------------------------------------------------------------------
   // 依存関係パネル -> バックエンド
@@ -394,7 +523,7 @@ export default function GanttPage() {
           </span>
         }
         description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗を編集できます（変更は即保存）。「依存を追加」ボタンの接続モードでバーを2回クリックすると矢印（依存）が引け、矢印クリックで削除できます。親子関係・依存は下のパネルでも編集できます。"
-        help="左の WBS 一覧と右のタイムラインが同じ行で並びます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。マウスでの依存編集は、(1)「依存を追加」ボタンで接続モードにし先行→後続の順にバーを2クリックして矢印を引く、(2) 矢印をクリックすると確認のうえ依存を削除、で行えます。通常モードではバークリックでタスク詳細へ移動します。親子関係（親タスク）は下のパネルのセレクトで変更できます。"
+        help="左の WBS 一覧と右のタイムラインが同じ行で並びます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。マウスでの依存編集は、(1)「依存を追加」ボタンで接続モードにし先行→後続の順にバーを2クリックして矢印を引く、(2) 矢印をクリックすると確認のうえ依存を削除、で行えます。通常モードではバークリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。親子関係（親タスク）は下のパネルのセレクトで変更できます。"
         backHref={`/dashboard/projects/${projectId}/tasks`}
         backLabel="タスク管理に戻る"
         actions={
@@ -407,7 +536,7 @@ export default function GanttPage() {
                 '「依存を追加」ボタンで接続モードにし、先行タスク→後続タスクの順にバーを2回クリックすると依存（矢印）が引けます（ESC で終了）。',
                 '依存の矢印をクリックすると、確認のうえその依存を削除できます。',
                 '親子関係は下のパネルの「親タスク」セレクトで変更できます（依存の追加・削除も同パネルで可能）。',
-                '通常モードではバー本体のクリックでタスク詳細へ移動します。',
+                '通常モードではバー本体のクリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。',
                 '右上の「日 / 週 / 月」で目盛りの粒度を切り替えられます。',
               ]}
             />
@@ -676,6 +805,240 @@ export default function GanttPage() {
               </p>
             )}
           </Card>
+        </>
+      )}
+
+      {/*
+        右側のタスク編集サイドバー（バークリックで開く）。
+        全画面コンテナが fixed inset-0 z-50 なので、サイドバーは z-[55]/z-[60] で
+        その上に重ね、全画面中でも使えるようにする（Select のドロップダウンは z-[70]）。
+        背景クリック / ✕ / Esc で閉じる。
+      */}
+      {selectedTask && (
+        <>
+          {/* 背景クリックで閉じる薄いオーバーレイ */}
+          <div
+            className="fixed inset-0 z-[55] bg-black/20"
+            onClick={closeSidebar}
+            aria-hidden="true"
+          />
+          <aside
+            className="fixed inset-y-0 right-0 z-[60] flex w-96 max-w-[90vw] flex-col border-l border-gray-200 bg-white shadow-xl"
+            role="dialog"
+            aria-label="タスクを編集"
+          >
+            {/* ヘッダ: タイトル・詳細ページへのリンク・閉じる */}
+            <div className="flex items-start justify-between gap-2 border-b border-gray-200 px-4 py-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-base font-semibold text-gray-800">
+                  {selectedTask.title}
+                </h2>
+                <Link
+                  href={`/dashboard/projects/${projectId}/tasks/${selectedTask.id}`}
+                  className="mt-0.5 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  詳細ページへ（コメント・添付はこちら）
+                </Link>
+              </div>
+              <button
+                type="button"
+                onClick={closeSidebar}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                title="閉じる（Esc）"
+                aria-label="閉じる"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* 編集フォーム */}
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  タイトル <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={sidebarForm.title}
+                  onChange={(e) =>
+                    setSidebarForm((f) => ({ ...f, title: e.target.value }))
+                  }
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  説明
+                </label>
+                <Textarea
+                  rows={4}
+                  value={sidebarForm.description}
+                  onChange={(e) =>
+                    setSidebarForm((f) => ({
+                      ...f,
+                      description: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">
+                    ステータス
+                  </label>
+                  <Select
+                    value={sidebarForm.status}
+                    onValueChange={(v) =>
+                      setSidebarForm((f) => ({
+                        ...f,
+                        status: v as TaskStatus,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-[70]">
+                      {TASK_STATUSES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {taskStatusLabels[s].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">
+                    優先度
+                  </label>
+                  <Select
+                    value={sidebarForm.priority}
+                    onValueChange={(v) =>
+                      setSidebarForm((f) => ({
+                        ...f,
+                        priority: v as TaskPriority,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-[70]">
+                      {TASK_PRIORITIES.map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {taskPriorityLabels[p].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  担当者名
+                </label>
+                <Input
+                  value={sidebarForm.assigneeName}
+                  onChange={(e) =>
+                    setSidebarForm((f) => ({
+                      ...f,
+                      assigneeName: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">
+                    開始日
+                  </label>
+                  <Input
+                    type="date"
+                    value={sidebarForm.startDate}
+                    onChange={(e) =>
+                      setSidebarForm((f) => ({
+                        ...f,
+                        startDate: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">
+                    期限
+                  </label>
+                  <Input
+                    type="date"
+                    value={sidebarForm.dueDate}
+                    onChange={(e) =>
+                      setSidebarForm((f) => ({
+                        ...f,
+                        dueDate: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">
+                    進捗（%）
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={sidebarForm.progress}
+                    onChange={(e) =>
+                      setSidebarForm((f) => ({
+                        ...f,
+                        progress: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">
+                    見積時間（h）
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.5"
+                    value={sidebarForm.estimatedHours}
+                    onChange={(e) =>
+                      setSidebarForm((f) => ({
+                        ...f,
+                        estimatedHours: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* フッタ: 保存（成功後も開いたまま、ガントへ即反映） */}
+            <div className="border-t border-gray-200 px-4 py-3">
+              {sidebarError && (
+                <p className="mb-2 text-sm text-red-600">{sidebarError}</p>
+              )}
+              <Button
+                type="button"
+                onClick={handleSidebarSave}
+                disabled={sidebarSaving}
+                className="w-full gap-1.5 bg-blue-600 hover:bg-blue-700"
+              >
+                {sidebarSaving && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
+                保存
+              </Button>
+            </div>
+          </aside>
         </>
       )}
     </div>

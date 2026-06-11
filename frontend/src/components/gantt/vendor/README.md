@@ -42,10 +42,21 @@
     オートスクロール rAF の停止を行う（`$destroy_fns` に解除関数を蓄積）。
     React 側（FrappeGantt.tsx）のアンマウント時に DOM 破棄前に呼ぶ。
     型は `index.d.ts` で補っている。
+11. ドラッグ後の click 抑止: ドラッグ/リサイズ/進捗ドラッグの mouseup 直後に
+    ブラウザが発火する click で `on_click` が走らないよう、一回限りの抑止フラグ
+    `suppress_bar_click` を追加。document mouseup（ドロップ確定）で
+    「実ドラッグ（10px 超）またはスナップで位置/幅が変わった」場合、および
+    進捗ハンドルの mouseup（finaldx あり）で立て、bar.js の click ハンドラが
+    冒頭で消費して return する。バーの mousedown で毎回リセットするため、
+    click が発火しなかった場合（バー外で離した等）でも次の純クリックは通る。
+    これにより「移動なしの純クリック」のときだけ on_click（詳細オープン・
+    接続モードの 2 クリック接続）が発火する。
 
 ### bar.js
 - `update_bar_position()`: ドラッグ中（`gantt.dragging_in_progress`）は
   `date_changed()` を呼ばない（date_change はドロップ確定時に 1 回だけ発火）。
+- `setup_click_event()` の click ハンドラ: `gantt.suppress_bar_click` が
+  立っていたら消費して return（上記 index.js 11. のドラッグ後 click 抑止）。
 
 ### arrow.js
 - `calculate_path()` を書き換え: 矢印は from バーの「右端中央」から出て

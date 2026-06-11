@@ -1162,6 +1162,10 @@ export default class Gantt {
         let parent_bar_id = null;
         let bars = []; // instanceof Bar
         this.bar_being_dragged = null;
+        // 変更（vendor）: ドラッグ/リサイズ/進捗ドラッグの mouseup 直後に発火する
+        // click で on_click（詳細オープン・接続クリック）が走らないようにする
+        // 一回限りの抑止フラグ。bar.js の click ハンドラが消費する。
+        this.suppress_bar_click = false;
 
         const action_in_progress = () =>
             is_dragging || is_resizing_left || is_resizing_right;
@@ -1299,6 +1303,9 @@ export default class Gantt {
 
             this.bar_being_dragged = false;
             pos = x_on_start;
+            // 変更（vendor）: 前回の操作で立てた抑止フラグが（click が発火せず）
+            // 残っていても、新しい押下で必ずリセットして純クリックを通す。
+            this.suppress_bar_click = false;
 
             bars.forEach((bar) => {
                 const $bar = bar.$bar;
@@ -1480,6 +1487,9 @@ export default class Gantt {
             const was_resizing_left = is_resizing_left;
             const was_resizing_right = is_resizing_right;
             const was_action = action_in_progress();
+            // 変更（vendor）: 実ドラッグ（mousemove で 10px 超動いた）かどうかを
+            // bar_being_dragged をクリアする前に記録（後続 click の抑止判定用）。
+            const was_dragged = this.bar_being_dragged === true;
             is_dragging = false;
             is_resizing_left = false;
             is_resizing_right = false;
@@ -1494,6 +1504,9 @@ export default class Gantt {
                 return;
             }
 
+            // 変更（vendor）: スナップの結果、実際に位置/幅が変わったバーが
+            // あったか（= 日付が変わる操作だったか）。click 抑止判定に使う。
+            let snapped_any = false;
             const moved_bars = bars.filter((bar) => bar.$bar.finaldx);
             moved_bars.forEach((bar) => {
                 const $bar = bar.$bar;
@@ -1506,6 +1519,7 @@ export default class Gantt {
                     applied_dx,
                     $bar.ox,
                 );
+                if (snapped_dx !== 0) snapped_any = true;
                 if (was_resizing_left) {
                     if (parent_bar_id === bar.task.id) {
                         bar.update_bar_position({
@@ -1526,6 +1540,11 @@ export default class Gantt {
                 }
                 $bar.finaldx = 0;
             });
+            // 変更（vendor）: 移動を伴う操作（10px 超のドラッグ、またはスナップで
+            // 位置が変わったリサイズ/移動）の直後に発火する click は「操作の終わり」
+            // であってクリックではないため、次の 1 回だけ on_click を抑止する。
+            // 移動なしの純クリックのときだけ詳細オープン/接続クリックが届く。
+            if (was_dragged || snapped_any) this.suppress_bar_click = true;
             // スナップ後の位置で date_change / progress_change を発火させる。
             this.dragging_in_progress = false;
             moved_bars.forEach((bar) => {
@@ -1619,6 +1638,10 @@ export default class Gantt {
         $.on(this.$svg, 'mouseup', () => {
             is_resizing = false;
             if (!($bar_progress && $bar_progress.finaldx)) return;
+
+            // 変更（vendor）: 進捗ハンドルのドラッグ直後に発火する click でも
+            // on_click（詳細オープン等）を発火させない（次の 1 回だけ抑止）。
+            this.suppress_bar_click = true;
 
             $bar_progress.finaldx = 0;
             bar.progress_changed();
