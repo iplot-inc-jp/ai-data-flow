@@ -13,6 +13,12 @@ import {
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { Check, X, Loader2, ClipboardList } from 'lucide-react';
 import { gapLedgerApi } from '@/lib/gap-ledger';
+import {
+  roadmapPhaseApi,
+  phaseStorageKey,
+  resolvePhase,
+  type RoadmapPhase,
+} from '@/lib/roadmap-phases';
 import { SheetToolbar } from './sheet-toolbar';
 
 type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -48,19 +54,16 @@ const SCORE_DIFF_LABEL: Record<string, string> = {
   HIGH: '高 (=5)',
 };
 
-// TOBE 3段階
-const PHASES = [
-  { key: 'NONE', label: '未割当' },
-  { key: 'Q', label: '3ヶ月 (Quick Win)' },
-  { key: 'P2', label: '1年 (Phase2)' },
-  { key: 'P3', label: '3年 (Phase3)' },
-];
+// TOBE フェーズ（RoadmapPhase マスタ駆動。ロードマップページと共有）。
+// 保存値は legacyKey ?? name（未割当は 'NONE'）。バッジは旧固定キーのみ
+// 専用色、カスタムフェーズは共通色にフォールバック。
 const phaseBadge: Record<string, string> = {
   Q: 'text-emerald-700 bg-emerald-50 border-emerald-300',
   P2: 'text-amber-700 bg-amber-50 border-amber-300',
   P3: 'text-gray-600 bg-gray-100 border-gray-300',
   NONE: 'text-gray-400 bg-white border-gray-200 border-dashed',
 };
+const customPhaseBadge = 'text-blue-700 bg-blue-50 border-blue-300';
 
 const filled = (v: string | null | undefined) => !!v && v.trim() !== '';
 
@@ -69,7 +72,7 @@ type ScoreRow = {
   gapId: string;
   impact: string; // 件/月（削減は負数）
   difficulty: string; // LOW/MID/HIGH
-  phase: string; // NONE/Q/P2/P3
+  phase: string; // GapLedger.phase の生値（フェーズの legacyKey ?? name。未割当は NONE）
   toComplete: string; // 補完すべきこと
 };
 
@@ -158,6 +161,39 @@ export function LedgerTab({
   } = useGapLedgerMeta(projectId);
 
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
+
+  // フェーズマスタ（RoadmapPhase）。list がバックエンドで初期3フェーズ（Q/P2/P3）をシード。
+  const [phases, setPhases] = useState<RoadmapPhase[]>([]);
+  useEffect(() => {
+    let active = true;
+    roadmapPhaseApi
+      .list(projectId)
+      .then((rows) => {
+        if (active) setPhases([...rows].sort((a, b) => a.order - b.order));
+      })
+      .catch((err) => console.error('Failed to load roadmap phases:', err));
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  // セレクト選択肢: 未割当(NONE) + フェーズ行(order昇順、value は legacyKey ?? name)
+  const phaseOptions = useMemo(
+    () => [
+      { value: 'NONE', label: '未割当' },
+      ...phases.map((p) => ({ value: phaseStorageKey(p), label: p.name })),
+    ],
+    [phases],
+  );
+
+  // GapLedger.phase の生値 → セレクト値（legacyKey 一致 → name 一致 → NONE）
+  const phaseValueOf = useCallback(
+    (raw: string) => {
+      const p = resolvePhase(raw, phases);
+      return p ? phaseStorageKey(p) : 'NONE';
+    },
+    [phases],
+  );
 
   const metaFor = (gapId: string): ScoreRow =>
     meta.find((m) => m.gapId === gapId) ?? {
@@ -561,19 +597,19 @@ export function LedgerTab({
                             <td className="px-2 py-2">
                               <div className="flex items-center gap-1.5">
                                 <Select
-                                  value={r.meta.phase}
+                                  value={phaseValueOf(r.meta.phase)}
                                   onValueChange={(v) =>
                                     setMetaField(r.item.id, { phase: v })
                                   }
                                 >
                                   <SelectTrigger
-                                    className={`h-8 border text-xs ${phaseBadge[r.meta.phase] ?? phaseBadge.NONE}`}
+                                    className={`h-8 border text-xs ${phaseBadge[phaseValueOf(r.meta.phase)] ?? customPhaseBadge}`}
                                   >
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent className="bg-white">
-                                    {PHASES.map((p) => (
-                                      <SelectItem key={p.key} value={p.key}>
+                                    {phaseOptions.map((p) => (
+                                      <SelectItem key={p.value} value={p.value}>
                                         {p.label}
                                       </SelectItem>
                                     ))}

@@ -39,6 +39,7 @@ import {
   ASIS_MEMO_REPOSITORY,
   TOBE_VISION_REPOSITORY,
   TOBE_ROADMAP_REPOSITORY,
+  ROADMAP_PHASE_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -196,6 +197,11 @@ import {
   GetTobeRoadmapsUseCase,
   UpdateTobeRoadmapUseCase,
   DeleteTobeRoadmapUseCase,
+  // RoadmapPhase
+  CreateRoadmapPhaseUseCase,
+  GetRoadmapPhasesUseCase,
+  UpdateRoadmapPhaseUseCase,
+  DeleteRoadmapPhaseUseCase,
 } from './application';
 
 // Infrastructure
@@ -234,6 +240,7 @@ import {
   AsisMemoRepositoryImpl,
   TobeVisionRepositoryImpl,
   TobeRoadmapRepositoryImpl,
+  RoadmapPhaseRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -305,6 +312,10 @@ import {
   ConstraintController,
   ConstraintByIdController,
 } from './presentation/controllers/constraint.controller';
+import {
+  RoadmapPhaseController,
+  RoadmapPhaseByIdController,
+} from './presentation/controllers/roadmap-phase.controller';
 import { SubProjectController } from './presentation/controllers/sub-project.controller';
 import { AnalysisController } from './presentation/controllers/analysis.controller';
 import { GapLedgerController } from './presentation/controllers/gap-ledger.controller';
@@ -397,6 +408,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     TobeVisionByIdController,
     TobeRoadmapController,
     TobeRoadmapByIdController,
+    RoadmapPhaseController,
+    RoadmapPhaseByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -541,6 +554,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: TOBE_ROADMAP_REPOSITORY,
       useClass: TobeRoadmapRepositoryImpl,
+    },
+    {
+      provide: ROADMAP_PHASE_REPOSITORY,
+      useClass: RoadmapPhaseRepositoryImpl,
     },
 
     // ========== Use Cases ==========
@@ -695,6 +712,11 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetTobeRoadmapsUseCase,
     UpdateTobeRoadmapUseCase,
     DeleteTobeRoadmapUseCase,
+    // RoadmapPhase
+    CreateRoadmapPhaseUseCase,
+    GetRoadmapPhasesUseCase,
+    UpdateRoadmapPhaseUseCase,
+    DeleteRoadmapPhaseUseCase,
 
     // ========== Services ==========
     ClaudeService,

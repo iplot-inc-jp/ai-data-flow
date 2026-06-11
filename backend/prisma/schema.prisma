@@ -121,6 +121,7 @@ model Project {
   analysisGapRows         AnalysisGapRow[]
   analysisLeakRows        AnalysisLeakRow[]
   gapLedgers              GapLedger[]
+  roadmapPhases           RoadmapPhase[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1396,6 +1397,7 @@ model Stakeholder {
   project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
   meetings        MeetingStakeholder[]
   reportCalendars ReportCalendar[]
+  ownedMeetings   Meeting[]            @relation("MeetingOwner")
 
   @@map("stakeholders")
 }
@@ -1417,12 +1419,19 @@ model Meeting {
   preMaterials      String?  @map("pre_materials") @db.Text
   minutesOwner      String?  @map("minutes_owner")
   decisionMaker     String?  @map("decision_maker")
+  format            String? // 対面 / オンライン / ハイブリッド（自由文字列）
+  durationMinutes   Int?     @map("duration_minutes") // 所要時間（分）
+  locationUrl       String?  @map("location_url") // 場所 or 会議URL
+  ownerStakeholderId String? @map("owner_stakeholder_id") // 主催/ファシリテーター
+  status            String?  @default("ACTIVE") // ACTIVE=開催中 / SUSPENDED=休止
+  goal              String?  @db.Text // この会議のゴール/アウトプット
   note              String?  @db.Text
   order             Int      @default(0)
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner           Stakeholder?         @relation("MeetingOwner", fields: [ownerStakeholderId], references: [id], onDelete: SetNull)
   stakeholders    MeetingStakeholder[]
   reportCalendars ReportCalendar[]
 
@@ -1771,6 +1780,22 @@ model GapLedger {
   gap     GapItem @relation(fields: [gapId], references: [id], onDelete: Cascade)
 
   @@map("gap_ledgers")
+}
+
+// ロードマップのフェーズ（列）マスタ。プロジェクトごとに追加・並べ替え可能。
+model RoadmapPhase {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  // 旧固定3フェーズとの互換キー（'Q'|'P2'|'P3'）。GapLedger.phase は legacyKey ?? name を保存する。
+  legacyKey String?  @map("legacy_key")
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("roadmap_phases")
 }
 
 // ===========================================

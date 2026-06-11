@@ -26,4 +26,5 @@ export * from './interest-matrix-row';
 export * from './asis-memo';
 export * from './tobe-vision';
 export * from './tobe-roadmap';
+export * from './roadmap-phase';
 

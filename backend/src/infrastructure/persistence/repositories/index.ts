@@ -31,3 +31,4 @@ export * from './interest-matrix-row.repository.impl';
 export * from './asis-memo.repository.impl';
 export * from './tobe-vision.repository.impl';
 export * from './tobe-roadmap.repository.impl';
+export * from './roadmap-phase.repository.impl';
