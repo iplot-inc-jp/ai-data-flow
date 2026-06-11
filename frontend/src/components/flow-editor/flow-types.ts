@@ -8,6 +8,8 @@ export type Role = {
   name: string;
   color: string;
   type?: string;
+  /** type==='SYSTEM' のとき参照するシステム（System マスタ）の id。 */
+  systemId?: string | null;
   order?: number;
   laneHeight?: number;
 };

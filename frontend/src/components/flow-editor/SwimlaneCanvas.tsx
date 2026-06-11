@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
@@ -80,6 +81,9 @@ import {
   Redo2,
   StickyNote,
   MessageSquarePlus,
+  GripVertical,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -106,6 +110,7 @@ import {
   type InformationCategory,
   type InformationType,
 } from '@/lib/dfd';
+import type { SystemMaster } from '@/lib/masters';
 
 const LANE_LABEL_W = 132;
 
@@ -253,6 +258,25 @@ export interface SwimlaneCanvasProps {
    * rolesApi.create → ロール一覧再取得で roles prop を更新する。
    */
   onAddRole?: (name: string, type: RoleType) => Promise<void>;
+  /**
+   * 既存ロール（スイムレーン）を更新する。ロールチップ／レーンヘッダーの編集パネルから呼ぶ。
+   * 名前・人/システム/その他 区分・SYSTEM のとき紐づくシステム・色を部分更新する。
+   * 呼び出し側（ページ）が PATCH /api/roles/:id → ロール一覧再取得で roles prop を更新する。
+   */
+  onUpdateRole?: (
+    roleId: string,
+    patch: { name?: string; type?: RoleType; systemId?: string | null; color?: string },
+  ) => Promise<void>;
+  /**
+   * ロール（スイムレーン）を削除する。編集パネルの削除ボタンから呼ぶ。
+   * 呼び出し側（ページ）が DELETE /api/roles/:id → ロール一覧再取得で roles prop を更新する。
+   */
+  onDeleteRole?: (roleId: string) => Promise<void>;
+  /**
+   * プロジェクトのシステムマスタ一覧。ロールの type==='SYSTEM' のとき
+   * 紐づけるシステムの選択肢として使う（編集パネルの system セレクト）。
+   */
+  systems?: SystemMaster[];
   // --- クロスフロー入出力リンク（右サイドバー「他の業務フローと連携」） ---
   /** ノードの入出力リンク一覧（双方向）を取得。サイドバーを開いた時に呼ぶ。 */
   onFetchNodeLinks?: (nodeId: string) => Promise<NodeLinksResult>;
@@ -496,6 +520,11 @@ type LaneNodeData = {
    * 上端/左端は下端/右端と逆方向のデルタで厚みを更新する。
    */
   onResizeStart?: (roleId: string, edge: LaneResizeEdge, e: ReactPointerEvent) => void;
+  /**
+   * レーンヘッダー（ラベル帯）クリックでロール編集を開く（任意）。
+   * 渡された時だけラベルがクリック可能になり、roleId を親へ上げる。
+   */
+  onLaneClick?: (roleId: string) => void;
 };
 
 function LaneNode({ data }: { data: LaneNodeData }) {
@@ -503,6 +532,12 @@ function LaneNode({ data }: { data: LaneNodeData }) {
   const isVertical = data.orientation === 'vertical';
   // ロール種別に応じた人/システム/中立アイコン（ラベル左）。
   const RoleIcon = roleTypeIcon(data.roleType);
+  // レーンヘッダークリックでロール編集を開けるか（onLaneClick あり）。
+  const labelClickable = !!data.onLaneClick;
+  const onLabelClick = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    data.onLaneClick?.(data.roleId);
+  };
 
   // レーン境界のリサイズハンドルを両端に出す。横帯=上端と下端、縦列=左端と右端。
   // 親（lane 背景）は pointer-events-none なので、ハンドルだけ pointer-events-auto。
@@ -556,7 +591,11 @@ function LaneNode({ data }: { data: LaneNodeData }) {
         style={{ backgroundColor: `${color}0d`, borderRight: `2px solid ${color}33` }}
       >
         <div
-          className="absolute left-0 top-0 w-full flex items-center justify-center gap-1 text-xs font-medium px-2 text-center border-b"
+          onClick={labelClickable ? onLabelClick : undefined}
+          title={labelClickable ? `${data.name}（クリックで編集）` : undefined}
+          className={`absolute left-0 top-0 w-full flex items-center justify-center gap-1 text-xs font-medium px-2 text-center border-b ${
+            labelClickable ? 'nodrag nopan cursor-pointer pointer-events-auto hover:brightness-95' : ''
+          }`}
           style={{
             height: LANE_LABEL_W,
             backgroundColor: `${color}1f`,
@@ -578,7 +617,11 @@ function LaneNode({ data }: { data: LaneNodeData }) {
       style={{ backgroundColor: `${color}0d`, borderBottom: `2px solid ${color}33` }}
     >
       <div
-        className="absolute left-0 top-0 h-full flex items-center justify-center gap-1 text-xs font-medium px-2 text-center border-r"
+        onClick={labelClickable ? onLabelClick : undefined}
+        title={labelClickable ? `${data.name}（クリックで編集）` : undefined}
+        className={`absolute left-0 top-0 h-full flex items-center justify-center gap-1 text-xs font-medium px-2 text-center border-r ${
+          labelClickable ? 'nodrag nopan cursor-pointer pointer-events-auto hover:brightness-95' : ''
+        }`}
         style={{ width: LANE_LABEL_W, backgroundColor: `${color}1f`, color, borderColor: `${color}33` }}
       >
         <RoleIcon className="h-3.5 w-3.5 shrink-0" />
@@ -1068,6 +1111,90 @@ const INFO_CATEGORY_BADGE: Record<InformationCategory, string> = {
   DOCUMENT: 'bg-violet-100 text-violet-700 border-violet-200',
 };
 
+// ===========================================
+// ドラッグ移動できる浮遊パネルの土台（共通）
+// ===========================================
+
+/**
+ * キャンバス上の浮遊パネルを「ヘッダーを掴んで自由に動かせる」ようにする小さな土台。
+ *
+ *  - 初期位置は呼び出し側が `className`（absolute left-3 top-1/2 ... 等）で指定する。
+ *    ドラッグ量は内部 state の {x,y} オフセットで持ち、`transform: translate(x,y)` で
+ *    重ねる。Tailwind の `-translate-y-1/2` のような初期 transform が必要な場合は
+ *    `baseTransform` に渡すと drag translate の前段に合成する。
+ *  - React Flow のパン/ノードドラッグを誘発しないよう全体に 'nodrag nopan'、
+ *    ヘッダーの pointerdown では e.stopPropagation() してドラッグを開始する。
+ *  - `header` はタイトル行（掴む対象）。`children` は本体。
+ *  - 折りたたみ等の状態は呼び出し側が持つ（このコンポーネントは位置だけを担当）。
+ */
+function DraggableFloating({
+  className,
+  baseTransform = '',
+  header,
+  children,
+  bodyClassName,
+  style,
+}: {
+  className: string;
+  baseTransform?: string;
+  header: ReactNode;
+  children?: ReactNode;
+  bodyClassName?: string;
+  style?: CSSProperties;
+}) {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+
+  const onHeaderPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      // 左クリック以外は無視。React Flow のパンへ伝播させない。
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      dragRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX: offset.x,
+        baseY: offset.y,
+      };
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    },
+    [offset.x, offset.y],
+  );
+
+  const onHeaderPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    e.stopPropagation();
+    setOffset({
+      x: d.baseX + (e.clientX - d.startX),
+      y: d.baseY + (e.clientY - d.startY),
+    });
+  }, []);
+
+  const endDrag = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }, []);
+
+  const transform = `${baseTransform} translate(${offset.x}px, ${offset.y}px)`.trim();
+
+  return (
+    <div className={`nodrag nopan ${className}`} style={{ ...style, transform }}>
+      <div
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        className="cursor-move touch-none select-none"
+      >
+        {header}
+      </div>
+      {children !== undefined && <div className={bodyClassName}>{children}</div>}
+    </div>
+  );
+}
+
 /**
  * 左サイドの INPUT/OUTPUT 候補パネル（④）。
  * プロジェクトの InformationType マスタ（DFD と共通の1テーブル）を一覧表示する。
@@ -1119,21 +1246,29 @@ function InformationTypeSidePanel({
   }
 
   return (
-    <div className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex max-h-[70%] w-56 flex-col rounded-lg border border-gray-200 bg-white shadow-md">
-      <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <Database className="h-4 w-4 text-indigo-500" />
-          <span className="text-[12px] font-semibold text-gray-700">INPUT/OUTPUT 候補</span>
+    <DraggableFloating
+      className="absolute left-3 top-1/2 z-20 flex max-h-[70%] w-56 flex-col rounded-lg border border-gray-200 bg-white shadow-md"
+      baseTransform="translateY(-50%)"
+      bodyClassName="flex min-h-0 flex-1 flex-col"
+      header={
+        <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <GripVertical className="h-4 w-4 shrink-0 text-gray-300" />
+            <Database className="h-4 w-4 text-indigo-500" />
+            <span className="text-[12px] font-semibold text-gray-700">INPUT/OUTPUT 候補</span>
+          </div>
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setCollapsed(true)}
+            title="折りたたむ"
+            className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setCollapsed(true)}
-          title="折りたたむ"
-          className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-      </div>
+      }
+    >
       <p className="px-3 pt-2 text-[10px] leading-snug text-gray-400">
         DFD と共通の情報種別マスタ。各ノードの INPUT/OUTPUT はノードのプロパティから選びます。
       </p>
@@ -1218,7 +1353,7 @@ function InformationTypeSidePanel({
           )}
         </div>
       )}
-    </div>
+    </DraggableFloating>
   );
 }
 
@@ -1238,21 +1373,203 @@ const ROLE_TYPE_OPTIONS: Array<{ value: RoleType; label: string }> = [
  * その場でロールを追加できる小さなフォームを持つ。
  * 追加自体は onAddRole（= rolesApi.create + 一覧再取得）に委譲する。
  */
+/** ロール編集パネルの色プリセット（スイムレーン帯の配色）。 */
+const ROLE_COLOR_PRESETS = [
+  '#3b82f6',
+  '#0ea5e9',
+  '#14b8a6',
+  '#22c55e',
+  '#84cc16',
+  '#eab308',
+  '#f97316',
+  '#ef4444',
+  '#ec4899',
+  '#a855f7',
+  '#6366f1',
+  '#64748b',
+];
+
+/**
+ * 既存ロールをクリックで編集する小パネル。
+ * 名前 input・人/システム/その他 区分・type==='SYSTEM' のとき systems から system 選択・色を編集し、
+ * 保存=onUpdateRole / 削除=onDeleteRole を呼ぶ。閉じる=onClose。
+ */
+function RoleEditPanel({
+  role,
+  systems,
+  onUpdateRole,
+  onDeleteRole,
+  onClose,
+}: {
+  role: Role;
+  systems: SystemMaster[];
+  onUpdateRole: SwimlaneCanvasProps['onUpdateRole'];
+  onDeleteRole: SwimlaneCanvasProps['onDeleteRole'];
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(role.name);
+  const [type, setType] = useState<RoleType>((role.type as RoleType) ?? 'HUMAN');
+  const [systemId, setSystemId] = useState<string>(
+    ((role as { systemId?: string | null }).systemId ?? '') || '',
+  );
+  const [color, setColor] = useState<string>(role.color || '#3b82f6');
+  const [busy, setBusy] = useState(false);
+
+  // 別のロールチップを選び直したらフォームを差し替える。
+  useEffect(() => {
+    setName(role.name);
+    setType((role.type as RoleType) ?? 'HUMAN');
+    setSystemId(((role as { systemId?: string | null }).systemId ?? '') || '');
+    setColor(role.color || '#3b82f6');
+  }, [role]);
+
+  const commitSave = useCallback(async () => {
+    const trimmed = name.trim();
+    if (!trimmed || busy || !onUpdateRole) return;
+    setBusy(true);
+    try {
+      await onUpdateRole(role.id, {
+        name: trimmed,
+        type,
+        color,
+        // SYSTEM のときだけ systemId を送る。未選択は null（紐づけ解除）。
+        systemId: type === 'SYSTEM' ? (systemId || null) : null,
+      });
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }, [name, type, color, systemId, busy, onUpdateRole, role.id, onClose]);
+
+  const commitDelete = useCallback(async () => {
+    if (busy || !onDeleteRole) return;
+    setBusy(true);
+    try {
+      await onDeleteRole(role.id);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, onDeleteRole, role.id, onClose]);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50/40 p-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold text-gray-600">ロールを編集</span>
+        <button
+          type="button"
+          onClick={onClose}
+          title="閉じる"
+          className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void commitSave();
+          if (e.key === 'Escape') onClose();
+        }}
+        placeholder="ロール名"
+        className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+      />
+      <select
+        value={type}
+        onChange={(e) => setType(e.target.value as RoleType)}
+        className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] bg-white"
+      >
+        {ROLE_TYPE_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      {/* type==='SYSTEM' のときだけ、紐づくシステムを選ぶ。 */}
+      {type === 'SYSTEM' && (
+        <select
+          value={systemId}
+          onChange={(e) => setSystemId(e.target.value)}
+          className="w-full rounded border border-gray-300 px-2 py-1 text-[12px] bg-white"
+        >
+          <option value="">（システム未選択）</option>
+          {systems.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      )}
+      {/* 色プリセット */}
+      <div className="flex flex-wrap gap-1">
+        {ROLE_COLOR_PRESETS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setColor(c)}
+            title={c}
+            className={`h-4 w-4 rounded-full border transition-transform ${
+              color.toLowerCase() === c.toLowerCase() ? 'ring-2 ring-offset-1 ring-blue-400 scale-110' : ''
+            }`}
+            style={{ backgroundColor: c, borderColor: `${c}aa` }}
+          />
+        ))}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm"
+          onClick={() => void commitSave()}
+          disabled={busy || !name.trim() || !onUpdateRole}
+          className="h-7 flex-1 text-[12px]"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : (<><Check className="mr-1 h-3 w-3" />保存</>)}
+        </Button>
+        {onDeleteRole && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void commitDelete()}
+            disabled={busy}
+            title="このロールを削除"
+            className="h-7 text-[12px] text-red-500 hover:text-red-600"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AddRoleControl({
   roles,
   onAddRole,
+  systems = [],
+  onUpdateRole,
+  onDeleteRole,
+  editingRoleId,
+  onEditRole,
 }: {
   roles: Role[];
-  onAddRole: (name: string, type: RoleType) => Promise<void>;
+  onAddRole?: (name: string, type: RoleType) => Promise<void>;
+  systems?: SystemMaster[];
+  onUpdateRole?: SwimlaneCanvasProps['onUpdateRole'];
+  onDeleteRole?: SwimlaneCanvasProps['onDeleteRole'];
+  /** 外部（レーンヘッダークリック）から開かれている編集対象ロールID。 */
+  editingRoleId?: string | null;
+  /** 編集対象ロールIDの変更を親へ通知（チップクリック / 閉じる）。 */
+  onEditRole?: (roleId: string | null) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [type, setType] = useState<RoleType>('HUMAN');
   const [busy, setBusy] = useState(false);
 
+  // ロールチップ編集が可能か（更新ハンドラがあるとき）。
+  const canEditRoles = !!onUpdateRole;
+  const editingRole = canEditRoles ? roles.find((r) => r.id === editingRoleId) ?? null : null;
+
   const commitAdd = useCallback(async () => {
     const trimmed = name.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || busy || !onAddRole) return;
     setBusy(true);
     try {
       await onAddRole(trimmed, type);
@@ -1265,36 +1582,71 @@ function AddRoleControl({
   }, [name, type, busy, onAddRole]);
 
   return (
-    <div className="flex max-w-[260px] flex-col gap-1.5">
-      <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-600">
-        <Users className="h-3.5 w-3.5 text-blue-600" />
-        ロール
-      </div>
-      {/* ロールチップ一覧（人/システム区分アイコン付き） */}
+    <DraggableFloating
+      className="flex max-w-[260px] flex-col rounded-lg border border-gray-200 bg-white p-2 shadow-sm"
+      bodyClassName="flex flex-col gap-1.5"
+      header={
+        <div className="mb-1.5 flex items-center gap-1 text-[11px] font-semibold text-gray-600">
+          <GripVertical className="h-3.5 w-3.5 shrink-0 text-gray-300" />
+          <Users className="h-3.5 w-3.5 text-blue-600" />
+          ロール
+        </div>
+      }
+    >
+      {/* ロールチップ一覧（人/システム区分アイコン付き）。
+          編集可能（onUpdateRole あり）なら、クリックで編集パネルを開く。 */}
       {roles.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {roles.map((r) => {
             const RoleIcon = roleTypeIcon(r.type);
-            return (
-              <span
-                key={r.id}
-                className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
-                style={{
-                  backgroundColor: `${r.color}14`,
-                  borderColor: `${r.color}55`,
-                  color: r.color,
-                }}
-                title={r.name}
-              >
+            const isEditing = canEditRoles && r.id === editingRoleId;
+            const chipClass =
+              'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium' +
+              (canEditRoles ? ' cursor-pointer hover:brightness-95' : '') +
+              (isEditing ? ' ring-2 ring-blue-400 ring-offset-1' : '');
+            const chipStyle = {
+              backgroundColor: `${r.color}14`,
+              borderColor: `${r.color}55`,
+              color: r.color,
+            };
+            const chipInner = (
+              <>
                 <RoleIcon className="h-3 w-3" />
                 <span className="max-w-[80px] truncate">{r.name}</span>
+                {canEditRoles && <Pencil className="h-2.5 w-2.5 opacity-50" />}
+              </>
+            );
+            return canEditRoles ? (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onEditRole?.(isEditing ? null : r.id)}
+                className={chipClass}
+                style={chipStyle}
+                title={`${r.name}（クリックで編集）`}
+              >
+                {chipInner}
+              </button>
+            ) : (
+              <span key={r.id} className={chipClass} style={chipStyle} title={r.name}>
+                {chipInner}
               </span>
             );
           })}
         </div>
       )}
+      {/* ロール編集パネル（チップ / レーンヘッダークリックで開く） */}
+      {editingRole && onUpdateRole && (
+        <RoleEditPanel
+          role={editingRole}
+          systems={systems}
+          onUpdateRole={onUpdateRole}
+          onDeleteRole={onDeleteRole}
+          onClose={() => onEditRole?.(null)}
+        />
+      )}
       {/* ＋ロール追加（名前 + 人/システム） */}
-      {adding ? (
+      {!onAddRole ? null : adding ? (
         <div className="flex flex-col gap-1.5">
           <input
             autoFocus
@@ -1346,7 +1698,7 @@ function AddRoleControl({
           ロール追加
         </button>
       )}
-    </div>
+    </DraggableFloating>
   );
 }
 
@@ -1391,6 +1743,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const [menu, setMenu] = useState<ContextMenuState>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  // ロール編集パネルで開いているロールID（ロールチップ / レーンヘッダークリックで開く）。
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  // 表示中ロールが消えた（一覧再取得で削除済み）場合は編集対象を閉じる。
+  useEffect(() => {
+    if (editingRoleId && !roles.some((r) => r.id === editingRoleId)) {
+      setEditingRoleId(null);
+    }
+  }, [roles, editingRoleId]);
   // 全画面トグル: true の間、最外ラッパを fixed inset-0 z-50 に拡大して
   // React Flow を画面いっぱいに表示する。Esc / ボタン再押下で解除。
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -1586,6 +1946,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         // 先頭レーンは前レーンが無いので手前側（上端/左端）ハンドルは出さない。
         showStartHandle: idx > 0,
         onResizeStart: handleLaneResizeStart,
+        // レーンヘッダークリックでロール編集を開く（実ロールかつ編集ハンドラありのとき）。
+        onLaneClick:
+          props.onUpdateRole && realRole ? () => setEditingRoleId(lane.roleId) : undefined,
       };
       if (isVertical) {
         const left = lane.left ?? 0;
@@ -1681,6 +2044,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     roles,
     handleLaneResizeStart,
     props.onUpdateLaneHeight,
+    props.onUpdateRole,
     props.annotations,
     props.onUpdateAnnotation,
     props.onDeleteAnnotation,
@@ -2239,13 +2603,19 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           </div>
         </Panel>
 
-        {/* ロール一覧 + フロー途中でのロール追加（左上、パンくずの下） */}
-        {props.onAddRole && (
-          <Panel
-            position="top-left"
-            className="mt-14 bg-white border border-gray-200 rounded-lg shadow-sm p-2"
-          >
-            <AddRoleControl roles={roles} onAddRole={props.onAddRole} />
+        {/* ロール一覧 + フロー途中でのロール追加 + ロール編集（左上、パンくずの下）。
+            ヘッダーを掴んで自由に動かせる（box は AddRoleControl 内の DraggableFloating が持つ）。 */}
+        {(props.onAddRole || props.onUpdateRole) && (
+          <Panel position="top-left" className="mt-14">
+            <AddRoleControl
+              roles={roles}
+              onAddRole={props.onAddRole}
+              systems={props.systems}
+              onUpdateRole={props.onUpdateRole}
+              onDeleteRole={props.onDeleteRole}
+              editingRoleId={editingRoleId}
+              onEditRole={setEditingRoleId}
+            />
           </Panel>
         )}
 

@@ -41,6 +41,7 @@ import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
 import { dfdApi, informationTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type InformationType, type InformationCategory } from '@/lib/dfd';
+import { systemApi, type SystemMaster } from '@/lib/masters';
 import { type RoleType } from '@/lib/api';
 import type {
   FlowAnnotation,
@@ -626,6 +627,8 @@ export default function ProjectFlowDetailPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
   const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
+  // システムマスタ（ロールの type==='SYSTEM' のとき紐づけ先選択肢）
+  const [systems, setSystems] = useState<SystemMaster[]>([]);
   // 注釈（付箋・コメント）。flowData.nodes/edges とは別系統で扱う（整形/転置/Undo-Redo 対象外）。
   const [annotations, setAnnotations] = useState<FlowAnnotation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -753,6 +756,15 @@ export default function ProjectFlowDetailPage() {
     }
   }, [projectId]);
 
+  // プロジェクトのシステムマスタ（ロール編集の type==='SYSTEM' 紐づけ用）
+  const fetchSystems = useCallback(async () => {
+    try {
+      setSystems(await systemApi.list(projectId));
+    } catch {
+      /* システムの取得失敗は致命ではない（system セレクトが空になるだけ） */
+    }
+  }, [projectId]);
+
   // 初期読み込み
   useEffect(() => {
     if (flowId) {
@@ -768,6 +780,10 @@ export default function ProjectFlowDetailPage() {
   useEffect(() => {
     if (projectId) fetchInformationTypes();
   }, [projectId, fetchInformationTypes]);
+
+  useEffect(() => {
+    if (projectId) fetchSystems();
+  }, [projectId, fetchSystems]);
 
   // 子フローへナビゲート
   const handleNodeDoubleClick = useCallback(
@@ -1692,6 +1708,48 @@ export default function ProjectFlowDetailPage() {
     [projectId, selectedRoleIds, roles, persistSelectedRoles, fetchRoles, getHeaders]
   );
 
+  // ロール更新（名前 / 人・システム・その他 区分 / SYSTEM のとき system 紐づけ / 色）
+  // PATCH /api/roles/:id に patch をそのまま送る → 成功後 fetchRoles で一覧更新。
+  const handleUpdateRole = useCallback(
+    async (
+      roleId: string,
+      patch: { name?: string; type?: RoleType; systemId?: string | null; color?: string }
+    ) => {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/roles/${roleId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error('Failed to update role');
+      await fetchRoles();
+    },
+    [fetchRoles, getHeaders]
+  );
+
+  // ロール削除。DELETE /api/roles/:id → 成功後 fetchRoles で一覧更新。
+  const handleDeleteRole = useCallback(
+    async (roleId: string) => {
+      // 誤クリックでレーンが消えないよう確認。担当ノードは削除されず「未割当」に戻る（FlowNode.role は SetNull）。
+      const role = roles.find((r) => r.id === roleId);
+      const assigned = (flowData?.nodes ?? []).filter(
+        (n) => (n.roleId ?? n.role?.id ?? null) === roleId
+      ).length;
+      const msg = assigned > 0
+        ? `ロール「${role?.name ?? ''}」を削除しますか？\nこのレーンの ${assigned} 件のノードは「未割当」に戻ります（ノード自体は消えません）。`
+        : `ロール「${role?.name ?? ''}」を削除しますか？`;
+      if (typeof window !== 'undefined' && !window.confirm(msg)) return;
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/roles/${roleId}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (!res.ok) throw new Error('Failed to delete role');
+      await fetchRoles();
+    },
+    [fetchRoles, getHeaders, roles, flowData]
+  );
+
   // ロールのチェック切替
   const toggleRole = useCallback(
     (roleId: string, checked: boolean) => {
@@ -2143,6 +2201,9 @@ export default function ProjectFlowDetailPage() {
           onDeleteNodeLink={handleDeleteNodeLink}
           onFetchFlowNodes={handleFetchFlowNodes}
           onAddRole={handleAddRole}
+          onUpdateRole={handleUpdateRole}
+          onDeleteRole={handleDeleteRole}
+          systems={systems}
           annotations={annotations}
           onAddAnnotation={handleAddAnnotation}
           onUpdateAnnotation={handleUpdateAnnotation}
