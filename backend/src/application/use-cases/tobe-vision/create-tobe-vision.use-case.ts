@@ -7,9 +7,37 @@ import {
   PROJECT_REPOSITORY,
   OrganizationRepository,
   ORGANIZATION_REPOSITORY,
+  IBusinessFlowRepository,
+  BUSINESS_FLOW_REPOSITORY,
   EntityNotFoundError,
   ForbiddenError,
+  ValidationError,
 } from '../../../domain';
+
+/**
+ * asisFlowId が指定された場合、その業務フローが
+ * 「存在し・同一プロジェクトに属し・kind === 'ASIS'」であることを検証する。
+ * null/未指定（紐づけ解除）はスキップ。
+ */
+export async function assertAsisFlowBelongsToProject(
+  businessFlowRepository: IBusinessFlowRepository,
+  asisFlowId: string | null | undefined,
+  projectId: string,
+): Promise<void> {
+  if (!asisFlowId) return;
+  const flow = await businessFlowRepository.findById(asisFlowId);
+  if (!flow) {
+    throw new EntityNotFoundError('BusinessFlow', asisFlowId);
+  }
+  if (flow.projectId !== projectId) {
+    throw new ValidationError(
+      'asisFlowId must reference a business flow in the same project',
+    );
+  }
+  if (flow.kind !== 'ASIS') {
+    throw new ValidationError('asisFlowId must reference an ASIS business flow');
+  }
+}
 
 export interface CreateTobeVisionInput {
   userId: string;
@@ -20,6 +48,7 @@ export interface CreateTobeVisionInput {
   effect?: string | null;
   order?: number;
   subProjectId?: string | null;
+  asisFlowId?: string | null;
 }
 
 export interface TobeVisionOutput {
@@ -31,6 +60,7 @@ export interface TobeVisionOutput {
   effect: string | null;
   order: number;
   subProjectId: string | null;
+  asisFlowId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,6 +75,7 @@ export function toTobeVisionOutput(tobeVision: TobeVision): TobeVisionOutput {
     effect: tobeVision.effect,
     order: tobeVision.order,
     subProjectId: tobeVision.subProjectId,
+    asisFlowId: tobeVision.asisFlowId,
     createdAt: tobeVision.createdAt,
     updatedAt: tobeVision.updatedAt,
   };
@@ -62,6 +93,8 @@ export class CreateTobeVisionUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    @Inject(BUSINESS_FLOW_REPOSITORY)
+    private readonly businessFlowRepository: IBusinessFlowRepository,
   ) {}
 
   async execute(input: CreateTobeVisionInput): Promise<TobeVisionOutput> {
@@ -80,6 +113,13 @@ export class CreateTobeVisionUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
+    // 2.5 asisFlowId 整合性確認（同一プロジェクトの ASIS フローのみ許可）
+    await assertAsisFlowBelongsToProject(
+      this.businessFlowRepository,
+      input.asisFlowId,
+      input.projectId,
+    );
+
     // 3. ID生成
     const id = this.tobeVisionRepository.generateId();
 
@@ -93,6 +133,7 @@ export class CreateTobeVisionUseCase {
         effect: input.effect,
         order: input.order,
         subProjectId: input.subProjectId,
+        asisFlowId: input.asisFlowId,
       },
       id,
     );

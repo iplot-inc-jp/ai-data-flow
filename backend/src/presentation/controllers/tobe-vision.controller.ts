@@ -62,6 +62,11 @@ class CreateTobeVisionDto {
   @IsOptional()
   @IsString()
   subProjectId?: string | null;
+
+  @ApiPropertyOptional({ description: '紐づくASIS業務フローID', nullable: true })
+  @IsOptional()
+  @IsString()
+  asisFlowId?: string | null;
 }
 
 class UpdateTobeVisionDto {
@@ -94,6 +99,11 @@ class UpdateTobeVisionDto {
   @IsOptional()
   @IsString()
   subProjectId?: string | null;
+
+  @ApiPropertyOptional({ description: '紐づくASIS業務フローID', nullable: true })
+  @IsOptional()
+  @IsString()
+  asisFlowId?: string | null;
 }
 
 @ApiTags('TOBEビジョン')
@@ -141,6 +151,7 @@ export class TobeVisionController {
       effect: dto.effect,
       order: dto.order,
       subProjectId: dto.subProjectId,
+      asisFlowId: dto.asisFlowId,
     });
   }
 }
@@ -173,6 +184,7 @@ export class TobeVisionByIdController {
       effect: dto.effect,
       order: dto.order,
       subProjectId: dto.subProjectId,
+      asisFlowId: dto.asisFlowId,
     });
   }
 

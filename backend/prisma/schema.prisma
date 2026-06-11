@@ -280,6 +280,8 @@ model BusinessFlow {
   snapshots           FlowSnapshot[]
   // 業務フロー上の注釈（付箋・コメント）
   annotations         FlowAnnotation[]
+  // この ASIS 業務フローを参照する TOBE ビジョン
+  asisTobeVisions     TobeVision[]             @relation("TobeVisionAsisFlow")
 
   @@map("business_flows")
 }
@@ -1608,6 +1610,8 @@ model TobeVision {
   projectId      String   @map("project_id")
   // サブ領域への紐づけ（データ連携。任意。既存 area は後方互換のため残置）
   subProjectId   String?  @map("sub_project_id")
+  // 対応する ASIS 業務フローへの紐づけ（データ連携。任意）
+  asisFlowId     String?  @map("asis_flow_id")
   area           String? // 領域
   vision         String?  @db.Text // ビジョン・あるべき姿
   countermeasure String?  @db.Text // 施策・対応
@@ -1618,6 +1622,8 @@ model TobeVision {
 
   project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   subProject SubProject?   @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  // 対応する ASIS 業務フロー
+  asisFlow   BusinessFlow? @relation("TobeVisionAsisFlow", fields: [asisFlowId], references: [id], onDelete: SetNull)
   // このビジョンに紐づくロードマップ施策
   roadmaps   TobeRoadmap[]
 

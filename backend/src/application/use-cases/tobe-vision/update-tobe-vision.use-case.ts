@@ -6,12 +6,15 @@ import {
   PROJECT_REPOSITORY,
   OrganizationRepository,
   ORGANIZATION_REPOSITORY,
+  IBusinessFlowRepository,
+  BUSINESS_FLOW_REPOSITORY,
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
 import {
   TobeVisionOutput,
   toTobeVisionOutput,
+  assertAsisFlowBelongsToProject,
 } from './create-tobe-vision.use-case';
 
 export interface UpdateTobeVisionInput {
@@ -23,6 +26,7 @@ export interface UpdateTobeVisionInput {
   effect?: string | null;
   order?: number;
   subProjectId?: string | null;
+  asisFlowId?: string | null;
 }
 
 /**
@@ -37,6 +41,8 @@ export class UpdateTobeVisionUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    @Inject(BUSINESS_FLOW_REPOSITORY)
+    private readonly businessFlowRepository: IBusinessFlowRepository,
   ) {}
 
   async execute(input: UpdateTobeVisionInput): Promise<TobeVisionOutput> {
@@ -61,6 +67,13 @@ export class UpdateTobeVisionUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
+    // 3.5 asisFlowId 整合性確認（同一プロジェクトの ASIS フローのみ許可）
+    await assertAsisFlowBelongsToProject(
+      this.businessFlowRepository,
+      input.asisFlowId,
+      tobeVision.projectId,
+    );
+
     // 4. ドメインロジック適用
     tobeVision.update({
       area: input.area,
@@ -69,6 +82,7 @@ export class UpdateTobeVisionUseCase {
       effect: input.effect,
       order: input.order,
       subProjectId: input.subProjectId,
+      asisFlowId: input.asisFlowId,
     });
 
     // 5. 永続化

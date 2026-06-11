@@ -182,6 +182,12 @@ export default function TobeManagementPage() {
     [flows]
   );
 
+  // あるべき姿・打ち手の「対応するASIS」select 用：ASIS 業務フローの一覧。
+  const asisFlows = useMemo(
+    () => flows.filter((f) => f.kind === 'ASIS'),
+    [flows]
+  );
+
   // 領域→サブ領域 を入れ子（DFS）で並べたセレクタ用の一覧。
   const flatSubProjects = useMemo(
     () => flattenSubProjects(subProjects),
@@ -221,6 +227,12 @@ export default function TobeManagementPage() {
         label: `${'　'.repeat(depth)}${sub.name}`,
       })),
     [flatSubProjects]
+  );
+
+  // あるべき姿・打ち手の「対応するASIS」select 用：ASIS フローを ID→名前で。
+  const asisFlowOptions = useMemo(
+    () => asisFlows.map((f) => ({ value: f.id, label: f.name })),
+    [asisFlows]
   );
 
   // 段階設計の「打ち手」select 用：あるべき姿・打ち手（TobeVision）を ID→ラベルで。
@@ -451,6 +463,14 @@ export default function TobeManagementPage() {
                   kind: 'select',
                   options: subProjectOptions,
                   emptyLabel: '未分類',
+                },
+                // 対応する ASIS 業務フロー（kind='ASIS'）を選んで紐づける（データ連携）。
+                {
+                  key: 'asisFlowId',
+                  label: '対応するASIS',
+                  kind: 'select',
+                  options: asisFlowOptions,
+                  emptyLabel: '—',
                 },
                 { key: 'vision', label: 'あるべき姿', kind: 'multiline' },
                 { key: 'countermeasure', label: '打ち手', kind: 'multiline' },

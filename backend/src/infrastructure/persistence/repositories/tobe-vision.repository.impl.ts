@@ -14,6 +14,7 @@ export class TobeVisionRepositoryImpl implements ITobeVisionRepository {
     id: string;
     projectId: string;
     subProjectId: string | null;
+    asisFlowId: string | null;
     area: string | null;
     vision: string | null;
     countermeasure: string | null;
@@ -26,6 +27,7 @@ export class TobeVisionRepositoryImpl implements ITobeVisionRepository {
       id: data.id,
       projectId: data.projectId,
       subProjectId: data.subProjectId,
+      asisFlowId: data.asisFlowId,
       area: data.area,
       vision: data.vision,
       countermeasure: data.countermeasure,
@@ -54,6 +56,7 @@ export class TobeVisionRepositoryImpl implements ITobeVisionRepository {
     const data = {
       projectId: tobeVision.projectId,
       subProjectId: tobeVision.subProjectId,
+      asisFlowId: tobeVision.asisFlowId,
       area: tobeVision.area,
       vision: tobeVision.vision,
       countermeasure: tobeVision.countermeasure,
