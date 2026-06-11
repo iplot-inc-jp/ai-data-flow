@@ -81,6 +81,11 @@ class CreateBusinessFlowDto {
   @IsString()
   subProjectId?: string | null;
 
+  @ApiProperty({ description: '対応するASISフローID', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  asisFlowId?: string | null;
+
   @ApiProperty({ description: 'フローフォルダID', required: false, nullable: true })
   @IsOptional()
   @IsString()
@@ -107,6 +112,11 @@ class UpdateBusinessFlowDto {
   @IsOptional()
   @IsString()
   subProjectId?: string | null;
+
+  @ApiProperty({ description: '対応するASISフローID', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  asisFlowId?: string | null;
 
   @ApiProperty({ description: 'フローフォルダID', required: false, nullable: true })
   @IsOptional()
@@ -573,10 +583,10 @@ class CreateFlowSnapshotDto {
 // ===== 注釈（付箋・コメント）DTOs =====
 
 class CreateFlowAnnotationDto {
-  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT'], required: false })
+  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT', 'ICON'], required: false })
   @IsOptional()
-  @IsIn(['STICKY', 'COMMENT'])
-  kind?: 'STICKY' | 'COMMENT';
+  @IsIn(['STICKY', 'COMMENT', 'ICON'])
+  kind?: 'STICKY' | 'COMMENT' | 'ICON';
 
   @IsOptional()
   @IsString()
@@ -594,13 +604,18 @@ class CreateFlowAnnotationDto {
   @IsOptional()
   @IsString()
   color?: string | null;
+
+  @ApiProperty({ description: 'アイコン名（kind=ICONのとき）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  icon?: string | null;
 }
 
 class UpdateFlowAnnotationDto {
-  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT'], required: false })
+  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT', 'ICON'], required: false })
   @IsOptional()
-  @IsIn(['STICKY', 'COMMENT'])
-  kind?: 'STICKY' | 'COMMENT';
+  @IsIn(['STICKY', 'COMMENT', 'ICON'])
+  kind?: 'STICKY' | 'COMMENT' | 'ICON';
 
   @IsOptional()
   @IsString()
@@ -618,6 +633,11 @@ class UpdateFlowAnnotationDto {
   @IsOptional()
   @IsString()
   color?: string | null;
+
+  @ApiProperty({ description: 'アイコン名（kind=ICONのとき）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  icon?: string | null;
 }
 
 @ApiTags('Business Flows')
@@ -815,6 +835,7 @@ export class BusinessFlowController {
       kind: dto.kind,
       confidence: dto.confidence,
       subProjectId: dto.subProjectId,
+      asisFlowId: dto.asisFlowId,
       folderId: dto.folderId,
       parentId: dto.parentId,
       depth,
@@ -837,6 +858,7 @@ export class BusinessFlowController {
     if (dto.kind) flow.setKind(dto.kind);
     if (dto.confidence) flow.setConfidence(dto.confidence);
     if (dto.subProjectId !== undefined) flow.setSubProject(dto.subProjectId);
+    if (dto.asisFlowId !== undefined) flow.setAsisFlow(dto.asisFlowId);
     if (dto.folderId !== undefined) flow.setFolder(dto.folderId);
     if (dto.laneHeights !== undefined) flow.setLaneHeights(dto.laneHeights);
 
@@ -1531,6 +1553,7 @@ export class BusinessFlowController {
         positionX: dto.positionX ?? 0,
         positionY: dto.positionY ?? 0,
         color: dto.color ?? null,
+        icon: dto.icon ?? null,
       },
     });
 
@@ -1549,17 +1572,19 @@ export class BusinessFlowController {
     await this.assertFlowMembership(flowId, user.id);
 
     const data: {
-      kind?: 'STICKY' | 'COMMENT';
+      kind?: 'STICKY' | 'COMMENT' | 'ICON';
       text?: string;
       positionX?: number;
       positionY?: number;
       color?: string | null;
+      icon?: string | null;
     } = {};
     if (dto.kind !== undefined) data.kind = dto.kind;
     if (dto.text !== undefined) data.text = dto.text;
     if (dto.positionX !== undefined) data.positionX = dto.positionX;
     if (dto.positionY !== undefined) data.positionY = dto.positionY;
     if (dto.color !== undefined) data.color = dto.color;
+    if (dto.icon !== undefined) data.icon = dto.icon;
 
     const updated = await this.prisma.flowAnnotation.update({
       where: { id },
@@ -1590,6 +1615,7 @@ export class BusinessFlowController {
     positionX: number;
     positionY: number;
     color: string | null;
+    icon: string | null;
     order: number;
     createdAt: Date;
     updatedAt: Date;
@@ -1601,6 +1627,7 @@ export class BusinessFlowController {
       positionX: a.positionX,
       positionY: a.positionY,
       color: a.color,
+      icon: a.icon,
       order: a.order,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
@@ -1932,6 +1959,7 @@ export class BusinessFlowController {
       kind: flow.kind,
       confidence: flow.confidence,
       subProjectId: flow.subProjectId,
+      asisFlowId: flow.asisFlowId,
       folderId: flow.folderId,
       parentId: flow.parentId,
       depth: flow.depth,

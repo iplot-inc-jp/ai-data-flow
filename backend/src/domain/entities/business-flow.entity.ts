@@ -12,6 +12,7 @@ export class BusinessFlow extends BaseEntity {
   private _kind: FlowKindValue;
   private _confidence: FlowConfidenceValue;
   private _subProjectId: string | null;
+  private _asisFlowId: string | null;
   private _folderId: string | null;
   private _parentId: string | null;
   private _depth: number;
@@ -26,6 +27,7 @@ export class BusinessFlow extends BaseEntity {
     kind?: FlowKindValue;
     confidence?: FlowConfidenceValue;
     subProjectId?: string | null;
+    asisFlowId?: string | null;
     folderId?: string | null;
     parentId?: string | null;
     depth?: number;
@@ -42,6 +44,7 @@ export class BusinessFlow extends BaseEntity {
     this._kind = props.kind ?? 'ASIS';
     this._confidence = props.confidence ?? 'HYPOTHESIS';
     this._subProjectId = props.subProjectId ?? null;
+    this._asisFlowId = props.asisFlowId ?? null;
     this._folderId = props.folderId ?? null;
     this._parentId = props.parentId ?? null;
     this._depth = props.depth ?? 0;
@@ -74,6 +77,10 @@ export class BusinessFlow extends BaseEntity {
 
   get subProjectId(): string | null {
     return this._subProjectId;
+  }
+
+  get asisFlowId(): string | null {
+    return this._asisFlowId;
   }
 
   get folderId(): string | null {
@@ -133,6 +140,10 @@ export class BusinessFlow extends BaseEntity {
     this._subProjectId = subProjectId;
   }
 
+  setAsisFlow(asisFlowId: string | null): void {
+    this._asisFlowId = asisFlowId;
+  }
+
   setFolder(folderId: string | null): void {
     this._folderId = folderId;
   }
@@ -155,6 +166,7 @@ export class BusinessFlow extends BaseEntity {
     kind?: FlowKindValue;
     confidence?: FlowConfidenceValue;
     subProjectId?: string | null;
+    asisFlowId?: string | null;
     folderId?: string | null;
     parentId?: string | null;
     depth?: number;

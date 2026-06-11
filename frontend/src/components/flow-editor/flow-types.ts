@@ -146,11 +146,13 @@ export type FlowNodeData = {
  */
 export type FlowAnnotation = {
   id: string;
-  /** STICKY=付箋（黄色）, COMMENT=コメント（白＋吹き出し風）。 */
-  kind: 'STICKY' | 'COMMENT';
+  /** STICKY=付箋（黄色）, COMMENT=コメント（白＋吹き出し風）, ICON=アイコン注釈（透明背景）。 */
+  kind: 'STICKY' | 'COMMENT' | 'ICON';
   text: string;
   positionX: number;
   positionY: number;
   color?: string | null;
+  /** kind==='ICON' のとき表示する lucide アイコン名（ICON_MAP のキー）。 */
+  icon?: string | null;
   order: number;
 };

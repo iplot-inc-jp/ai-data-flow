@@ -1556,7 +1556,7 @@ export default function ProjectFlowDetailPage() {
   const handleAddAnnotation = useCallback(
     async (
       kind: FlowAnnotation['kind'],
-      init?: { positionX: number; positionY: number }
+      init?: { positionX: number; positionY: number; icon?: string }
     ) => {
       if (!flowData) return;
       try {
@@ -1569,6 +1569,8 @@ export default function ProjectFlowDetailPage() {
             text: '',
             positionX: init?.positionX ?? 0,
             positionY: init?.positionY ?? 0,
+            // アイコン注釈（kind==='ICON'）のときだけ lucide アイコン名を送る。
+            ...(init?.icon ? { icon: init.icon } : {}),
           }),
         });
         if (!res.ok) throw new Error('Failed to create annotation');
@@ -1584,7 +1586,7 @@ export default function ProjectFlowDetailPage() {
   const handleUpdateAnnotation = useCallback(
     async (
       id: string,
-      patch: { text?: string; positionX?: number; positionY?: number; color?: string | null }
+      patch: { text?: string; positionX?: number; positionY?: number; color?: string | null; icon?: string | null }
     ) => {
       if (!flowData) return;
       // 楽観更新（ドラッグ移動・本文編集が即座に反映され、再取得のちらつきを避ける）

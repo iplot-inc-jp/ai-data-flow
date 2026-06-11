@@ -84,6 +84,20 @@ import {
   GripVertical,
   Pencil,
   Check,
+  Star,
+  Flag,
+  AlertTriangle,
+  CheckCircle2,
+  Zap,
+  Heart,
+  ThumbsUp,
+  Bell,
+  Bookmark,
+  Target,
+  Lightbulb,
+  Ban,
+  Smile,
+  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -347,15 +361,18 @@ export interface SwimlaneCanvasProps {
    * flow ノードとは別の専用ノード（type:'annotation'）として描画する。
    */
   annotations?: FlowAnnotation[];
-  /** 注釈を新規追加する（付箋 or コメント）。位置はビュー中央付近を渡す。 */
+  /**
+   * 注釈を新規追加する（付箋 / コメント / アイコン）。位置はビュー中央付近を渡す。
+   * kind==='ICON' のときは init.icon に lucide アイコン名（ICON_PALETTE のいずれか）を含める。
+   */
   onAddAnnotation?: (
     kind: FlowAnnotation['kind'],
-    init?: { positionX: number; positionY: number },
+    init?: { positionX: number; positionY: number; icon?: string },
   ) => void;
-  /** 注釈の本文・位置を部分更新する（本文編集の onBlur / ドラッグ停止）。 */
+  /** 注釈の本文・位置・アイコンを部分更新する（本文編集の onBlur / ドラッグ停止）。 */
   onUpdateAnnotation?: (
     id: string,
-    patch: { text?: string; positionX?: number; positionY?: number; color?: string | null },
+    patch: { text?: string; positionX?: number; positionY?: number; color?: string | null; icon?: string | null },
   ) => void;
   /** 注釈を削除する（ホバー時の ✕）。 */
   onDeleteAnnotation?: (id: string) => void;
@@ -1028,15 +1045,55 @@ type AnnotationNodeData = {
   kind: FlowAnnotation['kind'];
   text: string;
   color?: string | null;
+  /** kind==='ICON' のとき表示する lucide アイコン名（ICON_MAP のキー）。 */
+  icon?: string | null;
   onUpdateText?: (id: string, text: string) => void;
   onDelete?: (id: string) => void;
 };
 
 const ANNOTATION_W = 200;
 const ANNOTATION_MIN_H = 96;
+// アイコン注釈ノードの一辺（透明背景の小ノード。h-8 w-8 のアイコンを中央に置く）。
+const ICON_ANNOTATION_SIZE = 40;
+
+// アイコン注釈で選べる固定パレット（lucide 名）。順序がパレットの並び。
+const ICON_PALETTE = [
+  'Star',
+  'Flag',
+  'AlertTriangle',
+  'CheckCircle2',
+  'Zap',
+  'Heart',
+  'ThumbsUp',
+  'Bell',
+  'Bookmark',
+  'Target',
+  'Lightbulb',
+  'Ban',
+] as const;
+
+// アイコン名 → lucide コンポーネント。AnnotationNode / パレット双方で参照する。
+const ICON_MAP: Record<string, LucideIcon> = {
+  Star,
+  Flag,
+  AlertTriangle,
+  CheckCircle2,
+  Zap,
+  Heart,
+  ThumbsUp,
+  Bell,
+  Bookmark,
+  Target,
+  Lightbulb,
+  Ban,
+};
+
+// アイコン注釈の既定色（未指定 icon のフォールバックも含む）。
+const ICON_ANNOTATION_DEFAULT_COLOR = '#f59e0b';
 
 function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) {
   const isSticky = data.kind === 'STICKY';
+  const isIcon = data.kind === 'ICON';
   const [value, setValue] = useState(data.text ?? '');
   // 外部（再取得・楽観更新）で本文が変わったら同期。編集中の onBlur 確定後の再取得でも破綻しない。
   useEffect(() => {
@@ -1054,6 +1111,30 @@ function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) 
   const wrapperClass = isSticky
     ? 'rounded-sm border border-amber-300/70 shadow-md'
     : 'relative rounded-lg border-2 border-gray-300 bg-white shadow-md';
+
+  // アイコン注釈: 箱を出さず透明背景の小ノード。lucide アイコンを大きめ＋color で表示。
+  // ホバーで ✕ 削除（既存経路）、ドラッグ移動は flow ノードの drag stop で永続化される。
+  if (isIcon) {
+    const IconComp = ICON_MAP[data.icon ?? ''] ?? Star;
+    const iconColor = data.color || ICON_ANNOTATION_DEFAULT_COLOR;
+    return (
+      <div className="group/annotation relative flex h-full w-full items-center justify-center">
+        <IconComp className="h-8 w-8" style={{ color: iconColor }} strokeWidth={2} />
+        {/* ホバーで出る削除ボタン（付箋・コメントと同じ✕） */}
+        <button
+          type="button"
+          title="この注釈を削除"
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onDelete?.(id);
+          }}
+          className="nodrag nopan absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 shadow-sm hover:bg-red-50 hover:text-red-600 group-hover/annotation:flex"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1754,6 +1835,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // 全画面トグル: true の間、最外ラッパを fixed inset-0 z-50 に拡大して
   // React Flow を画面いっぱいに表示する。Esc / ボタン再押下で解除。
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // アイコン注釈パレット（ツールバーの「アイコン」ボタンのポップオーバー）の開閉。
+  const [iconPaletteOpen, setIconPaletteOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // --- 向き（縦/横）: flow ごとに localStorage 永続化 ---
@@ -2017,16 +2100,21 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         kind: a.kind,
         text: a.text,
         color: a.color,
+        icon: a.icon,
         onUpdateText: (id, text) => props.onUpdateAnnotation?.(id, { text }),
         onDelete: (id) => props.onDeleteAnnotation?.(id),
       };
+      // アイコン注釈は透明背景の小ノード。付箋/コメントの箱（幅 200 / 最低高 96）は出さない。
+      const isIconAnnotation = a.kind === 'ICON';
       return {
         id: a.id,
         type: 'annotation',
         position: { x: a.positionX, y: a.positionY },
         data,
-        width: ANNOTATION_W,
-        style: { width: ANNOTATION_W, minHeight: ANNOTATION_MIN_H },
+        width: isIconAnnotation ? ICON_ANNOTATION_SIZE : ANNOTATION_W,
+        style: isIconAnnotation
+          ? { width: ICON_ANNOTATION_SIZE, height: ICON_ANNOTATION_SIZE }
+          : { width: ANNOTATION_W, minHeight: ANNOTATION_MIN_H },
         draggable: true,
         selectable: true,
         connectable: false,
@@ -2320,7 +2408,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // 初期位置は現在表示中のビュー中央付近（screenToFlowPosition でラッパー中心を flow 座標へ）。
   // 取得できなければ固定オフセットにフォールバック。複数追加で重ならないよう少しずつずらす。
   const handleAddAnnotation = useCallback(
-    (kind: FlowAnnotation['kind']) => {
+    (kind: FlowAnnotation['kind'], icon?: string) => {
+      // アイコン注釈は小ノード（ICON_ANNOTATION_SIZE）、付箋/コメントは箱サイズで左上補正する。
+      const w = kind === 'ICON' ? ICON_ANNOTATION_SIZE : ANNOTATION_W;
+      const h = kind === 'ICON' ? ICON_ANNOTATION_SIZE : ANNOTATION_MIN_H;
       let cx = 80;
       let cy = 80;
       const root = wrapperRef.current;
@@ -2332,8 +2423,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             y: rect.top + rect.height / 2,
           });
           // ノード中心ではなく左上基準に置く（描画幅ぶん左へ寄せる）。
-          cx = p.x - ANNOTATION_W / 2;
-          cy = p.y - ANNOTATION_MIN_H / 2;
+          cx = p.x - w / 2;
+          cy = p.y - h / 2;
         } catch {
           /* viewport 未確定時は固定オフセット */
         }
@@ -2343,6 +2434,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       props.onAddAnnotation?.(kind, {
         positionX: cx + jitter * 16,
         positionY: cy + jitter * 16,
+        ...(icon ? { icon } : {}),
       });
     },
     [screenToFlowPosition, props],
@@ -2692,6 +2784,47 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
                   <MessageSquarePlus className="w-4 h-4 mr-1" />
                   コメント
                 </Button>
+                {/* アイコン注釈: ボタン→小さなパレットでアイコンを選んで追加。 */}
+                <div className="relative">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIconPaletteOpen((v) => !v)}
+                    className="text-gray-700"
+                    title="アイコン注釈を追加"
+                  >
+                    <Smile className="w-4 h-4 mr-1" />
+                    アイコン
+                  </Button>
+                  {iconPaletteOpen && (
+                    <>
+                      {/* 背景クリックでパレットを閉じる透明オーバーレイ */}
+                      <div
+                        className="fixed inset-0 z-30"
+                        onClick={() => setIconPaletteOpen(false)}
+                      />
+                      <div className="absolute left-0 top-full z-40 mt-1 grid grid-cols-4 gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+                        {ICON_PALETTE.map((iconName) => {
+                          const IconComp = ICON_MAP[iconName];
+                          return (
+                            <button
+                              key={iconName}
+                              type="button"
+                              title={`${iconName} を追加`}
+                              onClick={() => {
+                                handleAddAnnotation('ICON', iconName);
+                                setIconPaletteOpen(false);
+                              }}
+                              className="flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-amber-50 hover:text-amber-600"
+                            >
+                              <IconComp className="h-5 w-5" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
                 <span className="mx-0.5 h-5 w-px bg-gray-200" />
               </>
             )}

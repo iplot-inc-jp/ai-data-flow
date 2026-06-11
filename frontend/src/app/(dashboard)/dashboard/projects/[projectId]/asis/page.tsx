@@ -46,6 +46,8 @@ type BusinessFlow = {
   kind: FlowKind;
   subProjectId?: string | null;
   description?: string | null;
+  // TOBE→対応ASIS の紐づけ（TOBEフローのみ使用。null=未設定）。
+  asisFlowId?: string | null;
 };
 
 // 領域（SubProject）は TOBE と共通の SubProject マスタ。parentId で 領域→サブ領域 の入れ子を持つ。
@@ -110,27 +112,56 @@ const priorityBadge: Record<GapItem['priority'], string> = {
 };
 
 // 領域でグループ化したので、カードは領域バッジを省略しフロー名のみを表示する。
+// カード下部に「対応TOBE」セレクタを置き、選択した TOBE フロー側の asisFlowId を
+// このASISフローID に設定する（紐づけは BusinessFlow.asisFlowId に保存される）。
 function FlowCard({
   flow,
+  tobeFlows,
+  linkedTobeId,
   onOpen,
+  onChangeTobe,
 }: {
   flow: BusinessFlow;
+  tobeFlows: BusinessFlow[];
+  linkedTobeId: string | null;
   onOpen: () => void;
+  onChangeTobe: (tobeFlowId: string | null) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex w-full flex-col items-start gap-2 rounded-lg border border-gray-200 bg-white p-4 text-left transition-colors hover:border-amber-400 hover:bg-amber-50/40"
-    >
-      <div className="flex w-full items-start justify-between gap-2">
+    <div className="group flex w-full flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-amber-400 hover:bg-amber-50/40">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full items-start justify-between gap-2 text-left"
+      >
         <span className="flex items-center gap-2 font-medium text-foreground">
           <GitBranch className="h-4 w-4 shrink-0 text-amber-600" />
           <span className="truncate">{flow.name}</span>
         </span>
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 group-hover:text-amber-600" />
-      </div>
-    </button>
+      </button>
+      {/* 対応TOBE セレクタ。クリックがカード遷移へ波及しないよう stopPropagation。 */}
+      <label
+        className="flex items-center gap-2 text-xs text-muted-foreground"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="shrink-0">対応TOBE</span>
+        <select
+          value={linkedTobeId ?? UNASSIGNED}
+          onChange={(e) =>
+            onChangeTobe(e.target.value === UNASSIGNED ? null : e.target.value)
+          }
+          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-400"
+        >
+          <option value={UNASSIGNED}>—</option>
+          {tobeFlows.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 
@@ -196,6 +227,12 @@ export default function AsisManagementPage() {
     [flows]
   );
 
+  // 各ASISカードの「対応TOBE」セレクタ用：TOBE 業務フローの一覧。
+  const tobeFlows = useMemo(
+    () => flows.filter((f) => f.kind === 'TOBE'),
+    [flows]
+  );
+
   // 領域→サブ領域 を入れ子（DFS）で並べたセレクタ用の一覧。
   const flatSubProjects = useMemo(
     () => flattenSubProjects(subProjects),
@@ -224,6 +261,61 @@ export default function AsisManagementPage() {
 
   const openFlow = (id: string) =>
     router.push(`/dashboard/projects/${projectId}/flows/${id}`);
+
+  // 紐づけは TOBE 側の asisFlowId に保存する（選んだ TOBE を PUT）。
+  // 単一の TOBE フローの asisFlowId を更新し、成功したらローカル flows を反映する。
+  const putTobeAsisFlow = async (
+    tobeFlowId: string,
+    asisFlowId: string | null
+  ) => {
+    const res = await fetch(`${API_URL}/api/business-flows/${tobeFlowId}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ asisFlowId }),
+    });
+    return res.ok;
+  };
+
+  // このASISフローに対応づける TOBE を切り替える。
+  // 選択した TOBE の asisFlowId を このASISID に設定し、これまで紐づいていた別の TOBE は解除する。
+  // 選択解除（null）の場合は、現在紐づいている TOBE の asisFlowId を null にする。
+  const handleChangeTobe = async (
+    asisFlowId: string,
+    nextTobeFlowId: string | null
+  ) => {
+    setError(null);
+    const prevTobe = tobeFlows.find((t) => t.asisFlowId === asisFlowId) ?? null;
+    if (prevTobe?.id === nextTobeFlowId) return; // 変化なし
+
+    const prev = flows;
+    // 楽観的更新：旧 TOBE を解除し、新 TOBE に このASISID を設定。
+    setFlows((cur) =>
+      cur.map((f) => {
+        if (prevTobe && f.id === prevTobe.id) return { ...f, asisFlowId: null };
+        if (nextTobeFlowId && f.id === nextTobeFlowId)
+          return { ...f, asisFlowId };
+        return f;
+      })
+    );
+    try {
+      const tasks: Promise<boolean>[] = [];
+      // 以前の紐づけ先（別の TOBE）を解除。
+      if (prevTobe && prevTobe.id !== nextTobeFlowId)
+        tasks.push(putTobeAsisFlow(prevTobe.id, null));
+      // 新たに選んだ TOBE に このASISID を設定。
+      if (nextTobeFlowId)
+        tasks.push(putTobeAsisFlow(nextTobeFlowId, asisFlowId));
+      const results = await Promise.all(tasks);
+      if (results.some((ok) => !ok)) {
+        setFlows(prev);
+        setError('対応TOBEの更新に失敗しました');
+      }
+    } catch (err) {
+      console.error('Failed to update asisFlowId:', err);
+      setFlows(prev);
+      setError('対応TOBEの更新中にエラーが発生しました');
+    }
+  };
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -373,7 +465,15 @@ export default function AsisManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          tobeFlows={tobeFlows}
+                          linkedTobeId={
+                            tobeFlows.find((t) => t.asisFlowId === flow.id)
+                              ?.id ?? null
+                          }
                           onOpen={() => openFlow(flow.id)}
+                          onChangeTobe={(tobeFlowId) =>
+                            handleChangeTobe(flow.id, tobeFlowId)
+                          }
                         />
                       ))}
                     </div>
@@ -395,7 +495,15 @@ export default function AsisManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          tobeFlows={tobeFlows}
+                          linkedTobeId={
+                            tobeFlows.find((t) => t.asisFlowId === flow.id)
+                              ?.id ?? null
+                          }
                           onOpen={() => openFlow(flow.id)}
+                          onChangeTobe={(tobeFlowId) =>
+                            handleChangeTobe(flow.id, tobeFlowId)
+                          }
                         />
                       ))}
                     </div>

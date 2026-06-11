@@ -245,6 +245,8 @@ model BusinessFlow {
   confidence  FlowConfidence @default(HYPOTHESIS)
   // 親フローへの参照（階層構造）
   parentId    String?        @map("parent_id")
+  // 対応するASIS業務フローへの参照（このフローがTOBEの場合）
+  asisFlowId  String?        @map("asis_flow_id")
   // 階層の深さ（ルート=0, 子=1, 孫=2...）
   depth       Int            @default(0)
   // サブプロジェクトによるグルーピング（任意）
@@ -261,6 +263,9 @@ model BusinessFlow {
   folder              FlowFolder?              @relation(fields: [folderId], references: [id], onDelete: SetNull)
   parent              BusinessFlow?            @relation("FlowHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children            BusinessFlow[]           @relation("FlowHierarchy")
+  // 対応するASIS業務フロー（このフローがTOBEの場合）と、このASISフローを参照するTOBEフロー群
+  asisFlow            BusinessFlow?            @relation("FlowAsisTobe", fields: [asisFlowId], references: [id], onDelete: SetNull)
+  tobeFlows           BusinessFlow[]           @relation("FlowAsisTobe")
   nodes               FlowNode[]
   edges               FlowEdge[]
   // この業務フローに紐づく業務ブロック（親フローのノード）
@@ -313,6 +318,7 @@ model FlowSnapshot {
 enum FlowAnnotationKind {
   STICKY   // 付箋
   COMMENT  // コメント
+  ICON     // アイコン
 }
 
 model FlowAnnotation {
@@ -323,6 +329,7 @@ model FlowAnnotation {
   positionX Float              @default(0) @map("position_x")
   positionY Float              @default(0) @map("position_y")
   color     String?
+  icon      String?            // kind=ICON のとき lucide アイコン名
   order     Int                @default(0)
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")

@@ -50,6 +50,8 @@ type BusinessFlow = {
   kind: FlowKind;
   subProjectId?: string | null;
   description?: string | null;
+  // TOBE→対応ASIS の紐づけ（TOBEフローのみ使用。null=未設定）。
+  asisFlowId?: string | null;
 };
 
 // 領域（SubProject）は ASIS と共通の SubProject マスタ。parentId で 領域→サブ領域 の入れ子を持つ。
@@ -99,27 +101,53 @@ function flattenSubProjects(
 }
 
 // 領域でグループ化したので、カードは領域バッジを省略しフロー名のみを表示する。
+// カード下部に「対応ASIS」セレクタを置き、選択でこのTOBEフロー自身の asisFlowId を更新する。
 function FlowCard({
   flow,
+  asisFlows,
   onOpen,
+  onChangeAsis,
 }: {
   flow: BusinessFlow;
+  asisFlows: BusinessFlow[];
   onOpen: () => void;
+  onChangeAsis: (asisFlowId: string | null) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex w-full flex-col items-start gap-2 rounded-lg border border-gray-200 bg-white p-4 text-left transition-colors hover:border-emerald-400 hover:bg-emerald-50/40"
-    >
-      <div className="flex w-full items-start justify-between gap-2">
+    <div className="group flex w-full flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-emerald-400 hover:bg-emerald-50/40">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full items-start justify-between gap-2 text-left"
+      >
         <span className="flex items-center gap-2 font-medium text-foreground">
           <GitBranch className="h-4 w-4 shrink-0 text-emerald-600" />
           <span className="truncate">{flow.name}</span>
         </span>
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 group-hover:text-emerald-600" />
-      </div>
-    </button>
+      </button>
+      {/* 対応ASIS セレクタ。クリックがカード遷移へ波及しないよう stopPropagation。 */}
+      <label
+        className="flex items-center gap-2 text-xs text-muted-foreground"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="shrink-0">対応ASIS</span>
+        <select
+          value={flow.asisFlowId ?? UNASSIGNED}
+          onChange={(e) =>
+            onChangeAsis(e.target.value === UNASSIGNED ? null : e.target.value)
+          }
+          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+        >
+          <option value={UNASSIGNED}>—</option>
+          {asisFlows.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 
@@ -253,6 +281,34 @@ export default function TobeManagementPage() {
 
   const openFlow = (id: string) =>
     router.push(`/dashboard/projects/${projectId}/flows/${id}`);
+
+  // TOBEフローの「対応ASIS」を更新する。そのフロー自身を PUT し、成功したらローカル flows を更新。
+  const handleChangeAsis = async (
+    tobeFlowId: string,
+    asisFlowId: string | null
+  ) => {
+    setError(null);
+    // 楽観的更新（失敗時に元へ戻す）。
+    const prev = flows;
+    setFlows((cur) =>
+      cur.map((f) => (f.id === tobeFlowId ? { ...f, asisFlowId } : f))
+    );
+    try {
+      const res = await fetch(`${API_URL}/api/business-flows/${tobeFlowId}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ asisFlowId }),
+      });
+      if (!res.ok) {
+        setFlows(prev);
+        setError('対応ASISの更新に失敗しました');
+      }
+    } catch (err) {
+      console.error('Failed to update asisFlowId:', err);
+      setFlows(prev);
+      setError('対応ASISの更新中にエラーが発生しました');
+    }
+  };
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -400,7 +456,11 @@ export default function TobeManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          asisFlows={asisFlows}
                           onOpen={() => openFlow(flow.id)}
+                          onChangeAsis={(asisFlowId) =>
+                            handleChangeAsis(flow.id, asisFlowId)
+                          }
                         />
                       ))}
                     </div>
@@ -422,7 +482,11 @@ export default function TobeManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          asisFlows={asisFlows}
                           onOpen={() => openFlow(flow.id)}
+                          onChangeAsis={(asisFlowId) =>
+                            handleChangeAsis(flow.id, asisFlowId)
+                          }
                         />
                       ))}
                     </div>
