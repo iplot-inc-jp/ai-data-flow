@@ -37,6 +37,7 @@ import {
   ArrowLeftRight,
   Server,
   Lock,
+  Compass,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -575,6 +576,14 @@ export default function DashboardLayout({
   const { subProjects, flows } = useFlowTree(projectId)
   const { isSuperAdmin } = useCurrentUser()
 
+  // ガイド（全体マニュアル）。プロジェクト選択時のみ・サイドメニュー最上部に表示
+  const guideNav = useMemo(() => {
+    if (!projectId) return []
+    return [
+      { name: 'ガイド', href: `/dashboard/projects/${projectId}/guide`, icon: Compass },
+    ]
+  }, [projectId])
+
   // プロジェクト非依存のトップナビ（フラット）
   const baseNav = useMemo(() => {
     const nav = [
@@ -719,6 +728,23 @@ export default function DashboardLayout({
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+            {/* ガイド（全体マニュアル）: 最上部 */}
+            {guideNav.map((item) => {
+              const isActive = isLinkActive(item.href)
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  onClick={() => setSidebarOpen(false)}
+                  className={cn('sidebar-link', isActive && 'active')}
+                >
+                  <item.icon className="h-5 w-5 flex-shrink-0" />
+                  <span className="text-sm">{item.name}</span>
+                  {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
+                </Link>
+              )
+            })}
+
             {/* プロジェクト非依存のトップナビ（フラット） */}
             {baseNav.map((item) => {
               const isActive = isLinkActive(item.href)
@@ -861,6 +887,16 @@ export default function DashboardLayout({
 
             {/* アイコン列（アイコン＋その下に名前） */}
             <nav className="px-1.5 py-2 space-y-0.5">
+              {/* ガイド（全体マニュアル）: 最上部 */}
+              {guideNav.map((item) => (
+                <CollapsedNavLink
+                  key={item.name}
+                  item={item}
+                  isActive={isLinkActive(item.href)}
+                  onNavigate={() => setSidebarOpen(false)}
+                />
+              ))}
+
               {/* プロジェクト非依存のトップナビ */}
               {baseNav.map((item) => (
                 <CollapsedNavLink
