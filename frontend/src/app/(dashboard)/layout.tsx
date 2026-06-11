@@ -30,6 +30,7 @@ import {
   Target,
   ListTodo,
   GanttChartSquare,
+  CalendarClock,
   Map as MapIcon,
   ShieldAlert,
   FileSpreadsheet,
@@ -612,6 +613,7 @@ export default function DashboardLayout({
           { name: 'システム', href: `${base}/systems`, icon: Server },
           { name: '制約条件', href: `${base}/constraints`, icon: Lock },
           { name: 'ロール', href: `${base}/roles`, icon: UserCog },
+          { name: '会議マスタ', href: `${base}/meetings`, icon: CalendarClock },
         ],
       },
       {
