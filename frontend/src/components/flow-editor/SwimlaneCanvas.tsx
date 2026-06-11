@@ -43,6 +43,7 @@ import {
   useReactFlow,
   useNodesState,
   ConnectionMode,
+  SelectionMode,
   type Node,
   type Edge,
   type EdgeProps,
@@ -97,6 +98,8 @@ import {
   Lightbulb,
   Ban,
   Smile,
+  MousePointer2,
+  Hand,
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -1824,6 +1827,12 @@ function readStoredOrientation(flowId: string): FlowOrientation {
   return v === 'vertical' ? 'vertical' : 'horizontal';
 }
 
+function readStoredInteractMode(flowId: string): 'select' | 'move' {
+  if (typeof window === 'undefined') return 'select';
+  const v = window.localStorage.getItem('flow-interact-mode-' + flowId);
+  return v === 'move' ? 'move' : 'select';
+}
+
 function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const { flowData, roles } = props;
   const { fitView, getViewport, screenToFlowPosition } = useReactFlow();
@@ -1843,6 +1852,26 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   // アイコン注釈パレット（ツールバーの「アイコン」ボタンのポップオーバー）の開閉。
   const [iconPaletteOpen, setIconPaletteOpen] = useState(false);
+  // 操作モード（選択 / 移動）。embedded（比較ビュー）では使わない。
+  //   - 'select': 左ドラッグで範囲選択・ノード移動。中/右ドラッグで画面パン。Space 押しながら左ドラッグでもパン。
+  //   - 'move'  : 左ドラッグで画面パン。
+  // 向き（orientation）と同様に flow ごとに localStorage 永続化し、再マウントしても保持する。
+  const [interactMode, setInteractModeState] = useState<'select' | 'move'>('select');
+  useEffect(() => {
+    setInteractModeState(readStoredInteractMode(flowData.id));
+  }, [flowData.id]);
+  const setInteractMode = useCallback(
+    (next: 'select' | 'move' | ((m: 'select' | 'move') => 'select' | 'move')) => {
+      setInteractModeState((prev) => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('flow-interact-mode-' + flowData.id, resolved);
+        }
+        return resolved;
+      });
+    },
+    [flowData.id],
+  );
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // --- 向き（縦/横）: flow ごとに localStorage 永続化 ---
@@ -2446,6 +2475,50 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     [screenToFlowPosition, props],
   );
 
+  // --- ドロップ先レーン（ロール）判定の共通ロジック ---
+  // content ノードの左上座標とサイズ・現在の roleId を受け取り、ドロップ位置が含まれる
+  // 帯（レーン）を探して、変更すべき roleId を返す（変更不要なら undefined）。
+  // horizontal は Y で帯[top, top+height]、vertical は X で列[left, left+width]。
+  // 帯の外（上端より上 / 下端より下）に落ちた場合は最近傍の帯にスナップする。
+  // 未割当レーンは roleId を持たない（割当解除はここではしない）ので、実ロールの帯に
+  // 落ちた場合かつ現状と異なる場合のみ新しい roleId を返す。
+  // 単一ドラッグ・複数選択ドラッグの双方で同じ判定を使い、挙動を一致させる。
+  const resolveDroppedRoleId = useCallback(
+    (left: number, top: number, w: number, h: number, currentRoleId: string | null): string | undefined => {
+      if (bands.lanes.length === 0) return undefined;
+      const centerX = left + w / 2;
+      const centerY = top + h / 2;
+      const cross = isVertical ? centerX : centerY;
+      let hit = bands.lanes.find((lane) => {
+        const start = isVertical ? lane.left ?? 0 : lane.top;
+        const size = isVertical ? lane.width ?? 0 : lane.height;
+        return cross >= start && cross <= start + size;
+      });
+      if (!hit) {
+        // どの帯にも入っていなければ最近傍の帯中心へ
+        let best = bands.lanes[0];
+        let bestDist = Infinity;
+        for (const lane of bands.lanes) {
+          const center = isVertical
+            ? lane.centerX ?? (lane.left ?? 0) + (lane.width ?? 0) / 2
+            : lane.centerY;
+          const d = Math.abs(cross - center);
+          if (d < bestDist) {
+            bestDist = d;
+            best = lane;
+          }
+        }
+        hit = best;
+      }
+      const isRealRole = roles.some((r) => r.id === hit!.roleId);
+      if (isRealRole && hit!.roleId !== currentRoleId) {
+        return hit!.roleId;
+      }
+      return undefined;
+    },
+    [bands, isVertical, roles],
+  );
+
   // --- ドラッグ停止: 自由配置座標を保存 + ドロップ先レーンへロール再割当 ---
   // 旧実装は order/roleId だけ保存していたため位置がスナップバックしていた。
   // 新実装はドロップした左上座標を positionX/positionY としてそのまま保存する。
@@ -2463,59 +2536,62 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
       const w = node.width ?? NODE_W;
       const h = node.height ?? NODE_H;
-      // ドロップした左上座標（= サーバ保存値）と中心座標
+      // ドロップした左上座標（= サーバ保存値）
       const left = node.position.x;
       const top = node.position.y;
-      const centerX = left + w / 2;
-      const centerY = top + h / 2;
 
       const patch: NodeUpdatePatch = {
         positionX: left,
         positionY: top,
       };
 
-      // レーン（ロール）判定 — ドロップ位置が含まれる帯を探す。
-      // horizontal は Y で帯[top, top+height]、vertical は X で列[left, left+width]。
-      // 帯の外（上端より上 / 下端より下）に落ちた場合は最近傍の帯にスナップする。
       const src = flowData.nodes.find((n) => n.id === node.id);
       const currentRoleId = src?.roleId ?? src?.role?.id ?? null;
-
-      if (bands.lanes.length > 0) {
-        const cross = isVertical ? centerX : centerY;
-        let hit = bands.lanes.find((lane) => {
-          const start = isVertical ? lane.left ?? 0 : lane.top;
-          const size = isVertical ? lane.width ?? 0 : lane.height;
-          return cross >= start && cross <= start + size;
-        });
-        if (!hit) {
-          // どの帯にも入っていなければ最近傍の帯中心へ
-          let best = bands.lanes[0];
-          let bestDist = Infinity;
-          for (const lane of bands.lanes) {
-            const center = isVertical
-              ? lane.centerX ?? (lane.left ?? 0) + (lane.width ?? 0) / 2
-              : lane.centerY;
-            const d = Math.abs(cross - center);
-            if (d < bestDist) {
-              bestDist = d;
-              best = lane;
-            }
-          }
-          hit = best;
-        }
-        // 未割当レーンは roleId を持たない（割当解除はここではしない）ので、
-        // 実ロールの帯に落ちた場合のみロール変更を保存する。
-        const isRealRole = roles.some((r) => r.id === hit!.roleId);
-        if (isRealRole && hit!.roleId !== currentRoleId) {
-          patch.roleId = hit!.roleId;
-        }
+      const nextRoleId = resolveDroppedRoleId(left, top, w, h, currentRoleId);
+      if (nextRoleId !== undefined) {
+        patch.roleId = nextRoleId;
       }
 
       props.onUpdateNode?.(node.id, patch);
       // ローカル位置はドラッグ済みの座標のまま。保存後の再取得で同座標に戻るため
       // スナップバックは起きない。
     },
-    [bands, isVertical, roles, flowData.nodes, props],
+    [resolveDroppedRoleId, flowData.nodes, props],
+  );
+
+  // 複数選択ドラッグの保存。React Flow は複数ノードを (event, nodes) で渡すので、
+  // 各ノードについて handleNodeDragStop と同じ保存経路で永続化する。
+  // 単一ドラッグと同様に、各 content ノードはドロップ先レーンへのロール再割当
+  // (patch.roleId) も含めて保存し、挙動の不一致（位置だけ動いてレーンが変わらない /
+  // 再取得・整形・縦横転置で元レーンへ戻る）を防ぐ。
+  const handleSelectionDragStop = useCallback(
+    (_evt: unknown, nodes: Node[]) => {
+      for (const node of nodes) {
+        if (node.type === 'content') {
+          const w = node.width ?? NODE_W;
+          const h = node.height ?? NODE_H;
+          const left = node.position.x;
+          const top = node.position.y;
+          const patch: NodeUpdatePatch = {
+            positionX: left,
+            positionY: top,
+          };
+          const src = flowData.nodes.find((n) => n.id === node.id);
+          const currentRoleId = src?.roleId ?? src?.role?.id ?? null;
+          const nextRoleId = resolveDroppedRoleId(left, top, w, h, currentRoleId);
+          if (nextRoleId !== undefined) {
+            patch.roleId = nextRoleId;
+          }
+          props.onUpdateNode?.(node.id, patch);
+        } else if (node.type === 'annotation') {
+          props.onUpdateAnnotation?.(node.id, {
+            positionX: node.position.x,
+            positionY: node.position.y,
+          });
+        }
+      }
+    },
+    [resolveDroppedRoleId, flowData.nodes, props],
   );
 
   // 与えられたレイアウト（computeFlowLayout の結果）を一括保存ペイロードへ変換する。
@@ -2626,8 +2702,17 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         fitViewOptions={{ padding: 0.2 }}
         panOnScroll
         zoomOnScroll={false}
+        // 操作モード:
+        //   選択モード … 左ドラッグ=範囲選択（＋ノード移動）/ 中・右ドラッグ=パン / Space+左ドラッグ=パン
+        //   移動モード … 左ドラッグ=パン
+        // embedded（比較ビュー）は従来どおり左ドラッグで自由にパン。
+        selectionOnDrag={!props.embedded && interactMode === 'select'}
+        panOnDrag={props.embedded ? true : interactMode === 'move' ? true : [1, 2]}
+        panActivationKeyCode={'Space'}
+        selectionMode={SelectionMode.Partial}
         proOptions={{ hideAttribution: true }}
         onNodeDragStop={handleNodeDragStop}
+        onSelectionDragStop={handleSelectionDragStop}
         onPaneClick={() => { setSelectedEdgeId(null); closeMenu(); }}
         onEdgeClick={(_, edge) => { if (props.embedded) return; setSelectedEdgeId(edge.id); }}
         onNodeClick={(_, node) => {
@@ -2728,6 +2813,26 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         {!props.embedded && (
         <Panel position="top-right" className="bg-white border border-gray-200 rounded-lg shadow-sm p-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setInteractMode((m) => (m === 'select' ? 'move' : 'select'))}
+              className="text-gray-700"
+              title="選択: ドラッグで範囲選択・ノード移動／移動: ドラッグで画面移動。選択中も Space 押しながらで画面移動"
+            >
+              {interactMode === 'select' ? (
+                <>
+                  <MousePointer2 className="w-4 h-4 mr-1" />
+                  選択
+                </>
+              ) : (
+                <>
+                  <Hand className="w-4 h-4 mr-1" />
+                  移動
+                </>
+              )}
+            </Button>
+            <span className="mx-0.5 h-5 w-px bg-gray-200" />
             {(props.onUndo || props.onRedo) && (
               <>
                 <Button
