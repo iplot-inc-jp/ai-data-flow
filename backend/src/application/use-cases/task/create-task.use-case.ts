@@ -17,6 +17,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { TaskOutput, toTaskOutput } from './task.output';
+import { rollupAncestorDates } from './rollup-parent-dates';
 
 export interface CreateTaskInput {
   userId: string;
@@ -109,6 +110,11 @@ export class CreateTaskUseCase {
     );
 
     await this.taskRepository.save(task);
+
+    // 親タスクの期間ロールアップ（親は子の最小開始日・最大期日に合わせる）
+    if (task.parentId) {
+      await rollupAncestorDates(this.taskRepository, task.parentId);
+    }
 
     // 紐付けノードのラベル/種別を出力に含めるため再読込（join 済み）
     const saved = await this.taskRepository.findById(id);

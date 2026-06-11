@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { rollupAncestorDates } from './rollup-parent-dates';
 
 export interface DeleteTaskInput {
   userId: string;
@@ -50,6 +51,14 @@ export class DeleteTaskUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
+    // 削除前に旧親を保持し、削除後にその期間を再計算する
+    const oldParentId = task.parentId;
+
     await this.taskRepository.delete(input.taskId);
+
+    // 親タスクの期間ロールアップ（親は子の最小開始日・最大期日に合わせる）
+    if (oldParentId) {
+      await rollupAncestorDates(this.taskRepository, oldParentId);
+    }
   }
 }

@@ -1,4 +1,5 @@
 export * from './task.output';
+export * from './rollup-parent-dates';
 export * from './create-task.use-case';
 export * from './get-tasks.use-case';
 export * from './get-task.use-case';

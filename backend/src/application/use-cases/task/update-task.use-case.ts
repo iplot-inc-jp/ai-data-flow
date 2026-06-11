@@ -17,6 +17,7 @@ import {
   ValidationError,
 } from '../../../domain';
 import { TaskOutput, toTaskOutput } from './task.output';
+import { rollupAncestorDates, isSameDate } from './rollup-parent-dates';
 
 export interface UpdateTaskInput {
   userId: string;
@@ -96,6 +97,11 @@ export class UpdateTaskUseCase {
       await this.assertIssueNodeInProject(input.issueNodeId, task.projectId);
     }
 
+    // ロールアップ判定用に更新前の親・日付を保持
+    const oldParentId = task.parentId;
+    const oldStartDate = task.startDate;
+    const oldDueDate = task.dueDate;
+
     task.update({
       parentId: input.parentId,
       title: input.title,
@@ -117,7 +123,29 @@ export class UpdateTaskUseCase {
 
     await this.taskRepository.save(task);
 
-    // 紐付けノードのラベル/種別を出力に含めるため再読込（join 済み）
+    // 親タスクの期間ロールアップ（親は子の最小開始日・最大期日に合わせる）
+    const datesChanged =
+      !isSameDate(oldStartDate, task.startDate) ||
+      !isSameDate(oldDueDate, task.dueDate);
+    const parentChanged = oldParentId !== task.parentId;
+    if (datesChanged || parentChanged) {
+      // 自身が親（子を持つ）の場合、手編集された日付を子範囲へ揃え直す
+      const children = await this.taskRepository.findChildrenByParentId(
+        task.id,
+      );
+      if (children.length > 0) {
+        await rollupAncestorDates(this.taskRepository, task.id);
+      }
+      // 親付け替え時は旧親側も再計算
+      if (parentChanged) {
+        await rollupAncestorDates(this.taskRepository, oldParentId);
+      }
+      // 新親（変わっていなければ現在の親）を再計算
+      await rollupAncestorDates(this.taskRepository, task.parentId);
+    }
+
+    // 紐付けノードのラベル/種別を出力に含めるため再読込
+    // （join 済み + ロールアップで自身の日付が揃え直された場合も反映）
     const saved = await this.taskRepository.findById(task.id);
     return toTaskOutput(saved ?? task);
   }
