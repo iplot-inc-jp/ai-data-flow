@@ -214,3 +214,35 @@ export class UserController {
 }
 ```
 
+
+## 6. デプロイ（Vercel serverless）
+
+`backend/vercel.json` + `backend/api/index.js`（→ `dist/src/serverless.js`）で Vercel Functions として動く。
+
+### 前提（Vercel プロジェクト設定）
+
+- **Root Directory を `backend` に設定すること（必須）**。`vercel.json` のパス
+  （`api/index.js` / `dist/**`）はすべて backend 相対。プロジェクト: `brain-pro-api`。
+- **`DATABASE_URL` は Build 環境にも設定すること**。`buildCommand` 内で
+  `prisma db push` が実行されるため、Runtime だけでは足りない。
+- **`DATABASE_URL` は pooled エンドポイント**（Neon pooler / Supabase pooler / pgbouncer）
+  を指定する。serverless は同時実行インスタンスごとに PrismaClient が直接接続を張るため、
+  直結エンドポイントだと接続数上限を食い潰す。必要に応じて `?connection_limit=1` を付与。
+
+### スキーマ同期ポリシー
+
+- `buildCommand` の `prisma db push` は **`--accept-data-loss` を付けない**。
+  破壊的差分（列 DROP 等）はビルド失敗になり、古いブランチのプレビューが
+  新しい列（例: `attachments.data` とその中のファイル本体）を無警告で消すことを防ぐ。
+- スキーマ変更は `prisma/migrations/` に SQL も残す（例:
+  `20260612000000_add_attachment_data`）。ローカル dev DB へは
+  `npx prisma db push` で適用する（追加のみの非破壊変更）。
+
+### 依存解決
+
+- リポジトリは pnpm workspace だが、root の `package.json` に npm `workspaces` と
+  コミット済み `package-lock.json` もあるため、`installCommand: npm install` は
+  workspace root に遡って root の package-lock.json でバージョン固定インストールされる。
+- 注意: npm レイアウトでは `swagger-ui-dist` が repo root の `node_modules` に
+  ホイストされる。`/api/docs` の JS/CSS が 404 になる場合は `includeFiles` の
+  パス（`node_modules/swagger-ui-dist/**`）がこのホイストで届いていないのが原因。

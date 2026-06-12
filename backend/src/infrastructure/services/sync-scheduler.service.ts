@@ -21,6 +21,12 @@ export class SyncSchedulerService {
   // 毎時 0,5,10,... 分に実行（秒指定の6フィールド cron）。
   @Cron('0 */5 * * * *')
   async handleAutoSync(): Promise<void> {
+    // Vercel Functions（serverless）ではプロセスが常駐しないため cron は無効化。
+    // 手動同期エンドポイント（SyncService.runSync 経由）はそのまま使える。
+    if (process.env.VERCEL) {
+      return;
+    }
+
     const connections = await this.prisma.githubConnection.findMany({
       where: { autoSync: true },
     });

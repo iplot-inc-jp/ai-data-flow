@@ -1131,6 +1131,7 @@ model Attachment {
   pageRange String?        @map("page_range") // PDFのページ指定 例: "1-3,5"
   caption   String?
   order     Int            @default(0)
+  data      Bytes? // ファイル本体。serverless では DB 保存に使用。既存ローカル行は null=ディスク参照のまま
   createdAt DateTime       @default(now()) @map("created_at")
 
   informationTypeId String?  @map("information_type_id")
