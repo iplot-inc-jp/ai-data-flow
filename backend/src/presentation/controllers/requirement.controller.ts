@@ -14,6 +14,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsOptional, IsNumber } from 'class-validator';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService, RequirementParseResult } from '../../infrastructure/services/claude.service';
+import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { v4 as uuid } from 'uuid';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 
@@ -117,6 +118,7 @@ export class RequirementController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly claudeService: ClaudeService,
+    private readonly companyKeyService: CompanyKeyService,
   ) {}
 
   @Get('project/:projectId')
@@ -296,11 +298,14 @@ export class RequirementController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: ParseRequirementsDto,
   ) {
-    // APIキーを取得（ユーザー設定 > 環境変数）
-    const apiKey = await this.getApiKey(user.id);
+    // APIキーを取得（会社(Organization)キー > ユーザー設定 > 環境変数）
+    const apiKey = await this.companyKeyService.resolveForProject(
+      dto.projectId,
+      user.id,
+    );
     if (!apiKey) {
       throw new HttpException(
-        'Anthropic APIキーが設定されていません。設定ページでAPIキーを登録してください。',
+        'Anthropic APIキーが未設定です',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -329,20 +334,24 @@ export class RequirementController {
     @Param('id') id: string,
     @Body() body: { context?: string },
   ) {
-    const apiKey = await this.getApiKey(user.id);
-    if (!apiKey) {
-      throw new HttpException(
-        'Anthropic APIキーが設定されていません',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
     const requirement = await this.prisma.requirement.findUnique({
       where: { id },
     });
 
     if (!requirement) {
       throw new HttpException('Requirement not found', HttpStatus.NOT_FOUND);
+    }
+
+    // 会社(Organization)キー > ユーザー設定 > 環境変数 の順で解決
+    const apiKey = await this.companyKeyService.resolveForProject(
+      requirement.projectId,
+      user.id,
+    );
+    if (!apiKey) {
+      throw new HttpException(
+        'Anthropic APIキーが未設定です',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const refined = await this.claudeService.refineRequirement(
@@ -431,20 +440,6 @@ export class RequirementController {
   }
 
   // ========== Private Methods ==========
-
-  private async getApiKey(userId: string): Promise<string | null> {
-    // ユーザー設定からAPIキーを取得
-    const settings = await this.prisma.userSetting.findUnique({
-      where: { userId },
-    });
-
-    if (settings?.anthropicApiKey) {
-      return settings.anthropicApiKey;
-    }
-
-    // 環境変数にフォールバック
-    return process.env.ANTHROPIC_API_KEY || null;
-  }
 
   private async saveRequirements(
     requirements: RequirementParseResult['requirements'],

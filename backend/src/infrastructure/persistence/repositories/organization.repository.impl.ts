@@ -133,6 +133,15 @@ export class OrganizationRepositoryImpl implements OrganizationRepository {
   }
 
   async isMember(organizationId: string, userId: string): Promise<boolean> {
+    // 全体管理者（スーパー管理者）は全組織のリソースにアクセス可能
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { isSuperAdmin: true },
+    });
+    if (user?.isSuperAdmin) {
+      return true;
+    }
+
     const count = await this.prisma.organizationMember.count({
       where: { organizationId, userId },
     });

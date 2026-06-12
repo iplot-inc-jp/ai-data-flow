@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -111,6 +114,8 @@ export default function ProjectTableDetailPage() {
     description: '',
   });
 
+  const howToRef = useRef<HTMLSpanElement>(null);
+
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -174,6 +179,24 @@ export default function ProjectTableDetailPage() {
   useEffect(() => {
     fetchTableData();
   }, [fetchTableData]);
+
+  // キーボードショートカット
+  const openFirstColumnMapping = useCallback(() => {
+    const first = tableData?.columns?.[0];
+    if (!first) return;
+    setSelectedColumn(first);
+    setIsAddMappingOpen(true);
+  }, [tableData]);
+
+  useKeyboardShortcuts([
+    { combo: 'mod+enter', handler: () => openFirstColumnMapping() },
+    { combo: 'n', handler: () => openFirstColumnMapping() },
+    { combo: 'escape', handler: () => setIsAddMappingOpen(false) },
+    {
+      combo: 'shift+/',
+      handler: () => howToRef.current?.querySelector('button')?.click(),
+    },
+  ]);
 
   // CRUDマッピング追加
   const handleAddMapping = async () => {
@@ -271,7 +294,7 @@ export default function ProjectTableDetailPage() {
   return (
     <div className="space-y-6">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Link href={`/dashboard/projects/${projectId}/catalog`}>
             <Button variant="ghost" className="text-gray-600">
@@ -287,6 +310,22 @@ export default function ProjectTableDetailPage() {
             <code className="text-sm text-gray-500">{tableData.name}</code>
           </div>
         </div>
+        <span ref={howToRef} className="inline-flex">
+          <HowToPanel
+            steps={[
+              'このテーブルが持つカラム（項目）の一覧です。鍵アイコン＝主キー(PK)、リンクアイコン＝外部キー(FK)を表します。',
+              'カラムごとに「CRUD追加」を押すと、そのカラムを「どのロールが・どの業務フローで・どう操作するか」を定義できます。',
+              'CRUD操作タイプはC（作成）/R（参照）/U（更新）/D（削除）。ロールと業務フロー（任意）を紐付けると、CRUD表やER図に反映されます。',
+              '不要なCRUD操作はゴミ箱アイコンで削除できます。',
+            ]}
+            shortcuts={[
+              { keys: '⌘/Ctrl+Enter', desc: '先頭カラムのCRUD追加を開く' },
+              { keys: 'n', desc: '先頭カラムのCRUD追加を開く' },
+              { keys: 'Esc', desc: 'CRUD追加ダイアログを閉じる' },
+              { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+            ]}
+          />
+        </span>
       </div>
 
       {tableData.description && (
@@ -307,7 +346,10 @@ export default function ProjectTableDetailPage() {
       {/* カラム一覧 */}
       <Card className="bg-white border-gray-200">
         <CardHeader>
-          <CardTitle className="text-gray-900">カラム一覧</CardTitle>
+          <CardTitle className="text-gray-900 flex items-center gap-2">
+            カラム一覧
+            <HelpTooltip text="カラム＝テーブルの各項目（列）。鍵アイコンは主キー(PK＝行を一意に識別する項目)、リンクアイコンは外部キー(FK＝他テーブルを参照する項目)を表します。" />
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {tableData.columns.length === 0 ? (
@@ -316,7 +358,7 @@ export default function ProjectTableDetailPage() {
             <div className="space-y-4">
               {tableData.columns.map((column) => (
                 <div key={column.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-start justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1">
                         {column.isPrimaryKey && (
@@ -364,7 +406,10 @@ export default function ProjectTableDetailPage() {
                         </DialogHeader>
                         <div className="space-y-4 py-4">
                           <div className="space-y-2">
-                            <Label className="text-gray-700">操作タイプ</Label>
+                            <Label className="text-gray-700 flex items-center gap-1.5">
+                              操作タイプ
+                              <HelpTooltip text="CRUD＝データに対する4つの基本操作。C=Create(作成)、R=Read(参照)、U=Update(更新)、D=Delete(削除)。「誰がこのカラムに対して何をできるか」を1操作ずつ定義します。" />
+                            </Label>
                             <Select
                               value={newMapping.operation}
                               onValueChange={(v) =>
@@ -428,7 +473,10 @@ export default function ProjectTableDetailPage() {
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <Label className="text-gray-700">どのように操作するか</Label>
+                            <Label className="text-gray-700 flex items-center gap-1.5">
+                              どのように操作するか
+                              <HelpTooltip text="その操作の具体的な「打ち手（実装方針）」を一言で。例：ユーザー入力値をそのまま保存／承認後に自動採番／論理削除フラグを立てる。後工程の実装やレビューの手がかりになります。" />
+                            </Label>
                             <Input
                               value={newMapping.how}
                               onChange={(e) => setNewMapping({ ...newMapping, how: e.target.value })}

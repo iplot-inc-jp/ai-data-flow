@@ -10,6 +10,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ArrowLeft, FolderCog, Users, Loader2, Trash2, AlertTriangle } from 'lucide-react'
+import { HelpTooltip } from '@/components/ui/help-tooltip'
+import { HowToPanel } from '@/components/ui/how-to-panel'
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -137,6 +140,25 @@ export default function ProjectSettingsPage() {
     }
   };
 
+  // キーボードショートカット
+  const openHowTo = useCallback(() => {
+    document
+      .getElementById('howto-trigger-settings')
+      ?.querySelector<HTMLButtonElement>('button')
+      ?.click();
+  }, []);
+
+  useKeyboardShortcuts([
+    {
+      combo: 'mod+s',
+      whenTyping: true,
+      handler: () => {
+        if (!saving) handleSave();
+      },
+    },
+    { combo: 'shift+/', handler: openHowTo },
+  ]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -166,17 +188,33 @@ export default function ProjectSettingsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <Link href={`/dashboard/projects/${projectId}`}>
-          <Button variant="ghost" className="text-gray-600">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            戻る
-          </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">プロジェクト設定</h1>
-          <p className="text-gray-500 mt-1">{project.name} の設定を管理</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Link href={`/dashboard/projects/${projectId}`}>
+            <Button variant="ghost" className="text-gray-600">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              戻る
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">プロジェクト設定</h1>
+            <p className="text-gray-500 mt-1">{project.name} の設定を管理</p>
+          </div>
         </div>
+        <span id="howto-trigger-settings" className="contents">
+          <HowToPanel
+            steps={[
+              '「基本設定」タブでプロジェクト名・スラッグ・説明を編集し、「保存」を押します。',
+              '「ロール」タブでは登録済みロールの一覧を確認できます（追加・編集はロール管理ページへ）。',
+              '不要になったプロジェクトは「危険ゾーン」から削除できます（テーブル・フロー・ロールも全削除）。',
+              '入力中でも ⌘/Ctrl+S で保存できます。',
+            ]}
+            shortcuts={[
+              { keys: '⌘/Ctrl+S', desc: '基本設定を保存' },
+              { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+            ]}
+          />
+        </span>
       </div>
 
       {/* メッセージ表示 */}
@@ -223,7 +261,10 @@ export default function ProjectSettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-gray-700">スラッグ</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-gray-700">スラッグ</Label>
+                  <HelpTooltip text="URLに使われる識別子です。半角英数字とハイフンで構成し、プロジェクトを短く一意に表します（例：sales-system）。変更すると共有済みのURLが変わる点に注意してください。" />
+                </div>
                 <Input
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
@@ -260,6 +301,7 @@ export default function ProjectSettingsPage() {
               <CardTitle className="text-red-700 flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5" />
                 危険ゾーン
+                <HelpTooltip text="ここでの操作は取り消せません。プロジェクトを削除すると、紐づくテーブル・業務フロー・ロール・要求定義などすべてのデータが完全に失われます。実行前に必ず確認してください。" />
               </CardTitle>
               <CardDescription className="text-gray-500">
                 この操作は取り消せません
@@ -290,7 +332,10 @@ export default function ProjectSettingsPage() {
         <TabsContent value="roles">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900">ロール管理</CardTitle>
+              <CardTitle className="text-gray-900 flex items-center gap-1.5">
+                ロール管理
+                <HelpTooltip text="ロールは業務フロー図のスイムレーンに対応する担当主体（人・システム・その他）です。ここでは一覧確認のみで、追加・編集・色の変更は「ロール管理ページへ」から行います。" />
+              </CardTitle>
               <CardDescription className="text-gray-500">
                 業務フローで使用するロールを管理します
               </CardDescription>

@@ -20,11 +20,14 @@ model User {
   password  String
   name      String?
   avatarUrl String?  @map("avatar_url")
+  // 全体管理者（プラットフォーム管理者）。会社の作成等はこの権限のみ。
+  isSuperAdmin Boolean @default(false) @map("is_super_admin")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   organizationMembers OrganizationMember[]
-  settings           UserSetting?
+  settings            UserSetting?
+  apiKeys             ApiKey[]
 
   @@map("users")
 }
@@ -38,6 +41,10 @@ model Organization {
   name        String
   slug        String   @unique
   description String?
+  // 会社ステータス
+  status      String   @default("active") // active | suspended
+  // 会社ごとの Anthropic APIキー（AES-256-GCM 暗号化）。AI機能の鍵解決で最優先。
+  anthropicApiKeyEnc String? @map("anthropic_api_key_enc")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -83,6 +90,43 @@ model Project {
   roles         Role[]
   businessFlows BusinessFlow[]
   requirements  Requirement[]
+  phases        ProjectPhase[]
+  issueTrees    IssueTree[]
+  gapItems      GapItem[]
+  apiKeys       ApiKey[]
+  githubConnections GithubConnection[]
+  apiEndpoints      ApiEndpoint[]
+  subProjects       SubProject[]
+  systems           System[]
+  constraints       Constraint[]
+  attachments       Attachment[]
+  databaseConnections DatabaseConnection[]
+  flowFolders       FlowFolder[]
+  tasks             Task[]
+  dfdDiagrams       DfdDiagram[]
+  informationTypes  InformationType[]
+  stakeholders      Stakeholder[]
+  meetings          Meeting[]
+  risks             Risk[]
+  riskCategories    RiskCategory[]
+  suppliers         Supplier[]
+  products          Product[]
+  demandData        DemandData[]
+  reportCalendars   ReportCalendar[]
+  interestMatrixRows InterestMatrixRow[]
+  asisMemos         AsisMemo[]
+  tobeVisions       TobeVision[]
+  tobeRoadmaps      TobeRoadmap[]
+  analysisParetoRows      AnalysisParetoRow[]
+  analysisSensitivityRows AnalysisSensitivityRow[]
+  analysisGapRows         AnalysisGapRow[]
+  analysisLeakRows        AnalysisLeakRow[]
+  gapLedgers              GapLedger[]
+  roadmapPhases           RoadmapPhase[]
+  charter                 ProjectCharter?
+  changeRequests          ChangeRequest[]
+  lessons                 LessonLearned[]
+  adoptionStatuses        AdoptionStatus[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -95,18 +139,29 @@ model Project {
 model Role {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId     String?  @map("system_id")
+  subProjectId String?  @map("sub_project_id")
   name        String
   type        RoleType @default(HUMAN)
   description String?
   color       String?
   order       Int      @default(0)
   laneHeight  Int      @default(120) @map("lane_height") // スイムレーンの高さ
+  responsibility String? @db.Text
+  decisionScope  String? @map("decision_scope") @db.Text
+  kpi            String? @db.Text
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  system       System?       @relation(fields: [systemId], references: [id], onDelete: SetNull)
+  subProject   SubProject?   @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   flowNodes    FlowNode[]
   crudMappings CrudMapping[]
+  apiRolePermissions    ApiRolePermission[]
+  statusRolePermissions StatusRolePermission[]
+  assignedTasks         Task[]                 @relation("RoleAssignedTasks")
 
   @@unique([projectId, name])
   @@map("roles")
@@ -125,6 +180,8 @@ enum RoleType {
 model Table {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 紐づく情報種別マスタ（共通マスタ基盤。任意）
+  informationTypeId String? @map("information_type_id")
   name        String
   displayName String?  @map("display_name")
   description String?
@@ -132,8 +189,10 @@ model Table {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  columns Column[]
+  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
+  columns  Column[]
+  statuses TableStatus[]
 
   @@unique([projectId, name])
   @@map("tables")
@@ -157,7 +216,7 @@ model Column {
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")
 
-  table            Table                    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  table            Table             @relation(fields: [tableId], references: [id], onDelete: Cascade)
   crudMappings     CrudMapping[]
   interfaceColumns InterfaceColumn[]
 
@@ -182,29 +241,138 @@ enum ColumnDataType {
 // ===========================================
 
 model BusinessFlow {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
+  id          String         @id @default(uuid())
+  projectId   String         @map("project_id")
   name        String
   description String?
-  version     Int      @default(1)
+  version     Int            @default(1)
+  // ASIS / TOBE 判別子と確信度（Ph.1仮説→Ph.2確定の昇格）
+  kind        FlowKind       @default(ASIS)
+  confidence  FlowConfidence @default(HYPOTHESIS)
   // 親フローへの参照（階層構造）
-  parentId    String?  @map("parent_id")
+  parentId    String?        @map("parent_id")
+  // 対応するASIS業務フローへの参照（このフローがTOBEの場合）
+  asisFlowId  String?        @map("asis_flow_id")
   // 階層の深さ（ルート=0, 子=1, 孫=2...）
-  depth       Int      @default(0)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  depth       Int            @default(0)
+  // サブプロジェクトによるグルーピング（任意）
+  subProjectId String?       @map("sub_project_id")
+  // フォルダによるグルーピング（任意）
+  folderId    String?        @map("folder_id")
+  // スイムレーンのロール別レーン高さ（手動リサイズの永続化）。{ [roleId]: height } のマップ
+  laneHeights Json           @default("{}") @map("lane_heights")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
 
-  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parent       BusinessFlow?  @relation("FlowHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children     BusinessFlow[] @relation("FlowHierarchy")
-  nodes        FlowNode[]
-  edges        FlowEdge[]
+  project             Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject          SubProject?              @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  folder              FlowFolder?              @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  parent              BusinessFlow?            @relation("FlowHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children            BusinessFlow[]           @relation("FlowHierarchy")
+  // 対応するASIS業務フロー（このフローがTOBEの場合）と、このASISフローを参照するTOBEフロー群
+  asisFlow            BusinessFlow?            @relation("FlowAsisTobe", fields: [asisFlowId], references: [id], onDelete: SetNull)
+  tobeFlows           BusinessFlow[]           @relation("FlowAsisTobe")
+  nodes               FlowNode[]
+  edges               FlowEdge[]
   // この業務フローに紐づく業務ブロック（親フローのノード）
-  parentNode   FlowNode?      @relation("NodeChildFlow")
-  crudMappings CrudMapping[]
+  parentNode          FlowNode?                @relation("NodeChildFlow")
+  crudMappings        CrudMapping[]
   requirementMappings RequirementFlowMapping[]
+  gapAsisItems        GapItem[]                @relation("GapAsisFlow")
+  gapTobeItems        GapItem[]                @relation("GapTobeFlow")
+  // 他フローのノードからこのフローへ向かう入出力リンク
+  nodeLinkTargets     FlowNodeLink[]           @relation("NodeLinkTargetFlow")
+  definition          FlowDefinition?
+  dfd                 DfdDiagram?              @relation("FlowDfd")
+  dfdNodeRefs         DfdNode[]                @relation("DfdNodeRefFlow")
+  cruoaCols           CruoaCol[]
+  cruoaRows           CruoaRow[]
+  // Undo/Redo 用スナップショット履歴
+  snapshots           FlowSnapshot[]
+  // 業務フロー上の注釈（付箋・コメント）
+  annotations         FlowAnnotation[]
+  // この ASIS 業務フローを参照する TOBE ビジョン
+  asisTobeVisions     TobeVision[]             @relation("TobeVisionAsisFlow")
+  // この業務フローに紐づく添付ファイル
+  attachments         Attachment[]             @relation("FlowAttachments")
 
   @@map("business_flows")
+}
+
+// ===========================================
+// 業務フロー Undo/Redo スナップショット履歴
+// 1スナップショット = フローの編集状態 JSON（nodes/edges）
+// ===========================================
+
+model FlowSnapshot {
+  id        String   @id @default(uuid())
+  flowId    String   @map("flow_id")
+  seq       Int
+  label     String?
+  data      Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId, seq])
+  @@map("flow_snapshots")
+}
+
+// ===========================================
+// 業務フロー上の注釈（付箋・コメント）
+// キャンバス上の自由配置メモ。ノード/エッジには紐づかない
+// ===========================================
+
+enum FlowAnnotationKind {
+  STICKY   // 付箋
+  COMMENT  // コメント
+  ICON     // アイコン
+}
+
+model FlowAnnotation {
+  id        String             @id @default(uuid())
+  flowId    String             @map("flow_id")
+  kind      FlowAnnotationKind @default(STICKY)
+  text      String             @default("") @db.Text
+  positionX Float              @default(0) @map("position_x")
+  positionY Float              @default(0) @map("position_y")
+  // 付箋・アイコンのサイズ（手動リサイズの永続化）。null=従来固定サイズ扱い
+  width     Float?             @map("width")
+  height    Float?             @map("height")
+  color     String?
+  icon      String?            // kind=ICON のとき lucide アイコン名
+  order     Int                @default(0)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+  @@map("flow_annotations")
+}
+
+model FlowDefinition {
+  id                String   @id @default(uuid())
+  flowId            String   @unique @map("flow_id")
+  purpose           String?  @db.Text
+  owner             String?
+  stakeholders      String?  @db.Text
+  input             String?  @db.Text
+  inputDetail       String?  @db.Text @map("input_detail")
+  trigger           String?  @db.Text
+  doSteps           Json     @default("[]") @map("do_steps")
+  output            String?  @db.Text
+  nextProcess       String?  @db.Text @map("next_process")
+  exceptionHandling String?  @db.Text @map("exception_handling")
+  frequency         String?
+  system            String?
+  tacitNotes        String?  @db.Text @map("tacit_notes")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@map("flow_definitions")
 }
 
 // 業務ブロック（四角形・ひし形など）
@@ -216,21 +384,39 @@ model FlowNode {
   description String?
   positionX   Float        @map("position_x")
   positionY   Float        @map("position_y")
+  // ノードのサイズ（手動リサイズの永続化）。null=従来固定サイズ扱い
+  width       Float?       @map("width")
+  height      Float?       @map("height")
+  // 時系列順（構造ベース自動レイアウトのタイブレーク。layerはエッジから導出）
+  order       Int          @default(0)
   roleId      String?      @map("role_id")
   // 業務ブロックが子フローを持つ場合の参照
   childFlowId String?      @unique @map("child_flow_id")
+  // 処理時間・対応数・補足（metadata から実カラム化）
+  processingTime String?   @map("processing_time")
+  handledCount   String?   @map("handled_count")
+  supplement     String?   @map("supplement")
   metadata    Json         @default("{}")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
 
-  flow          BusinessFlow   @relation(fields: [flowId], references: [id], onDelete: Cascade)
-  role          Role?          @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  flow                BusinessFlow             @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  role                Role?                    @relation(fields: [roleId], references: [id], onDelete: SetNull)
   // この業務ブロックの子フロー
-  childFlow     BusinessFlow?  @relation("NodeChildFlow", fields: [childFlowId], references: [id], onDelete: SetNull)
-  crudMappings  CrudMapping[]
-  sourceEdges   FlowEdge[]     @relation("SourceNode")
-  targetEdges   FlowEdge[]     @relation("TargetNode")
+  childFlow           BusinessFlow?            @relation("NodeChildFlow", fields: [childFlowId], references: [id], onDelete: SetNull)
+  crudMappings        CrudMapping[]
+  sourceEdges         FlowEdge[]               @relation("SourceNode")
+  targetEdges         FlowEdge[]               @relation("TargetNode")
   requirementMappings RequirementFlowMapping[]
+  gapAsisNodes        GapItem[]                @relation("GapAsisNode")
+  gapTobeNodes        GapItem[]                @relation("GapTobeNode")
+  // このノードが持つクロスフロー入出力リンク
+  links               FlowNodeLink[]           @relation("NodeLinks")
+  // 他ノードのリンクがこのノードを参照しているもの
+  linkTargets         FlowNodeLink[]           @relation("NodeLinkTargetNode")
+  dfdNodeRefs         DfdNode[]                @relation("DfdNodeRefNode")
+  // このノードの入出力（情報種別マスタとの紐づけ）
+  informationLinks    NodeInformationLink[]
 
   @@map("flow_nodes")
 }
@@ -238,8 +424,8 @@ model FlowNode {
 enum FlowNodeType {
   START
   END
-  PROCESS       // 四角形：処理・業務
-  DECISION      // ひし形：分岐
+  PROCESS // 四角形：処理・業務
+  DECISION // ひし形：分岐
   SYSTEM_INTEGRATION
   MANUAL_OPERATION
   DATA_STORE
@@ -250,17 +436,95 @@ model FlowEdge {
   flowId       String   @map("flow_id")
   sourceNodeId String   @map("source_node_id")
   targetNodeId String   @map("target_node_id")
+  sourceHandle String?  @map("source_handle")
+  targetHandle String?  @map("target_handle")
   label        String?
   condition    String?
+  // この矢印上を流れるデータ（情報種別マスタとの紐づけ）
+  informationTypeId String? @map("information_type_id")
+  // 線の形状: 'smoothstep'(角ばり,既定) | 'bezier'(曲線) | 'straight'(直線)
+  pathStyle    String?  @map("path_style")
+  // ラベル文字・運ぶ情報チップの「パス上の位置」を 0〜1 の割合で保持（未設定=0.5中央）
+  labelT       Float?   @map("label_t")
+  infoT        Float?   @map("info_t")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   flow                 BusinessFlow          @relation(fields: [flowId], references: [id], onDelete: Cascade)
   sourceNode           FlowNode              @relation("SourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
   targetNode           FlowNode              @relation("TargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
+  informationType      InformationType?      @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
   interfaceDefinitions InterfaceDefinition[]
 
   @@map("flow_edges")
+}
+
+// ===========================================
+// フローフォルダ（業務フローの入れ子グルーピング）
+// ===========================================
+
+model FlowFolder {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  // 親フォルダ（入れ子フォルダ）
+  parentId  String?  @map("parent_id")
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent        FlowFolder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children      FlowFolder[]   @relation("FolderTree")
+  businessFlows BusinessFlow[]
+
+  @@map("flow_folders")
+}
+
+// ===========================================
+// クロスフロー入出力リンク（ノード ⇔ 他フロー/他ノード）
+// ===========================================
+
+enum FlowLinkDirection {
+  INPUT
+  OUTPUT
+}
+
+model FlowNodeLink {
+  id           String            @id @default(uuid())
+  nodeId       String            @map("node_id")
+  direction    FlowLinkDirection
+  targetFlowId String            @map("target_flow_id")
+  targetNodeId String?           @map("target_node_id")
+  label        String?
+  order        Int               @default(0)
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  node       FlowNode     @relation("NodeLinks", fields: [nodeId], references: [id], onDelete: Cascade)
+  targetFlow BusinessFlow @relation("NodeLinkTargetFlow", fields: [targetFlowId], references: [id], onDelete: Cascade)
+  targetNode FlowNode?    @relation("NodeLinkTargetNode", fields: [targetNodeId], references: [id], onDelete: SetNull)
+
+  @@map("flow_node_links")
+}
+
+// ===========================================
+// ノード入出力 ⇔ 情報種別マスタ
+// （ノードのINPUT/OUTPUTを情報種別マスタから選ぶ）
+// ===========================================
+
+model NodeInformationLink {
+  id                String   @id @default(uuid())
+  nodeId            String   @map("node_id")
+  informationTypeId String   @map("information_type_id")
+  direction         FlowLinkDirection
+  order             Int      @default(0)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  node            FlowNode        @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  informationType InformationType @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
+
+  @@map("node_information_links")
 }
 
 // ===========================================
@@ -288,10 +552,10 @@ model CrudMapping {
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
 
-  column   Column        @relation(fields: [columnId], references: [id], onDelete: Cascade)
-  role     Role          @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  flow     BusinessFlow? @relation(fields: [flowId], references: [id], onDelete: SetNull)
-  flowNode FlowNode?     @relation(fields: [flowNodeId], references: [id], onDelete: SetNull)
+  column              Column                   @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  role                Role                     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  flow                BusinessFlow?            @relation(fields: [flowId], references: [id], onDelete: SetNull)
+  flowNode            FlowNode?                @relation(fields: [flowNodeId], references: [id], onDelete: SetNull)
   requirementMappings RequirementCrudMapping[]
 
   @@map("crud_mappings")
@@ -351,15 +615,15 @@ model InterfaceColumn {
 // ===========================================
 
 model UserSetting {
-  id        String   @id @default(uuid())
-  userId    String   @unique @map("user_id")
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
   // API Keys（暗号化して保存）
-  anthropicApiKey String? @map("anthropic_api_key")
-  openaiApiKey    String? @map("openai_api_key")
+  anthropicApiKey String?  @map("anthropic_api_key")
+  openaiApiKey    String?  @map("openai_api_key")
   // その他の設定
-  settings  Json     @default("{}")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  settings        Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -371,45 +635,45 @@ model UserSetting {
 // ===========================================
 
 model Requirement {
-  id          String            @id @default(uuid())
-  projectId   String            @map("project_id")
+  id           String              @id @default(uuid())
+  projectId    String              @map("project_id")
   // 階層構造
-  parentId    String?           @map("parent_id")
-  depth       Int               @default(0)
-  order       Int               @default(0)
+  parentId     String?             @map("parent_id")
+  depth        Int                 @default(0)
+  order        Int                 @default(0)
   // 要求内容
-  code        String?           // 要求番号（例：REQ-001）
-  title       String
-  description String?           @db.Text
+  code         String? // 要求番号（例：REQ-001）
+  title        String
+  description  String?             @db.Text
   // 元の自然言語入力
-  originalText String?          @map("original_text") @db.Text
+  originalText String?             @map("original_text") @db.Text
   // 要求タイプ
-  type        RequirementType   @default(FUNCTIONAL)
-  priority    RequirementPriority @default(MEDIUM)
-  status      RequirementStatus @default(DRAFT)
+  type         RequirementType     @default(FUNCTIONAL)
+  priority     RequirementPriority @default(MEDIUM)
+  status       RequirementStatus   @default(DRAFT)
   // メタデータ
-  metadata    Json              @default("{}")
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
+  metadata     Json                @default("{}")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
 
   project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parent   Requirement?  @relation("RequirementHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children Requirement[] @relation("RequirementHierarchy")
-  
+
   // 業務フロー・CRUDとの紐付け
-  flowMappings    RequirementFlowMapping[]
-  crudMappings    RequirementCrudMapping[]
+  flowMappings RequirementFlowMapping[]
+  crudMappings RequirementCrudMapping[]
 
   @@map("requirements")
 }
 
 enum RequirementType {
-  FUNCTIONAL        // 機能要求
-  NON_FUNCTIONAL    // 非機能要求
-  BUSINESS_RULE     // ビジネスルール
-  CONSTRAINT        // 制約
-  INTERFACE         // インターフェース要求
-  DATA              // データ要求
+  FUNCTIONAL // 機能要求
+  NON_FUNCTIONAL // 非機能要求
+  BUSINESS_RULE // ビジネスルール
+  CONSTRAINT // 制約
+  INTERFACE // インターフェース要求
+  DATA // データ要求
 }
 
 enum RequirementPriority {
@@ -428,10 +692,10 @@ enum RequirementStatus {
 
 // 要求と業務フローの紐付け
 model RequirementFlowMapping {
-  id            String @id @default(uuid())
-  requirementId String @map("requirement_id")
-  flowId        String @map("flow_id")
-  flowNodeId    String? @map("flow_node_id")
+  id            String   @id @default(uuid())
+  requirementId String   @map("requirement_id")
+  flowId        String   @map("flow_id")
+  flowNodeId    String?  @map("flow_node_id")
   description   String?
   createdAt     DateTime @default(now()) @map("created_at")
 
@@ -444,9 +708,9 @@ model RequirementFlowMapping {
 
 // 要求とCRUDマッピングの紐付け
 model RequirementCrudMapping {
-  id            String @id @default(uuid())
-  requirementId String @map("requirement_id")
-  crudMappingId String @map("crud_mapping_id")
+  id            String   @id @default(uuid())
+  requirementId String   @map("requirement_id")
+  crudMappingId String   @map("crud_mapping_id")
   description   String?
   createdAt     DateTime @default(now()) @map("created_at")
 
@@ -454,4 +718,1341 @@ model RequirementCrudMapping {
   crudMapping CrudMapping @relation(fields: [crudMappingId], references: [id], onDelete: Cascade)
 
   @@map("requirement_crud_mappings")
+}
+
+// ===========================================
+// プロジェクトフェーズ（Ph.0〜Ph.7 パイプライン）
+// ===========================================
+
+model ProjectPhase {
+  id        String      @id @default(uuid())
+  projectId String      @map("project_id")
+  kind      PhaseKind
+  order     Int         @default(0)
+  status    PhaseStatus @default(NOT_STARTED)
+  summary   String?     @db.Text
+  detail    String?     @db.Text
+  metadata  Json        @default("{}")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+
+  @@unique([projectId, kind])
+  @@map("project_phases")
+}
+
+enum PhaseKind {
+  BACKGROUND // Ph.0 構想・背景理解
+  ASIS_DATA // Ph.1 現状把握（データ）
+  HEARING // Ph.2 現状把握（ヒアリング）
+  ISSUE_ANALYSIS // Ph.3 課題構造化（イシューツリー）
+  TOBE // Ph.4 TOBE設計
+  PROPOSAL // Ph.5 提案・合意形成
+  REQUIREMENTS // Ph.6 要件定義
+  EXECUTION // Ph.7 推進・実行管理＋動作確認
+}
+
+enum PhaseStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  APPROVED
+  DONE
+}
+
+// ===========================================
+// イシューツリー（なぜ型 / 打ち手型）
+// ===========================================
+
+model IssueTree {
+  id           String           @id @default(uuid())
+  projectId    String           @map("project_id")
+  // 旧: ツリー型（WHY/SOLUTION）。互換のため残置。新規は pattern を使う。
+  type         IssueTreeType
+  // 新: ツリーパターン（作成時に選ぶテンプレ）
+  pattern      IssueTreePattern @default(ISSUE_POINT)
+  name         String
+  rootQuestion String?          @map("root_question") @db.Text
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  project  Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  nodes    IssueNode[]
+  // この打ち手ツリーが改善対象とする GAP（SOLUTION型 ⇔ GapItem）
+  gapItems GapItem[]
+
+  @@map("issue_trees")
+}
+
+enum IssueTreeType {
+  WHY // なぜ型（調査・原因究明）
+  SOLUTION // 打ち手型（How・MECEアクション）
+}
+
+enum IssueTreePattern {
+  ISSUE_POINT // イシューツリー（論点・調査）
+  WHY // Whyツリー（原因究明）
+  WHAT // Whatツリー（対象分割）
+  HOW // Howツリー（打ち手・発散）
+  MECE_ACTION // MECEアクションツリー（打ち手・網羅）
+  KPI // KPIツリー
+}
+
+model IssueNode {
+  id              String             @id @default(uuid())
+  treeId          String             @map("tree_id")
+  parentId        String?            @map("parent_id")
+  depth           Int                @default(0)
+  order           Int                @default(0)
+  label           String             @db.Text
+  kind            IssueNodeKind      @default(ISSUE)
+  verification    NodeVerification   @default(NA)
+  recommendation  NodeRecommendation @default(NA)
+  evidence        String?            @db.Text
+  // SOLUTION型の根本原因ノードが参照する WHY型の確定ノード（任意）
+  rootCauseNodeId String?            @map("root_cause_node_id")
+  metadata        Json               @default("{}")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  tree     IssueTree   @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  parent   IssueNode?  @relation("IssueNodeHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children IssueNode[] @relation("IssueNodeHierarchy")
+  tasks    Task[]
+
+  @@map("issue_nodes")
+}
+
+enum NodeVerification {
+  CONFIRMED // ○ 裏付けあり/確定
+  REJECTED // × 否定/不支持
+  UNKNOWN // △ データで言えない
+  NEEDS_HEARING // 【未確認/要ヒアリング】
+  NA // 検証対象外（SOLUTION型など）
+}
+
+enum NodeRecommendation {
+  ADOPT // 採用
+  HOLD // 保留
+  REJECT // 不採用
+  NA
+}
+
+// ===========================================
+// GAP（ASIS と TOBE の差分＝本当の課題）
+// ===========================================
+
+model GapItem {
+  id              String      @id @default(uuid())
+  projectId       String      @map("project_id")
+  phaseId         String?     @map("phase_id")
+  businessArea    String      @map("business_area")
+  asisDescription String?     @map("asis_description") @db.Text
+  tobeDescription String?     @map("tobe_description") @db.Text
+  gapDescription  String?     @map("gap_description") @db.Text
+  priority        GapPriority @default(MEDIUM)
+  status          GapStatus   @default(OPEN)
+  ownerName       String?     @map("owner_name")
+  order           Int         @default(0)
+  // スコープ外フラグ（今回の取り組み範囲から除外した GAP）
+  outOfScope      Boolean     @default(false) @map("out_of_scope")
+  // ASIS / TOBE フロー・ノードへの差分マッピング（全て任意）
+  asisFlowId      String?     @map("asis_flow_id")
+  asisNodeId      String?     @map("asis_node_id")
+  tobeFlowId      String?     @map("tobe_flow_id")
+  tobeNodeId      String?     @map("tobe_node_id")
+  // この GAP を改善する打ち手ツリー（SOLUTION型 IssueTree, 任意）
+  issueTreeId     String?     @map("issue_tree_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  asisFlow  BusinessFlow? @relation("GapAsisFlow", fields: [asisFlowId], references: [id], onDelete: SetNull)
+  tobeFlow  BusinessFlow? @relation("GapTobeFlow", fields: [tobeFlowId], references: [id], onDelete: SetNull)
+  asisNode  FlowNode?     @relation("GapAsisNode", fields: [asisNodeId], references: [id], onDelete: SetNull)
+  tobeNode  FlowNode?     @relation("GapTobeNode", fields: [tobeNodeId], references: [id], onDelete: SetNull)
+  issueTree IssueTree?    @relation(fields: [issueTreeId], references: [id], onDelete: SetNull)
+  ledger    GapLedger?
+
+  @@map("gap_items")
+}
+
+enum GapPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum GapStatus {
+  OPEN
+  RESOLVED
+}
+
+// ===========================================
+// 公開APIキー（/api/v1 + MCP用）
+// ===========================================
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  projectId  String?   @map("project_id")
+  name       String
+  keyHash    String    @unique @map("key_hash")
+  keyPrefix  String    @map("key_prefix")
+  scopes     String[]  @default([])
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// BusinessFlow 用の判別子
+enum FlowKind {
+  ASIS
+  TOBE
+}
+
+enum FlowConfidence {
+  HYPOTHESIS
+  CONFIRMED
+}
+
+// ===========================================
+// GitHub連携 + コードからのAI抽出（背景エージェント）
+// ===========================================
+
+model GithubConnection {
+  id                  String    @id @default(uuid())
+  projectId           String    @map("project_id")
+  repoFullName        String    @map("repo_full_name") // owner/repo
+  branch              String    @default("main")
+  tokenEnc            String    @map("token_enc") // AES-256-GCM 暗号化PAT
+  autoSync            Boolean   @default(false) @map("auto_sync")
+  syncIntervalMinutes Int       @default(30) @map("sync_interval_minutes")
+  lastSyncedSha       String?   @map("last_synced_sha")
+  lastSyncedAt        DateTime? @map("last_synced_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  project Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs    SyncRun[]
+
+  @@unique([projectId, repoFullName])
+  @@map("github_connections")
+}
+
+model SyncRun {
+  id           String        @id @default(uuid())
+  connectionId String        @map("connection_id")
+  status       SyncRunStatus @default(PENDING)
+  trigger      SyncTrigger   @default(MANUAL)
+  commitSha    String?       @map("commit_sha")
+  summary      Json          @default("{}") // {apis,tables,statuses,roles} 件数
+  error        String?       @db.Text
+  log          String?       @db.Text
+  startedAt    DateTime      @default(now()) @map("started_at")
+  finishedAt   DateTime?     @map("finished_at")
+
+  connection GithubConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@map("sync_runs")
+}
+
+enum SyncRunStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum SyncTrigger {
+  MANUAL
+  AUTO
+}
+
+model ApiEndpoint {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  method     String // GET/POST/PUT/DELETE/...
+  path       String
+  summary    String?
+  sourceFile String?  @map("source_file")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rolePermissions ApiRolePermission[]
+
+  @@unique([projectId, method, path])
+  @@map("api_endpoints")
+}
+
+model ApiRolePermission {
+  id            String  @id @default(uuid())
+  apiEndpointId String  @map("api_endpoint_id")
+  roleId        String  @map("role_id")
+  allowed       Boolean @default(true)
+  note          String?
+
+  apiEndpoint ApiEndpoint @relation(fields: [apiEndpointId], references: [id], onDelete: Cascade)
+  role        Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([apiEndpointId, roleId])
+  @@map("api_role_permissions")
+}
+
+model TableStatus {
+  id        String   @id @default(uuid())
+  tableId   String   @map("table_id")
+  value     String // 例: 下書き / 申請中 / 承認済み
+  label     String?
+  color     String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  table           Table                  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  rolePermissions StatusRolePermission[]
+
+  @@unique([tableId, value])
+  @@map("table_statuses")
+}
+
+model StatusRolePermission {
+  id            String   @id @default(uuid())
+  tableStatusId String   @map("table_status_id")
+  roleId        String   @map("role_id")
+  operations    String[] @default([]) // 許可操作: C/R/U/D/承認 等
+  note          String?
+
+  tableStatus TableStatus @relation(fields: [tableStatusId], references: [id], onDelete: Cascade)
+  role        Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([tableStatusId, roleId])
+  @@map("status_role_permissions")
+}
+
+// ===========================================
+// サブプロジェクト / 添付ファイル
+// ===========================================
+
+model SubProject {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  // 親サブ領域（領域→サブ領域の入れ子。任意）
+  parentId    String?  @map("parent_id")
+  name        String
+  description String?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent        SubProject?  @relation("SubProjectTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children      SubProject[] @relation("SubProjectTree")
+  businessFlows BusinessFlow[]
+  roles            Role[]
+  systems          System[]
+  constraints      Constraint[]
+  informationTypes InformationType[]
+  tobeVisions      TobeVision[]
+  tobeRoadmaps     TobeRoadmap[]
+  risks            Risk[]
+  stakeholderAssignments StakeholderSubProject[]
+  lessons          LessonLearned[]
+  meetingLinks     MeetingSubProject[]
+
+  @@map("sub_projects")
+}
+
+// ===========================================
+// 共通マスタ基盤：システム / 制約
+// ===========================================
+
+// システム種別（周辺システム / 今回作る対象システム）
+enum SystemKind {
+  PERIPHERAL // 周辺システム
+  TARGET     // 今回作る対象システム
+}
+
+model System {
+  id           String     @id @default(uuid())
+  projectId    String     @map("project_id")
+  subProjectId String?    @map("sub_project_id")
+  name         String
+  kind         SystemKind @default(PERIPHERAL)
+  description  String?    @db.Text
+  order        Int        @default(0)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject       SubProject?      @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  roles            Role[]
+  adoptionStatuses AdoptionStatus[]
+
+  @@map("systems")
+}
+
+model Constraint {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  subProjectId String?  @map("sub_project_id")
+  title        String
+  description  String?  @db.Text
+  category     String?
+  kind         String?  @default("CONSTRAINT") // CONSTRAINT=制約 / ASSUMPTION=前提条件
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+
+  @@map("constraints")
+}
+
+model Attachment {
+  id        String         @id @default(uuid())
+  projectId String         @map("project_id")
+  phaseId   String?        @map("phase_id")
+  taskId    String?        @map("task_id")
+  kind      AttachmentKind @default(FILE)
+  filename  String
+  mimeType  String         @map("mime_type")
+  url       String // 配信パス（/uploads/...）
+  size      Int            @default(0)
+  pageRange String?        @map("page_range") // PDFのページ指定 例: "1-3,5"
+  caption   String?
+  order     Int            @default(0)
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  informationTypeId String?  @map("information_type_id")
+  flowId            String?  @map("flow_id")
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase   ProjectPhase? @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  task    Task?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
+  flow    BusinessFlow? @relation("FlowAttachments", fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+enum AttachmentKind {
+  IMAGE
+  PDF
+  FILE
+}
+
+enum IssueNodeKind {
+  ISSUE
+  CAUSE
+  COUNTERMEASURE
+  POINT
+  HYPOTHESIS
+  VERIFICATION
+  RESULT
+  ELEMENT
+  OPTION
+  ACTION
+  METRIC
+}
+
+// ===========================================
+// DB直結（データカタログのスキーマ取り込み元・複数可）
+// ===========================================
+
+model DatabaseConnection {
+  id                 String    @id @default(uuid())
+  projectId          String    @map("project_id")
+  name               String
+  dialect            String    @default("postgres") // postgres / mysql / ...
+  connStringEnc      String    @map("conn_string_enc") // AES-256-GCM 暗号化した接続文字列
+  lastIntrospectedAt DateTime? @map("last_introspected_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("database_connections")
+}
+
+// ===========================================
+// 記録シート（教材の配布物テンプレ＝表形式の記録）
+// ===========================================
+
+// ===========================================
+// タスク（Backlog相当：親タスク・依存関係対応）
+// ===========================================
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TaskPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  projectId      String       @map("project_id")
+  // 親タスク（subtask / 親タスク）
+  parentId       String?      @map("parent_id")
+  title          String
+  description    String?      @db.Text
+  status         TaskStatus   @default(OPEN)
+  priority       TaskPriority @default(MEDIUM)
+  assigneeName   String?      @map("assignee_name")
+  assigneeRoleId String?      @map("assignee_role_id")
+  // イシューツリーのノードへの紐付け（ISSUE/CAUSE/COUNTERMEASURE）。任意。
+  issueNodeId    String?      @map("issue_node_id")
+  // リスク対応タスクの紐付け（任意）
+  riskId         String?      @map("risk_id")
+  startDate      DateTime?    @map("start_date")
+  dueDate        DateTime?    @map("due_date")
+  progress       Int          @default(0)
+  estimatedHours Float?       @map("estimated_hours")
+  actualHours    Float?       @map("actual_hours")
+  milestone      String?
+  category       String?
+  order          Int          @default(0)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent       Task?            @relation("TaskHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children     Task[]           @relation("TaskHierarchy")
+  assigneeRole Role?            @relation("RoleAssignedTasks", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
+  issueNode    IssueNode?       @relation(fields: [issueNodeId], references: [id], onDelete: SetNull)
+  risk         Risk?            @relation(fields: [riskId], references: [id], onDelete: SetNull)
+  // この依存関係でこのタスクが後続側（先行タスクへの参照を持つ）
+  predecessors TaskDependency[] @relation("DepSuccessor")
+  // この依存関係でこのタスクが先行側（後続タスクから参照される）
+  successors   TaskDependency[] @relation("DepPredecessor")
+  comments     TaskComment[]
+  attachments  Attachment[]
+
+  @@map("tasks")
+}
+
+model TaskComment {
+  id           String   @id @default(uuid())
+  taskId       String   @map("task_id")
+  authorUserId String?  @map("author_user_id")
+  authorName   String?  @map("author_name")
+  body         String   @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_comments")
+}
+
+model TaskDependency {
+  id            String   @id @default(uuid())
+  predecessorId String   @map("predecessor_id")
+  successorId   String   @map("successor_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  predecessor Task @relation("DepPredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  successor   Task @relation("DepSuccessor", fields: [successorId], references: [id], onDelete: Cascade)
+
+  @@unique([predecessorId, successorId])
+  @@map("task_dependencies")
+}
+
+// ===========================================
+// DFD（データフロー図）
+// ===========================================
+
+enum DfdNodeKind {
+  FUNCTION
+  EXTERNAL_ENTITY
+  DATA_STORE
+}
+
+model DfdDiagram {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  flowId      String?  @unique @map("flow_id")
+  title       String?
+  docId       String?  @map("doc_id")
+  authorName  String?  @map("author_name")
+  approverName String? @map("approver_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  flow    BusinessFlow? @relation("FlowDfd", fields: [flowId], references: [id], onDelete: Cascade)
+  nodes   DfdNode[]
+  flows   DfdFlow[]
+
+  @@unique([projectId, flowId])
+  @@map("dfd_diagrams")
+}
+
+model DfdNode {
+  id         String      @id @default(uuid())
+  diagramId  String      @map("diagram_id")
+  kind       DfdNodeKind
+  label      String
+  number     String?
+  refFlowId  String?     @map("ref_flow_id")
+  refNodeId  String?     @map("ref_node_id")
+  positionX  Float       @default(0) @map("position_x")
+  positionY  Float       @default(0) @map("position_y")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+
+  diagram    DfdDiagram    @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  refFlow    BusinessFlow? @relation("DfdNodeRefFlow", fields: [refFlowId], references: [id], onDelete: SetNull)
+  refNode    FlowNode?     @relation("DfdNodeRefNode", fields: [refNodeId], references: [id], onDelete: SetNull)
+  outFlows   DfdFlow[]     @relation("DfdFlowSource")
+  inFlows    DfdFlow[]     @relation("DfdFlowTarget")
+
+  @@map("dfd_nodes")
+}
+
+model DfdFlow {
+  id           String   @id @default(uuid())
+  diagramId    String   @map("diagram_id")
+  sourceNodeId String   @map("source_node_id")
+  targetNodeId String   @map("target_node_id")
+  sourceHandle String?  @map("source_handle")
+  targetHandle String?  @map("target_handle")
+  dataItem     String   @map("data_item")
+  informationTypeId String?  @map("information_type_id")
+  // 線の形状: 'smoothstep'(角ばり,既定) | 'bezier'(曲線) | 'straight'(直線)
+  pathStyle    String?  @map("path_style")
+  // ラベル文字・運ぶ情報チップの「パス上の位置」を 0〜1 の割合で保持（未設定=0.5中央）
+  labelT       Float?   @map("label_t")
+  infoT        Float?   @map("info_t")
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  diagram    DfdDiagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  sourceNode DfdNode     @relation("DfdFlowSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode DfdNode     @relation("DfdFlowTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+  informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
+
+  @@map("dfd_flows")
+}
+
+enum InformationCategory {
+  INFORMATION
+  OBJECT
+  DOCUMENT
+}
+
+model InformationType {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  // 紐づくサブ領域（共通マスタ基盤。任意）
+  subProjectId String? @map("sub_project_id")
+  name        String
+  category    InformationCategory @default(INFORMATION)
+  description String?  @db.Text
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject  SubProject?  @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  dfdFlows    DfdFlow[]
+  attachments Attachment[]
+  // この情報種別を入出力として参照しているノードリンク
+  nodeLinks   NodeInformationLink[]
+  // この情報種別を矢印上のデータとして参照しているフローエッジ
+  edges       FlowEdge[]
+  // この情報種別に紐づくテーブル（共通マスタ基盤）
+  tables      Table[]
+
+  @@map("information_types")
+}
+
+// ===========================================
+// ステークホルダー
+// ===========================================
+
+model Stakeholder {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  name            String
+  affiliation     String?
+  role            String?
+  interest        String?  @db.Text
+  concern         String?  @db.Text
+  influence       String?
+  support         String?
+  engagement      String?  @db.Text
+  reportFrequency String?  @map("report_frequency")
+  contactMethod   String?  @map("contact_method")
+  owner           String?
+  reportLine      String?  @map("report_line")
+  asisHearing     String?  @map("asis_hearing") @db.Text
+  tobeSparring    String?  @map("tobe_sparring") @db.Text
+  note            String?  @db.Text
+  side            String?  @default("INTERNAL") // INTERNAL=内部(自社) / EXTERNAL=外部(お客様・パートナー)
+  order           Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project               Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meetings              MeetingStakeholder[]
+  reportCalendars       ReportCalendar[]
+  ownedMeetings         Meeting[]               @relation("MeetingOwner")
+  ownedRisks            Risk[]                  @relation("RiskOwner")
+  subProjectAssignments StakeholderSubProject[]
+  approvedCharters      ProjectCharter[]        @relation("CharterApprover")
+  sponsoredCharters     ProjectCharter[]        @relation("CharterSponsor")
+  approvedChangeRequests ChangeRequest[]        @relation("ChangeApprover")
+  adoptionStatuses      AdoptionStatus[]
+
+  @@map("stakeholders")
+}
+
+// ===========================================
+// ステークホルダー ↔ サブプロジェクト（多対多 + RACI）
+// ===========================================
+
+model StakeholderSubProject {
+  id            String   @id @default(uuid())
+  stakeholderId String   @map("stakeholder_id")
+  subProjectId  String   @map("sub_project_id")
+  raci          String?  @default("R") // R=実行責任 / A=説明責任 / C=協業 / I=報告先
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  stakeholder Stakeholder @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
+  subProject  SubProject  @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+
+  @@unique([stakeholderId, subProjectId])
+  @@map("stakeholder_sub_projects")
+}
+
+// ===========================================
+// 会議体
+// ===========================================
+
+model Meeting {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  name              String
+  purpose           String?  @db.Text
+  frequency         String?
+  dayTime           String?  @map("day_time")
+  requiredAttendees String?  @map("required_attendees") @db.Text
+  optionalAttendees String?  @map("optional_attendees") @db.Text
+  agendaTemplate    String?  @map("agenda_template") @db.Text
+  preMaterials      String?  @map("pre_materials") @db.Text
+  minutesOwner      String?  @map("minutes_owner")
+  decisionMaker     String?  @map("decision_maker")
+  format            String? // 対面 / オンライン / ハイブリッド（自由文字列）
+  durationMinutes   Int?     @map("duration_minutes") // 所要時間（分）
+  locationUrl       String?  @map("location_url") // 場所 or 会議URL
+  ownerStakeholderId String? @map("owner_stakeholder_id") // 主催/ファシリテーター
+  status            String?  @default("ACTIVE") // ACTIVE=開催中 / SUSPENDED=休止
+  goal              String?  @db.Text // この会議のゴール/アウトプット
+  note              String?  @db.Text
+  order             Int      @default(0)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner           Stakeholder?         @relation("MeetingOwner", fields: [ownerStakeholderId], references: [id], onDelete: SetNull)
+  stakeholders    MeetingStakeholder[]
+  reportCalendars ReportCalendar[]
+  risks           Risk[]
+  subProjects     MeetingSubProject[]
+
+  @@map("meetings")
+}
+
+// ===========================================
+// 会議体 ↔ ステークホルダー（多対多）
+// ===========================================
+
+model MeetingStakeholder {
+  id            String   @id @default(uuid())
+  meetingId     String   @map("meeting_id")
+  stakeholderId String   @map("stakeholder_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  meeting     Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  stakeholder Stakeholder @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, stakeholderId])
+  @@map("meeting_stakeholders")
+}
+
+// ===========================================
+// 会議体 ↔ サブ領域（多対多）
+// ===========================================
+
+model MeetingSubProject {
+  id           String   @id @default(uuid())
+  meetingId    String   @map("meeting_id")
+  subProjectId String   @map("sub_project_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  meeting    Meeting    @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  subProject SubProject @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, subProjectId])
+  @@map("meeting_sub_projects")
+}
+
+// ===========================================
+// リスク・ボトルネック登録簿（PMBOK準拠）
+// ===========================================
+
+// RBS（リスク・ブレークダウン・ストラクチャー）のカテゴリ
+model RiskCategory {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  risks   Risk[]
+
+  // 初期カテゴリの冪等シード（同時GET競合時の重複挿入防止）に必須
+  @@unique([projectId, name])
+  @@map("risk_categories")
+}
+
+model Risk {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  code           String? // リスクID（表示用）
+  type           String? // リスク / ボトルネック
+  event          String?  @db.Text // 事象内容
+  causeCategory  String?  @map("cause_category") // 人 / 情報 / 決裁 / 技術 / 外部
+  probability    String? // 高 / 中 / 低（旧・後方互換のため残置）
+  impact         String? // 高 / 中 / 低（旧・後方互換のため残置）
+  priority       String?
+  countermeasure String?  @db.Text // 対応策（予防・軽減）
+  needsMtg       String?  @map("needs_mtg") // 要 / 不要
+  mtgDate        String?  @map("mtg_date") // MTG設定日
+  deadline       String? // 期限
+  owner          String?
+  status         String?
+  note           String?  @db.Text
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // --- PMBOK準拠の追加項目（全て optional・後方互換） ---
+  categoryId         String? @map("category_id") // RBSカテゴリ
+  subProjectId       String? @map("sub_project_id") // 対象サブ領域
+  ownerStakeholderId String? @map("owner_stakeholder_id") // リスクオーナー
+  reviewMeetingId    String? @map("review_meeting_id") // レビュー会議体
+  probabilityScore   Int?    @map("probability_score") // 発生確率 1-5
+  impactScore        Int?    @map("impact_score") // 影響度 1-5
+  riskType           String? @default("THREAT") @map("risk_type") // THREAT / OPPORTUNITY
+  strategy           String? // 回避 / 転嫁 / 軽減 / 受容 / 活用 / 共有 / 強化
+  responsePlan       String? @map("response_plan") @db.Text // 対応計画
+  contingencyPlan    String? @map("contingency_plan") @db.Text // コンティンジェンシー計画
+  trigger            String? @db.Text // トリガー条件
+  lifecycle          String? @default("IDENTIFIED") // IDENTIFIED / ANALYZED / RESPONDING / MONITORING / OCCURRED / CLOSED
+
+  project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category         RiskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subProject       SubProject?   @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  ownerStakeholder Stakeholder?  @relation("RiskOwner", fields: [ownerStakeholderId], references: [id], onDelete: SetNull)
+  reviewMeeting    Meeting?      @relation(fields: [reviewMeetingId], references: [id], onDelete: SetNull)
+  tasks            Task[]
+
+  @@map("risks")
+}
+
+// ===========================================
+// 仕入先マスタ
+// ===========================================
+
+model Supplier {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  code         String? // 仕入先コード
+  name         String // 仕入先名
+  salesRep     String?  @map("sales_rep") // 担当営業
+  tel          String? // 電話番号
+  email        String? // メールアドレス
+  leadTimeDays Int?     @map("lead_time_days") // リードタイム（日）
+  note         String?  @db.Text // 備考
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@map("suppliers")
+}
+
+// ===========================================
+// 商品マスタ（仕入先・最小ロット・単価）
+// ===========================================
+
+model Product {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  code         String? // 商品コード
+  name         String // 商品名
+  supplierId   String?  @map("supplier_id") // 仕入先FK
+  supplierName String?  @map("supplier_name") // 仕入先（フリーテキストfallback）
+  minLot       Int?     @map("min_lot") // 最小ロット（個）
+  unitPrice    Int?     @map("unit_price") // 単価（円）
+  note         String?  @db.Text // 備考
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@map("products")
+}
+
+// ===========================================
+// 過去需要データ（商品×期間ごとに1行）
+// ===========================================
+
+model DemandData {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  productName String?  @map("product_name") // 商品
+  period      String? // 月 / 年月
+  quantity    Int? // 需要数
+  note        String?  @db.Text // 備考
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("demand_data")
+}
+
+// ===========================================
+// 報告・連絡カレンダー
+// ===========================================
+
+model ReportCalendar {
+  id            String   @id @default(uuid())
+  projectId     String   @map("project_id")
+  stakeholderId String?  @map("stakeholder_id") // 報告対象（誰に）FK
+  reportTo      String?  @map("report_to") // 報告対象（フリーテキストfallback）
+  meetingId     String?  @map("meeting_id") // 関連会議FK
+  reportContent String?  @map("report_content") @db.Text // 報告内容（何を）
+  frequency     String? // 頻度
+  dayTime       String?  @map("day_time") // 曜日・時刻
+  format        String? // 形式
+  medium        String? // 媒体
+  drafter       String? // 起票担当
+  approver      String? // 承認者
+  templateRef   String?  @map("template_ref") // テンプレ・参考
+  note          String?  @db.Text // 備考
+  order         Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stakeholder Stakeholder? @relation(fields: [stakeholderId], references: [id], onDelete: SetNull)
+  meeting     Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+
+  @@map("report_calendars")
+}
+
+// ===========================================
+// 関心ごとマトリクス（フェーズ×ロール）
+// 1フェーズ1行のフラットな実テーブル（視点は固定カラム）
+// ===========================================
+
+model InterestMatrixRow {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  phase        String? // フェーズ
+  duration     String? // 期間目安
+  mainMeetings String?  @map("main_meetings") // 主要ミーティング体
+  fieldStaff   String?  @map("field_staff") @db.Text // 現場（実務担当）
+  clientPm     String?  @map("client_pm") @db.Text // 先方プロマネ
+  executive    String?  @db.Text // 役員（経営層）
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("interest_matrix_rows")
+}
+
+// ===========================================
+// ASIS メモ（現状把握）
+// ===========================================
+
+model AsisMemo {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  topic        String? // テーマ
+  currentState String?  @map("current_state") // 現状
+  pain         String? // 痛み・課題
+  restriction  String? // 制約
+  note         String?  @db.Text // 備考
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("asis_memos")
+}
+
+// ===========================================
+// TOBE ビジョン（あるべき姿）
+// ===========================================
+
+model TobeVision {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  // サブ領域への紐づけ（データ連携。任意。既存 area は後方互換のため残置）
+  subProjectId   String?  @map("sub_project_id")
+  // 対応する ASIS 業務フローへの紐づけ（データ連携。任意）
+  asisFlowId     String?  @map("asis_flow_id")
+  area           String? // 領域
+  vision         String?  @db.Text // ビジョン・あるべき姿
+  countermeasure String?  @db.Text // 施策・対応
+  effect         String? // 効果
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject?   @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  // 対応する ASIS 業務フロー
+  asisFlow   BusinessFlow? @relation("TobeVisionAsisFlow", fields: [asisFlowId], references: [id], onDelete: SetNull)
+  // このビジョンに紐づくロードマップ施策
+  roadmaps   TobeRoadmap[]
+
+  @@map("tobe_visions")
+}
+
+// ===========================================
+// TOBE ロードマップ（フェーズ別施策）
+// ===========================================
+
+model TobeRoadmap {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  // サブ領域への紐づけ（データ連携。任意）
+  subProjectId String?  @map("sub_project_id")
+  // 元になった TOBE ビジョンへの紐づけ（データ連携。任意）
+  tobeVisionId String?  @map("tobe_vision_id")
+  phase        String? // フェーズ
+  measure      String?  @db.Text // 施策
+  roi          String? // ROI
+  cost         String? // コスト
+  payback      String? // 回収期間
+  scope        String? // 範囲
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  tobeVision TobeVision? @relation(fields: [tobeVisionId], references: [id], onDelete: SetNull)
+
+  @@map("tobe_roadmaps")
+}
+
+// ===========================================
+// GAP分析ツール（パレート / 感度 / ギャップ / 漏れ）
+// 自由記述の RecordSheet 相当を実テーブル化（全フリーテキスト）
+// ===========================================
+
+// パレート分析（80:20）
+model AnalysisParetoRow {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  code      String?
+  count     String?
+  amount    String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_pareto_rows")
+}
+
+// 感度分析（効きどころ）
+model AnalysisSensitivityRow {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  measure    String?
+  stars      String?
+  difficulty String?
+  order      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_sensitivity_rows")
+}
+
+// ギャップ分析（自社 vs ベンチマーク）
+model AnalysisGapRow {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  metric       String?
+  self         String?
+  benchmark    String?
+  factor       String?
+  contribution String?
+  hasAction    String?  @map("has_action")
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_gap_rows")
+}
+
+// 漏れ分析（ファネル通過）
+model AnalysisLeakRow {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  stage      String?
+  passCount  String?  @map("pass_count")
+  hypothesis String?
+  order      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_leak_rows")
+}
+
+// ===========================================
+// GAP台帳オーバーレイ（gap-ledger-meta + gap-roadmap を統合）
+// GAP item ごとの追加メタ（インパクト/難易度/フェーズ/補完問い）
+// ===========================================
+
+model GapLedger {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  gapId      String   @unique @map("gap_id")
+  impact     String?
+  difficulty String?
+  phase      String?
+  toComplete String?  @map("to_complete")
+  // ロードマップ（roadmap ページ）用の追加項目。phase 同様 GapItem に対する 1:1 オーバーレイ。
+  target     String?
+  note       String?
+  order      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  gap     GapItem @relation(fields: [gapId], references: [id], onDelete: Cascade)
+
+  @@map("gap_ledgers")
+}
+
+// ロードマップのフェーズ（列）マスタ。プロジェクトごとに追加・並べ替え可能。
+model RoadmapPhase {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  // 旧固定3フェーズとの互換キー（'Q'|'P2'|'P3'）。GapLedger.phase は legacyKey ?? name を保存する。
+  legacyKey String?  @map("legacy_key")
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("roadmap_phases")
+}
+
+// ===========================================
+// CRUOA 情報の地図（業務フロー単位の動的マトリクス）
+// 列 / 行 / セルを実テーブル化（replace-all）
+// ===========================================
+
+model CruoaCol {
+  id        String   @id @default(uuid())
+  flowId    String   @map("flow_id")
+  label     String?
+  roleId    String?  @map("role_id")
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@map("cruoa_cols")
+}
+
+model CruoaRow {
+  id        String   @id @default(uuid())
+  flowId    String   @map("flow_id")
+  info      String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  flow  BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  cells CruoaCell[]
+
+  @@map("cruoa_rows")
+}
+
+model CruoaCell {
+  id        String   @id @default(uuid())
+  rowId     String   @map("row_id")
+  colId     String   @map("col_id")
+  value     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  row CruoaRow @relation(fields: [rowId], references: [id], onDelete: Cascade)
+
+  @@map("cruoa_cells")
+}
+
+// ===========================================
+// PMBOK 補完：プロジェクト憲章 / 変更要求 / 教訓
+// ===========================================
+
+// プロジェクト憲章（プロジェクトごとに1件）
+model ProjectCharter {
+  id                    String   @id @default(uuid())
+  projectId             String   @unique @map("project_id")
+  background            String?  @db.Text
+  purpose               String?  @db.Text
+  successCriteria       String?  @db.Text @map("success_criteria")
+  scopeIn               String?  @db.Text @map("scope_in")
+  scopeOut              String?  @db.Text @map("scope_out")
+  budgetNote            String?  @map("budget_note")
+  approverStakeholderId String?  @map("approver_stakeholder_id")
+  sponsorStakeholderId  String?  @map("sponsor_stakeholder_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approver Stakeholder? @relation("CharterApprover", fields: [approverStakeholderId], references: [id], onDelete: SetNull)
+  sponsor  Stakeholder? @relation("CharterSponsor", fields: [sponsorStakeholderId], references: [id], onDelete: SetNull)
+
+  @@map("project_charters")
+}
+
+// 変更要求（変更管理）
+model ChangeRequest {
+  id                    String    @id @default(uuid())
+  projectId             String    @map("project_id")
+  title                 String
+  reason                String?   @db.Text
+  impactScope           String?   @db.Text @map("impact_scope")
+  impactSchedule        String?   @map("impact_schedule")
+  impactCost            String?   @map("impact_cost")
+  status                String?   @default("REQUESTED") // REQUESTED / APPROVED / REJECTED / APPLIED
+  approverStakeholderId String?   @map("approver_stakeholder_id")
+  decidedAt             DateTime? @map("decided_at")
+  note                  String?   @db.Text
+  order                 Int       @default(0)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approver Stakeholder? @relation("ChangeApprover", fields: [approverStakeholderId], references: [id], onDelete: SetNull)
+
+  @@map("change_requests")
+}
+
+// 教訓（レッスンズラーンド）
+model LessonLearned {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  kind           String?  @default("WENT_WELL") // WENT_WELL=うまくいった / PROBLEM=問題 / IMPROVEMENT=改善
+  content        String   @db.Text
+  recommendation String?  @db.Text
+  subProjectId   String?  @map("sub_project_id")
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+
+  @@map("lessons_learned")
+}
+
+// ===========================================
+// 変更履歴（監査ログ）
+// ===========================================
+
+// 汎用の変更履歴。FKは張らない（対象が消えてもログは残す）。
+model ChangeLog {
+  id         String   @id @default(uuid())
+  projectId  String?  @map("project_id")
+  userId     String?  @map("user_id")
+  userEmail  String?  @map("user_email")
+  method     String // HTTPメソッド（POST/PUT/PATCH/DELETE 等）
+  path       String // リクエストパス
+  entity     String? // path から導出した対象種別（business-flows/tasks/risks 等）
+  action     String? // CREATE / UPDATE / DELETE
+  summary    String?
+  statusCode Int?     @map("status_code")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([projectId, createdAt])
+  @@map("change_logs")
+}
+
+// ===========================================
+// 導入状況（ステークホルダー × システム の定着度トラッキング）
+// ===========================================
+
+model AdoptionStatus {
+  id            String    @id @default(uuid())
+  projectId     String    @map("project_id")
+  stakeholderId String    @map("stakeholder_id")
+  // 対象システム。null = プロジェクト全体
+  systemId      String?   @map("system_id")
+  // NOT_STARTED=未着手 / INFORMED=説明済 / TRAINED=トレーニング済 / TRIAL=試行中 / LIVE=本稼働 / ESTABLISHED=定着
+  stage         String?   @default("NOT_STARTED")
+  blockers      String?   @db.Text
+  nextAction    String?   @map("next_action") @db.Text
+  note          String?   @db.Text
+  lastContactAt DateTime? @map("last_contact_at")
+  order         Int       @default(0)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stakeholder Stakeholder @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
+  system      System?     @relation(fields: [systemId], references: [id], onDelete: SetNull)
+
+  // NOTE: Postgres は NULL 同士を distinct 扱いするため、systemId が null（全体）の
+  // 行はこの複合ユニークでは重複を防げない。マイグレーションフェーズで部分ユニーク
+  // インデックス (project_id, stakeholder_id) WHERE system_id IS NULL を追加予定。
+  @@unique([projectId, stakeholderId, systemId])
+  @@map("adoption_statuses")
 }

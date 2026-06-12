@@ -1,13 +1,22 @@
 import { BaseEntity } from './base.entity';
 import { ValidationError } from '../errors/domain.error';
 
+export type FlowKindValue = 'ASIS' | 'TOBE';
+export type FlowConfidenceValue = 'HYPOTHESIS' | 'CONFIRMED';
+
 export class BusinessFlow extends BaseEntity {
   private _projectId: string;
   private _name: string;
   private _description: string | null;
   private _version: number;
+  private _kind: FlowKindValue;
+  private _confidence: FlowConfidenceValue;
+  private _subProjectId: string | null;
+  private _asisFlowId: string | null;
+  private _folderId: string | null;
   private _parentId: string | null;
   private _depth: number;
+  private _laneHeights: Record<string, number>;
 
   constructor(props: {
     id: string;
@@ -15,8 +24,14 @@ export class BusinessFlow extends BaseEntity {
     name: string;
     description?: string | null;
     version?: number;
+    kind?: FlowKindValue;
+    confidence?: FlowConfidenceValue;
+    subProjectId?: string | null;
+    asisFlowId?: string | null;
+    folderId?: string | null;
     parentId?: string | null;
     depth?: number;
+    laneHeights?: Record<string, number> | null;
     createdAt?: Date;
     updatedAt?: Date;
   }) {
@@ -26,8 +41,14 @@ export class BusinessFlow extends BaseEntity {
     this._name = props.name;
     this._description = props.description ?? null;
     this._version = props.version ?? 1;
+    this._kind = props.kind ?? 'ASIS';
+    this._confidence = props.confidence ?? 'HYPOTHESIS';
+    this._subProjectId = props.subProjectId ?? null;
+    this._asisFlowId = props.asisFlowId ?? null;
+    this._folderId = props.folderId ?? null;
     this._parentId = props.parentId ?? null;
     this._depth = props.depth ?? 0;
+    this._laneHeights = props.laneHeights ?? {};
   }
 
   get projectId(): string {
@@ -46,12 +67,37 @@ export class BusinessFlow extends BaseEntity {
     return this._version;
   }
 
+  get kind(): FlowKindValue {
+    return this._kind;
+  }
+
+  get confidence(): FlowConfidenceValue {
+    return this._confidence;
+  }
+
+  get subProjectId(): string | null {
+    return this._subProjectId;
+  }
+
+  get asisFlowId(): string | null {
+    return this._asisFlowId;
+  }
+
+  get folderId(): string | null {
+    return this._folderId;
+  }
+
   get parentId(): string | null {
     return this._parentId;
   }
 
   get depth(): number {
     return this._depth;
+  }
+
+  /** ロール別レーン高さの手動オーバーライド（{ [roleId]: height }）。 */
+  get laneHeights(): Record<string, number> {
+    return this._laneHeights;
   }
 
   get isRootFlow(): boolean {
@@ -82,11 +128,46 @@ export class BusinessFlow extends BaseEntity {
     this._depth = depth;
   }
 
+  setKind(kind: FlowKindValue): void {
+    this._kind = kind;
+  }
+
+  setConfidence(confidence: FlowConfidenceValue): void {
+    this._confidence = confidence;
+  }
+
+  setSubProject(subProjectId: string | null): void {
+    this._subProjectId = subProjectId;
+  }
+
+  setAsisFlow(asisFlowId: string | null): void {
+    this._asisFlowId = asisFlowId;
+  }
+
+  setFolder(folderId: string | null): void {
+    this._folderId = folderId;
+  }
+
+  /** ロール別レーン高さのオーバーライドを丸ごと差し替える。 */
+  setLaneHeights(laneHeights: Record<string, number>): void {
+    this._laneHeights = laneHeights ?? {};
+  }
+
+  /** Ph.1 仮説 → Ph.2 確定 への昇格 */
+  promoteToConfirmed(): void {
+    this._confidence = 'CONFIRMED';
+  }
+
   static create(props: {
     id: string;
     projectId: string;
     name: string;
     description?: string | null;
+    kind?: FlowKindValue;
+    confidence?: FlowConfidenceValue;
+    subProjectId?: string | null;
+    asisFlowId?: string | null;
+    folderId?: string | null;
     parentId?: string | null;
     depth?: number;
   }): BusinessFlow {

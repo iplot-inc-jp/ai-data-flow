@@ -1,0 +1,17 @@
+{
+  "name": "ai-data-flow-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing the ai-data-flow IPLoT methodology pipeline (projects, phases, ASIS/TOBE flows, issue trees, GAP, CRUD) over the public API",
+  "bin": {
+    "ai-data-flow-mcp": "index.mjs"
+  },
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.8"
+  }
+}

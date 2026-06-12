@@ -16,6 +16,12 @@ export interface CreateRoleInput {
   type: RoleType;
   description?: string;
   color?: string;
+  responsibility?: string | null;
+  decisionScope?: string | null;
+  kpi?: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId?: string | null;
+  subProjectId?: string | null;
 }
 
 export interface CreateRoleOutput {
@@ -25,6 +31,12 @@ export interface CreateRoleOutput {
   type: RoleType;
   description: string | null;
   color: string | null;
+  responsibility: string | null;
+  decisionScope: string | null;
+  kpi: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId: string | null;
+  subProjectId: string | null;
 }
 
 /**
@@ -66,6 +78,11 @@ export class CreateRoleUseCase {
         type: input.type,
         description: input.description,
         color: input.color,
+        responsibility: input.responsibility,
+        decisionScope: input.decisionScope,
+        kpi: input.kpi,
+        systemId: input.systemId,
+        subProjectId: input.subProjectId,
       },
       id,
     );
@@ -81,6 +98,11 @@ export class CreateRoleUseCase {
       type: role.type,
       description: role.description,
       color: role.color,
+      responsibility: role.responsibility,
+      decisionScope: role.decisionScope,
+      kpi: role.kpi,
+      systemId: role.systemId,
+      subProjectId: role.subProjectId,
     };
   }
 }

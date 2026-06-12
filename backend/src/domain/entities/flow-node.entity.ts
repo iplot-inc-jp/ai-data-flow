@@ -17,8 +17,13 @@ export class FlowNode extends BaseEntity {
   private _description: string | null;
   private _positionX: number;
   private _positionY: number;
+  private _width: number | null;
+  private _height: number | null;
   private _roleId: string | null;
   private _childFlowId: string | null;
+  private _processingTime: string | null;
+  private _handledCount: string | null;
+  private _supplement: string | null;
   private _metadata: Record<string, unknown>;
 
   constructor(props: {
@@ -29,8 +34,13 @@ export class FlowNode extends BaseEntity {
     description?: string | null;
     positionX: number;
     positionY: number;
+    width?: number | null;
+    height?: number | null;
     roleId?: string | null;
     childFlowId?: string | null;
+    processingTime?: string | null;
+    handledCount?: string | null;
+    supplement?: string | null;
     metadata?: Record<string, unknown>;
     createdAt?: Date;
     updatedAt?: Date;
@@ -43,8 +53,13 @@ export class FlowNode extends BaseEntity {
     this._description = props.description ?? null;
     this._positionX = props.positionX;
     this._positionY = props.positionY;
+    this._width = props.width ?? null;
+    this._height = props.height ?? null;
     this._roleId = props.roleId ?? null;
     this._childFlowId = props.childFlowId ?? null;
+    this._processingTime = props.processingTime ?? null;
+    this._handledCount = props.handledCount ?? null;
+    this._supplement = props.supplement ?? null;
     this._metadata = props.metadata ?? {};
   }
 
@@ -72,12 +87,32 @@ export class FlowNode extends BaseEntity {
     return this._positionY;
   }
 
+  get width(): number | null {
+    return this._width;
+  }
+
+  get height(): number | null {
+    return this._height;
+  }
+
   get roleId(): string | null {
     return this._roleId;
   }
 
   get childFlowId(): string | null {
     return this._childFlowId;
+  }
+
+  get processingTime(): string | null {
+    return this._processingTime;
+  }
+
+  get handledCount(): string | null {
+    return this._handledCount;
+  }
+
+  get supplement(): string | null {
+    return this._supplement;
   }
 
   get metadata(): Record<string, unknown> {
@@ -108,6 +143,11 @@ export class FlowNode extends BaseEntity {
     this._positionY = y;
   }
 
+  updateSize(width: number | null, height: number | null): void {
+    this._width = width;
+    this._height = height;
+  }
+
   updateType(type: FlowNodeType): void {
     this._type = type;
   }
@@ -131,6 +171,18 @@ export class FlowNode extends BaseEntity {
     this._metadata = metadata;
   }
 
+  updateProcessingTime(processingTime: string | null): void {
+    this._processingTime = processingTime;
+  }
+
+  updateHandledCount(handledCount: string | null): void {
+    this._handledCount = handledCount;
+  }
+
+  updateSupplement(supplement: string | null): void {
+    this._supplement = supplement;
+  }
+
   static create(props: {
     id: string;
     flowId: string;
@@ -139,7 +191,12 @@ export class FlowNode extends BaseEntity {
     description?: string | null;
     positionX: number;
     positionY: number;
+    width?: number | null;
+    height?: number | null;
     roleId?: string | null;
+    processingTime?: string | null;
+    handledCount?: string | null;
+    supplement?: string | null;
   }): FlowNode {
     if (!props.label || props.label.length === 0) {
       throw new ValidationError('Node label is required');

@@ -16,6 +16,7 @@ export interface GetCurrentUserOutput {
   email: string;
   name: string | null;
   avatarUrl: string | null;
+  isSuperAdmin: boolean;
   organizations: {
     id: string;
     name: string;
@@ -65,6 +66,7 @@ export class GetCurrentUserUseCase {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      isSuperAdmin: user.isSuperAdmin,
       organizations: orgsWithRoles,
     };
   }

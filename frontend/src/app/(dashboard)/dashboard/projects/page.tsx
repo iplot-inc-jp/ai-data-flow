@@ -22,7 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Folder, Plus, Building2, Loader2, ArrowRight } from 'lucide-react';
+import { Folder, Plus, Building2, Loader2, ArrowRight, ShieldAlert } from 'lucide-react';
+import Link from 'next/link';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -46,9 +50,20 @@ export default function ProjectsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [howToOpen, setHowToOpen] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', slug: '', description: '' });
+
+  // キーボードショートカット
+  // - mod+Enter / n : 新規プロジェクト作成ダイアログを開く
+  // - shift+/（?）   : 操作方法ダイアログを開く
+  useKeyboardShortcuts([
+    { combo: 'mod+enter', handler: () => setIsCreateDialogOpen(true) },
+    { combo: 'n', handler: () => setIsCreateDialogOpen(true) },
+    { combo: 'shift+/', handler: () => setHowToOpen(true) },
+  ]);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
@@ -60,16 +75,30 @@ export default function ProjectsPage() {
   const fetchOrganizations = useCallback(async () => {
     try {
       const headers = getHeaders();
-      const res = await fetch(`${API_URL}/api/organizations`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setOrganizations(data);
-        if (data.length > 0) {
-          setSelectedOrg(data[0]);
-        }
+
+      // 会社作成は全体管理者のみ。ここでは自動作成せず、権限と一覧のみ取得する。
+      const [meRes, orgRes] = await Promise.all([
+        fetch(`${API_URL}/api/auth/me`, { headers }),
+        fetch(`${API_URL}/api/organizations`, { headers }),
+      ]);
+
+      if (meRes.ok) {
+        const me = await meRes.json();
+        setIsSuperAdmin(Boolean(me?.isSuperAdmin));
+      }
+
+      const data: Organization[] = orgRes.ok ? await orgRes.json() : [];
+      const orgs = Array.isArray(data) ? data : [];
+
+      setOrganizations(orgs);
+      if (orgs.length > 0) {
+        setSelectedOrg(orgs[0]); // → projects 取得 effect が loading を解除
+      } else {
+        setLoading(false); // 会社が無い → スピナー解除（メッセージ表示へ）
       }
     } catch (err) {
       console.error('Failed to fetch organizations:', err);
+      setLoading(false);
     }
   }, [getHeaders]);
 
@@ -127,20 +156,82 @@ export default function ProjectsPage() {
 
   if (loading && organizations.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[400px]">
+      <div className="flex items-center justify-center h-[400px]" style={{ fontFamily: '"Yu Gothic", "游ゴシック", sans-serif' }}>
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
       </div>
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+  // 会社（組織）が1つも無い場合のガイド（会社作成は全体管理者のみ）
+  if (!loading && organizations.length === 0) {
+    return (
+      <div className="space-y-6" style={{ fontFamily: '"Yu Gothic", "游ゴシック", sans-serif' }}>
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">プロジェクト選択</h1>
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+            プロジェクト選択
+            <HelpTooltip text="プロジェクトは作業の単位です。1つの会社の中に複数のプロジェクト（例: ECサイト、基幹システム刷新）を持てます。" />
+          </h1>
+          <p className="text-gray-500 mt-1">所属する会社がまだありません</p>
+        </div>
+        <Card className="bg-white border-gray-200">
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mb-4 border border-amber-200">
+              <ShieldAlert className="h-8 w-8 text-amber-500" />
+            </div>
+            {isSuperAdmin ? (
+              <>
+                <p className="text-gray-700 mb-2 font-medium">会社がまだありません</p>
+                <p className="text-sm text-gray-500 mb-4">
+                  まずは会社を作成してください。会社の作成は全体管理者のみ可能です。
+                </p>
+                <Link href="/dashboard/companies">
+                  <Button className="bg-blue-600 hover:bg-blue-700">
+                    <Building2 className="h-4 w-4 mr-2" />
+                    会社を作成
+                  </Button>
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-700 mb-2 font-medium">利用できる会社がありません</p>
+                <p className="text-sm text-gray-500">
+                  全体管理者に会社の作成を依頼してください。
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" style={{ fontFamily: '"Yu Gothic", "游ゴシック", sans-serif' }}>
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+            プロジェクト選択
+            <HelpTooltip text="プロジェクトは作業の単位です。1つの会社の中に複数のプロジェクト（例: ECサイト、基幹システム刷新）を持てます。" />
+          </h1>
           <p className="text-gray-500 mt-1">作業するプロジェクトを選択してください</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <HowToPanel
+            open={howToOpen}
+            onOpenChange={setHowToOpen}
+            steps={[
+              '組織が2つ以上ある場合は、上部のセレクタで対象の組織を選びます。',
+              'カードをクリックすると、そのプロジェクトの作業画面へ移動します。',
+              '「新規プロジェクト」からプロジェクト名・スラッグ（URL用の短い識別子）・説明を入力して作成します。',
+              'スラッグは英数字とハイフンの半角（例: ec-site）で入力してください。',
+            ]}
+            shortcuts={[
+              { keys: '⌘/Ctrl+Enter', desc: '新規プロジェクト作成を開く' },
+              { keys: 'n', desc: '新規プロジェクト作成を開く' },
+              { keys: '?', desc: 'この操作方法を開く' },
+            ]}
+          />
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button className="bg-blue-600 hover:bg-blue-700">
@@ -166,7 +257,10 @@ export default function ProjectsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-gray-700">スラッグ</Label>
+                <Label className="text-gray-700 flex items-center gap-1.5">
+                  スラッグ
+                  <HelpTooltip text="URLや内部識別に使う短い名前です。英数字とハイフン（例: ec-site）で、プロジェクトを一意に識別します。" />
+                </Label>
                 <Input
                   value={newProject.slug}
                   onChange={(e) => setNewProject({ ...newProject, slug: e.target.value })}
@@ -194,6 +288,7 @@ export default function ProjectsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Organization Selector */}
@@ -207,7 +302,7 @@ export default function ProjectsPage() {
               if (org) setSelectedOrg(org);
             }}
           >
-            <SelectTrigger className="w-[300px] bg-white border-gray-300">
+            <SelectTrigger className="w-full sm:w-[300px] bg-white border-gray-300">
               <SelectValue placeholder="組織を選択" />
             </SelectTrigger>
             <SelectContent className="bg-white border-gray-200">

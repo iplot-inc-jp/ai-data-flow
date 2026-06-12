@@ -18,6 +18,12 @@ export interface RoleDto {
   color: string | null;
   order: number;
   laneHeight: number;
+  responsibility: string | null;
+  decisionScope: string | null;
+  kpi: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId: string | null;
+  subProjectId: string | null;
 }
 
 /**
@@ -46,6 +52,11 @@ export class GetRolesUseCase {
         color: role.color,
         order: role.order ?? 0,
         laneHeight: role.laneHeight ?? 120,
+        responsibility: role.responsibility,
+        decisionScope: role.decisionScope,
+        kpi: role.kpi,
+        systemId: role.systemId,
+        subProjectId: role.subProjectId,
       }));
   }
 }

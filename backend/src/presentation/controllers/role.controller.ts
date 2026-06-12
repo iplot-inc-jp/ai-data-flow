@@ -1,12 +1,14 @@
-import { Controller, Post, Get, Put, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Put, Patch, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { IsArray, IsString, IsNumber, IsOptional } from 'class-validator';
 import {
   CreateRoleUseCase,
   GetRolesUseCase,
+  UpdateRoleUseCase,
 } from '../../application';
 import {
   CreateRoleRequestDto,
+  UpdateRoleRequestDto,
   RoleResponseDto,
   RoleTypeDto,
 } from '../dto';
@@ -32,6 +34,7 @@ export class RoleController {
   constructor(
     private readonly createRoleUseCase: CreateRoleUseCase,
     private readonly getRolesUseCase: GetRolesUseCase,
+    private readonly updateRoleUseCase: UpdateRoleUseCase,
     @Inject(ROLE_REPOSITORY)
     private readonly roleRepository: RoleRepository,
     private readonly prisma: PrismaService,
@@ -69,6 +72,38 @@ export class RoleController {
       type: dto.type,
       description: dto.description,
       color: dto.color,
+      responsibility: dto.responsibility,
+      decisionScope: dto.decisionScope,
+      kpi: dto.kpi,
+      systemId: dto.systemId,
+      subProjectId: dto.subProjectId,
+    });
+    return {
+      ...result,
+      type: result.type as RoleTypeDto,
+    };
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'ロール更新（責務・決裁範囲・KPI 等）' })
+  @ApiParam({ name: 'id', description: 'ロールID' })
+  @ApiResponse({ status: 200, description: '更新成功', type: RoleResponseDto })
+  @ApiResponse({ status: 404, description: 'ロールが見つかりません' })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateRoleRequestDto,
+  ): Promise<RoleResponseDto> {
+    const result = await this.updateRoleUseCase.execute({
+      id,
+      name: dto.name,
+      type: dto.type,
+      description: dto.description,
+      color: dto.color,
+      responsibility: dto.responsibility,
+      decisionScope: dto.decisionScope,
+      kpi: dto.kpi,
+      systemId: dto.systemId,
+      subProjectId: dto.subProjectId,
     });
     return {
       ...result,
@@ -109,6 +144,11 @@ export class RoleController {
       color: r.color,
       order: r.order,
       laneHeight: r.laneHeight,
+      responsibility: r.responsibility,
+      decisionScope: r.decisionScope,
+      kpi: r.kpi,
+      systemId: r.systemId,
+      subProjectId: r.subProjectId,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));
@@ -136,6 +176,11 @@ export class RoleController {
       color: role.color,
       order: role.order,
       laneHeight: role.laneHeight,
+      responsibility: role.responsibility,
+      decisionScope: role.decisionScope,
+      kpi: role.kpi,
+      systemId: role.systemId,
+      subProjectId: role.subProjectId,
       createdAt: role.createdAt,
       updatedAt: role.updatedAt,
     };

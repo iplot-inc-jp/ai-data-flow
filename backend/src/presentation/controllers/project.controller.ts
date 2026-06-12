@@ -9,7 +9,13 @@ import {
   ProjectResponseDto,
 } from '../dto';
 import { CurrentUser, CurrentUserPayload } from '../decorators/current-user.decorator';
-import { PROJECT_REPOSITORY, ProjectRepository } from '../../domain';
+import {
+  PROJECT_REPOSITORY,
+  ProjectRepository,
+  ORGANIZATION_REPOSITORY,
+  OrganizationRepository,
+  ForbiddenError,
+} from '../../domain';
 
 @ApiTags('プロジェクト')
 @ApiBearerAuth()
@@ -18,17 +24,31 @@ export class ProjectByIdController {
   constructor(
     @Inject(PROJECT_REPOSITORY)
     private readonly projectRepository: ProjectRepository,
+    @Inject(ORGANIZATION_REPOSITORY)
+    private readonly organizationRepository: OrganizationRepository,
   ) {}
 
   @Get(':id')
   @ApiOperation({ summary: 'プロジェクト詳細取得' })
   @ApiParam({ name: 'id', description: 'プロジェクトID' })
   @ApiResponse({ status: 200, description: '成功', type: ProjectResponseDto })
+  @ApiResponse({ status: 403, description: '権限がありません' })
   @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
-  async findById(@Param('id') id: string): Promise<ProjectResponseDto | null> {
+  async findById(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ): Promise<ProjectResponseDto | null> {
     const project = await this.projectRepository.findById(id);
     if (!project) {
       return null;
+    }
+    // 組織メンバー（または全体管理者）のみ閲覧可。isMember は super-admin を許可する。
+    const isMember = await this.organizationRepository.isMember(
+      project.organizationId,
+      user.id,
+    );
+    if (!isMember) {
+      throw new ForbiddenError('You are not a member of this organization');
     }
     return {
       id: project.id,
