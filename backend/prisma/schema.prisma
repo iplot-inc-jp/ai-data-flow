@@ -127,6 +127,9 @@ model Project {
   changeRequests          ChangeRequest[]
   lessons                 LessonLearned[]
   adoptionStatuses        AdoptionStatus[]
+  dataObjects             DataObject[]
+  dataObjectRelations     DataObjectRelation[]
+  kpis                    Kpi[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -162,6 +165,7 @@ model Role {
   apiRolePermissions    ApiRolePermission[]
   statusRolePermissions StatusRolePermission[]
   assignedTasks         Task[]                 @relation("RoleAssignedTasks")
+  ownedKpis             Kpi[]
 
   @@unique([projectId, name])
   @@map("roles")
@@ -182,15 +186,21 @@ model Table {
   projectId   String   @map("project_id")
   // 紐づく情報種別マスタ（共通マスタ基盤。任意）
   informationTypeId String? @map("information_type_id")
+  // 所属オブジェクト（DFDデータストア＝オブジェクト関係性マップの共通マスタ。任意）
+  dataObjectId String? @map("data_object_id")
   name        String
   displayName String?  @map("display_name")
   description String?
   tags        String[] @default([])
+  // ER図キャンバス上の位置
+  erPositionX Float    @default(0) @map("er_position_x")
+  erPositionY Float    @default(0) @map("er_position_y")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
+  dataObject DataObject? @relation(fields: [dataObjectId], references: [id], onDelete: SetNull)
   columns  Column[]
   statuses TableStatus[]
 
@@ -295,6 +305,8 @@ model BusinessFlow {
   asisTobeVisions     TobeVision[]             @relation("TobeVisionAsisFlow")
   // この業務フローに紐づく添付ファイル
   attachments         Attachment[]             @relation("FlowAttachments")
+  // この業務フローを対象に作成された KPI
+  kpis                Kpi[]
 
   @@map("business_flows")
 }
@@ -327,6 +339,7 @@ enum FlowAnnotationKind {
   STICKY   // 付箋
   COMMENT  // コメント
   ICON     // アイコン
+  SCOPE    // スコープ囲み（業務領域を点線/背景色つき矩形で囲う）
 }
 
 model FlowAnnotation {
@@ -341,6 +354,9 @@ model FlowAnnotation {
   height    Float?             @map("height")
   color     String?
   icon      String?            // kind=ICON のとき lucide アイコン名
+  // kind=SCOPE の枠線スタイル 'dashed' | 'solid' と背景塗りの不透明度(0-1)
+  borderStyle String?          @map("border_style")
+  fillOpacity Float?           @map("fill_opacity")
   order     Int                @default(0)
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")
@@ -455,8 +471,112 @@ model FlowEdge {
   targetNode           FlowNode              @relation("TargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
   informationType      InformationType?      @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
   interfaceDefinitions InterfaceDefinition[]
+  // この矢印に紐づくAPI（CRUDのAPI一覧。複数・任意）
+  apiLinks             FlowEdgeApiLink[]
 
   @@map("flow_edges")
+}
+
+// ===========================================
+// KPI（AI作成: フローのINPUT/OUTPUT・帳票から生成。SMART採点つき）
+// ===========================================
+
+enum KpiCategory {
+  BUSINESS   // 業務KPI（ASIS/TOBE業務フローの改善指標）
+  AI_QUALITY // AI精度KPI（導入するAI/システム自体の精度・品質指標）
+}
+
+enum KpiDirection {
+  INCREASE // 増やすほど良い
+  DECREASE // 減らすほど良い
+  MAINTAIN // 維持
+}
+
+enum KpiFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum KpiStatus {
+  DRAFT    // AI生成直後の下書き
+  ACTIVE   // 採用・運用中
+  ARCHIVED
+}
+
+model Kpi {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  // 業務KPI / AI精度KPI の区分
+  category    KpiCategory @default(BUSINESS)
+  // 対象業務フロー（任意。主に業務KPI）
+  flowId      String?  @map("flow_id")
+  // 対象システム（任意。主にAI精度KPI: どのAI/システムの精度か）
+  systemId    String?  @map("system_id")
+  name        String
+  description String?  @db.Text
+  // 計算式・定義（例: 欠品率 = 欠品件数 / 発注明細数）
+  definition  String?  @db.Text
+  unit        String?
+  baselineValue Float? @map("baseline_value")
+  targetValue   Float? @map("target_value")
+  currentValue  Float? @map("current_value")
+  direction   KpiDirection @default(INCREASE)
+  frequency   KpiFrequency @default(MONTHLY)
+  // 測定方法・データソースの説明
+  measurementMethod String? @map("measurement_method") @db.Text
+  // 責任者ロール（任意）
+  ownerRoleId String?  @map("owner_role_id")
+  // SMART採点（AI採点 0-5）と講評
+  smartSpecific   Int?    @map("smart_specific")
+  smartMeasurable Int?    @map("smart_measurable")
+  smartAchievable Int?    @map("smart_achievable")
+  smartRelevant   Int?    @map("smart_relevant")
+  smartTimeBound  Int?    @map("smart_time_bound")
+  smartComment    String? @map("smart_comment") @db.Text
+  aiGenerated Boolean   @default(false) @map("ai_generated")
+  status      KpiStatus @default(DRAFT)
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  flow      BusinessFlow? @relation(fields: [flowId], references: [id], onDelete: SetNull)
+  system    System?       @relation(fields: [systemId], references: [id], onDelete: SetNull)
+  ownerRole Role?         @relation(fields: [ownerRoleId], references: [id], onDelete: SetNull)
+  // 測定対象の INPUT/OUTPUT（情報種別。複数）
+  informationLinks KpiInformationLink[]
+
+  @@map("kpis")
+}
+
+model KpiInformationLink {
+  id                String   @id @default(uuid())
+  kpiId             String   @map("kpi_id")
+  informationTypeId String   @map("information_type_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  kpi             Kpi             @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  informationType InformationType @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([kpiId, informationTypeId])
+  @@map("kpi_information_links")
+}
+
+// 業務フローの矢印 × API エンドポイント（多対多。システムと人を跨ぐ矢印などに紐づけ）
+model FlowEdgeApiLink {
+  id            String   @id @default(uuid())
+  edgeId        String   @map("edge_id")
+  apiEndpointId String   @map("api_endpoint_id")
+  order         Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  edge        FlowEdge    @relation(fields: [edgeId], references: [id], onDelete: Cascade)
+  apiEndpoint ApiEndpoint @relation(fields: [apiEndpointId], references: [id], onDelete: Cascade)
+
+  @@unique([edgeId, apiEndpointId])
+  @@map("flow_edge_api_links")
 }
 
 // ===========================================
@@ -989,6 +1109,7 @@ model ApiEndpoint {
 
   project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   rolePermissions ApiRolePermission[]
+  flowEdgeLinks   FlowEdgeApiLink[]
 
   @@unique([projectId, method, path])
   @@map("api_endpoints")
@@ -1096,6 +1217,7 @@ model System {
   subProject       SubProject?      @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   roles            Role[]
   adoptionStatuses AdoptionStatus[]
+  kpis             Kpi[]
 
   @@map("systems")
 }
@@ -1125,12 +1247,17 @@ model Attachment {
   taskId    String?        @map("task_id")
   kind      AttachmentKind @default(FILE)
   filename  String
+  // 表示名（編集可能。null=filename を表示）
+  displayName String?      @map("display_name")
+  // フォルダ分け（自由入力のフォルダ名。null=未分類）
+  folder    String?
   mimeType  String         @map("mime_type")
   url       String // 配信パス（/uploads/...）
   size      Int            @default(0)
   pageRange String?        @map("page_range") // PDFのページ指定 例: "1-3,5"
   caption   String?
   order     Int            @default(0)
+  data      Bytes? // ファイル本体。serverless では DB 保存に使用。既存ローカル行は null=ディスク参照のまま
   createdAt DateTime       @default(now()) @map("created_at")
 
   informationTypeId String?  @map("information_type_id")
@@ -1297,11 +1424,36 @@ model DfdDiagram {
 
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   flow    BusinessFlow? @relation("FlowDfd", fields: [flowId], references: [id], onDelete: Cascade)
-  nodes   DfdNode[]
-  flows   DfdFlow[]
+  nodes       DfdNode[]
+  flows       DfdFlow[]
+  annotations DfdAnnotation[]
 
   @@unique([projectId, flowId])
   @@map("dfd_diagrams")
+}
+
+// DFD キャンバス上の注釈（付箋・メモ。業務フローの FlowAnnotation と同じ概念）
+model DfdAnnotation {
+  id        String             @id @default(uuid())
+  diagramId String             @map("diagram_id")
+  kind      FlowAnnotationKind @default(STICKY)
+  text      String             @default("") @db.Text
+  positionX Float              @default(0) @map("position_x")
+  positionY Float              @default(0) @map("position_y")
+  width     Float?             @map("width")
+  height    Float?             @map("height")
+  color     String?
+  icon      String?
+  borderStyle String?          @map("border_style")
+  fillOpacity Float?           @map("fill_opacity")
+  order     Int                @default(0)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  diagram DfdDiagram @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+
+  @@index([diagramId])
+  @@map("dfd_annotations")
 }
 
 model DfdNode {
@@ -1312,6 +1464,8 @@ model DfdNode {
   number     String?
   refFlowId  String?     @map("ref_flow_id")
   refNodeId  String?     @map("ref_node_id")
+  // データストア（kind=DATA_STORE）の場合に紐づくオブジェクト（共通マスタ。任意）
+  dataObjectId String?   @map("data_object_id")
   positionX  Float       @default(0) @map("position_x")
   positionY  Float       @default(0) @map("position_y")
   createdAt  DateTime    @default(now()) @map("created_at")
@@ -1320,6 +1474,7 @@ model DfdNode {
   diagram    DfdDiagram    @relation(fields: [diagramId], references: [id], onDelete: Cascade)
   refFlow    BusinessFlow? @relation("DfdNodeRefFlow", fields: [refFlowId], references: [id], onDelete: SetNull)
   refNode    FlowNode?     @relation("DfdNodeRefNode", fields: [refNodeId], references: [id], onDelete: SetNull)
+  dataObject DataObject?   @relation(fields: [dataObjectId], references: [id], onDelete: SetNull)
   outFlows   DfdFlow[]     @relation("DfdFlowSource")
   inFlows    DfdFlow[]     @relation("DfdFlowTarget")
 
@@ -1352,6 +1507,58 @@ model DfdFlow {
   @@map("dfd_flows")
 }
 
+// ===========================================
+// データオブジェクト
+// （DFDデータストア＝オブジェクト関係性マップの「オブジェクト」＝ER図のグループ囲み。共通マスタ）
+// ===========================================
+
+enum RelationCardinality {
+  ONE_TO_ONE
+  ONE_TO_MANY
+  MANY_TO_MANY
+}
+
+model DataObject {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  name        String
+  description String?  @db.Text
+  color       String?
+  // オブジェクト関係性マップ上の位置
+  positionX   Float    @default(0) @map("position_x")
+  positionY   Float    @default(0) @map("position_y")
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dfdNodes     DfdNode[]
+  tables       Table[]
+  outRelations DataObjectRelation[] @relation("DataObjectRelSource")
+  inRelations  DataObjectRelation[] @relation("DataObjectRelTarget")
+
+  @@unique([projectId, name])
+  @@map("data_objects")
+}
+
+model DataObjectRelation {
+  id             String              @id @default(uuid())
+  projectId      String              @map("project_id")
+  sourceObjectId String              @map("source_object_id")
+  targetObjectId String              @map("target_object_id")
+  cardinality    RelationCardinality @default(ONE_TO_MANY)
+  label          String?
+  description    String?             @db.Text
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceObject DataObject @relation("DataObjectRelSource", fields: [sourceObjectId], references: [id], onDelete: Cascade)
+  targetObject DataObject @relation("DataObjectRelTarget", fields: [targetObjectId], references: [id], onDelete: Cascade)
+
+  @@map("data_object_relations")
+}
+
 enum InformationCategory {
   INFORMATION
   OBJECT
@@ -1380,6 +1587,8 @@ model InformationType {
   edges       FlowEdge[]
   // この情報種別に紐づくテーブル（共通マスタ基盤）
   tables      Table[]
+  // この情報種別を測定対象とする KPI
+  kpiLinks    KpiInformationLink[]
 
   @@map("information_types")
 }

@@ -10,6 +10,8 @@ export interface CreateDfdNodeProps {
   number?: string | null;
   refFlowId?: string | null;
   refNodeId?: string | null;
+  /** DATA_STORE をデータオブジェクトマスタに紐づける（任意） */
+  dataObjectId?: string | null;
   positionX?: number;
   positionY?: number;
 }
@@ -22,6 +24,7 @@ export interface ReconstructDfdNodeProps {
   number: string | null;
   refFlowId: string | null;
   refNodeId: string | null;
+  dataObjectId: string | null;
   positionX: number;
   positionY: number;
   createdAt: Date;
@@ -36,6 +39,7 @@ export class DfdNode extends BaseEntity {
   private _number: string | null;
   private _refFlowId: string | null;
   private _refNodeId: string | null;
+  private _dataObjectId: string | null;
   private _positionX: number;
   private _positionY: number;
 
@@ -47,6 +51,7 @@ export class DfdNode extends BaseEntity {
     number: string | null,
     refFlowId: string | null,
     refNodeId: string | null,
+    dataObjectId: string | null,
     positionX: number,
     positionY: number,
     createdAt: Date,
@@ -59,6 +64,7 @@ export class DfdNode extends BaseEntity {
     this._number = number;
     this._refFlowId = refFlowId;
     this._refNodeId = refNodeId;
+    this._dataObjectId = dataObjectId;
     this._positionX = positionX;
     this._positionY = positionY;
   }
@@ -76,6 +82,7 @@ export class DfdNode extends BaseEntity {
       props.number ?? null,
       props.refFlowId ?? null,
       props.refNodeId ?? null,
+      props.dataObjectId ?? null,
       props.positionX ?? 0,
       props.positionY ?? 0,
       now,
@@ -92,6 +99,7 @@ export class DfdNode extends BaseEntity {
       props.number,
       props.refFlowId,
       props.refNodeId,
+      props.dataObjectId,
       props.positionX,
       props.positionY,
       props.createdAt,
@@ -116,6 +124,12 @@ export class DfdNode extends BaseEntity {
     this.touch();
   }
 
+  /** データオブジェクトマスタとの紐づけ設定/解除 */
+  updateDataObjectId(dataObjectId: string | null): void {
+    this._dataObjectId = dataObjectId ?? null;
+    this.touch();
+  }
+
   updatePosition(x: number, y: number): void {
     this._positionX = x;
     this._positionY = y;
@@ -128,6 +142,7 @@ export class DfdNode extends BaseEntity {
   get number(): string | null { return this._number; }
   get refFlowId(): string | null { return this._refFlowId; }
   get refNodeId(): string | null { return this._refNodeId; }
+  get dataObjectId(): string | null { return this._dataObjectId; }
   get positionX(): number { return this._positionX; }
   get positionY(): number { return this._positionY; }
 }

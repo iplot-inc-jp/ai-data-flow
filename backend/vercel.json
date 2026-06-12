@@ -1,0 +1,11 @@
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }],
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "{dist/**,node_modules/swagger-ui-dist/**}",
+      "maxDuration": 30
+    }
+  },
+  "buildCommand": "npx prisma generate && DATABASE_URL=${DATABASE_URL_UNPOOLED:-$DATABASE_URL} npx prisma db push && npx nest build",
+  "installCommand": "npm install"
+}

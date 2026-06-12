@@ -31,6 +31,7 @@ import {
 import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine } from 'lucide-react';
 import { informationTypeApi, type InformationType } from '@/lib/dfd';
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
+import { dataObjectApi, type DataObjectDto } from '@/lib/data-objects';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -73,6 +74,12 @@ export default function ProjectCatalogPage() {
   const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
   // 紐付け保存中のテーブルID（select を一時的に無効化）
   const [savingLinkId, setSavingLinkId] = useState<string | null>(null);
+  // オブジェクト（共通マスタ）一覧。テーブルごとの「オブジェクト」紐付け select で使う。
+  const [dataObjects, setDataObjects] = useState<DataObjectDto[]>([]);
+  // テーブルID → 紐づくオブジェクトID（オブジェクト関係性マップのグラフから構築）
+  const [tableObjectIds, setTableObjectIds] = useState<Record<string, string>>({});
+  // オブジェクト紐付け保存中のテーブルID（select を一時的に無効化）
+  const [savingObjectLinkId, setSavingObjectLinkId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -159,11 +166,27 @@ export default function ProjectCatalogPage() {
     }
   }, [projectId]);
 
+  // オブジェクト（共通マスタ）一覧を取得。グラフの objects[].tables からテーブル→オブジェクトの紐付けも構築。
+  const fetchDataObjects = useCallback(async () => {
+    try {
+      const graph = await dataObjectApi.getGraph(projectId);
+      setDataObjects(graph.objects);
+      const map: Record<string, string> = {};
+      for (const obj of graph.objects) {
+        for (const t of obj.tables) map[t.id] = obj.id;
+      }
+      setTableObjectIds(map);
+    } catch (err) {
+      console.error('Failed to fetch data objects:', err);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     fetchTables();
     fetchDbConnections();
     fetchInformationTypes();
-  }, [fetchTables, fetchDbConnections, fetchInformationTypes]);
+    fetchDataObjects();
+  }, [fetchTables, fetchDbConnections, fetchInformationTypes, fetchDataObjects]);
 
   // テーブルの INPUT/OUTPUT 紐付けを更新（PUT /tables/:id）。保存後にローカル state を更新。
   const handleLinkInformationType = useCallback(
@@ -189,6 +212,28 @@ export default function ProjectCatalogPage() {
       }
     },
     [getHeaders],
+  );
+
+  // テーブルの「オブジェクト」紐付けを更新（PUT /tables/:tableId/data-object）。保存後にローカル state を更新。
+  const handleLinkDataObject = useCallback(
+    async (tableId: string, value: string) => {
+      const dataObjectId = value === '__none__' ? null : value;
+      setSavingObjectLinkId(tableId);
+      try {
+        await dataObjectApi.linkTableToObject(tableId, dataObjectId);
+        setTableObjectIds((prev) => {
+          const next = { ...prev };
+          if (dataObjectId) next[tableId] = dataObjectId;
+          else delete next[tableId];
+          return next;
+        });
+      } catch (err) {
+        console.error('Failed to link table to data object:', err);
+      } finally {
+        setSavingObjectLinkId(null);
+      }
+    },
+    [],
   );
 
   // キーボードショートカット
@@ -1044,6 +1089,29 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
                       onCreated={(created) => setInformationTypes((prev) => [...prev, created])}
                       disabled={savingLinkId === table.id}
                     />
+
+                    {/* オブジェクト（共通マスタ）紐付け */}
+                    <Label className="text-xs text-gray-500 flex items-center gap-1 mb-1 mt-3">
+                      オブジェクト紐付け
+                      <HelpTooltip text="このテーブルが属するオブジェクト（DFDのデータストア／オブジェクト関係性マップ／ER図の点線囲みを貫く共通マスタ）を選びます。1つのオブジェクトに複数テーブルを紐づけられます。" />
+                    </Label>
+                    <Select
+                      value={tableObjectIds[table.id] ?? '__none__'}
+                      onValueChange={(value) => handleLinkDataObject(table.id, value)}
+                      disabled={savingObjectLinkId === table.id}
+                    >
+                      <SelectTrigger className="h-8 bg-white border-gray-300 text-gray-900 text-sm">
+                        <SelectValue placeholder="— 未設定 —" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white">
+                        <SelectItem value="__none__">— 未設定 —</SelectItem>
+                        {dataObjects.map((obj) => (
+                          <SelectItem key={obj.id} value={obj.id}>
+                            {obj.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </CardContent>
               </Card>

@@ -12,6 +12,7 @@ export * from './flow-node';
 export * from './task';
 export * from './task-comment';
 export * from './dfd';
+export * from './data-object';
 export * from './information-type';
 export * from './system';
 export * from './constraint';
@@ -28,4 +29,5 @@ export * from './asis-memo';
 export * from './tobe-vision';
 export * from './tobe-roadmap';
 export * from './roadmap-phase';
+export * from './kpi';
 

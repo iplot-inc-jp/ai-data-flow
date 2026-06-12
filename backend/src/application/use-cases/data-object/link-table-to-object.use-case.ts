@@ -1,0 +1,40 @@
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  DATA_OBJECT_REPOSITORY, IDataObjectRepository,
+  PROJECT_REPOSITORY, ProjectRepository,
+  ORGANIZATION_REPOSITORY, OrganizationRepository,
+  EntityNotFoundError, ValidationError,
+} from '../../../domain';
+import { authorizeProject } from './data-object-authz';
+
+export interface LinkTableToObjectInput {
+  userId: string;
+  tableId: string;
+  /** null で紐づけ解除 */
+  dataObjectId: string | null;
+}
+
+/** 実態テーブルをデータオブジェクトに紐づけ/解除する */
+@Injectable()
+export class LinkTableToObjectUseCase {
+  constructor(
+    @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
+    @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
+    @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+  ) {}
+
+  async execute(input: LinkTableToObjectInput): Promise<void> {
+    const table = await this.repo.findTableProjectRef(input.tableId);
+    if (!table) throw new EntityNotFoundError('Table', input.tableId);
+    await authorizeProject(this.projectRepo, this.orgRepo, table.projectId, input.userId);
+
+    if (input.dataObjectId !== null) {
+      const object = await this.repo.findById(input.dataObjectId);
+      if (!object) throw new EntityNotFoundError('DataObject', input.dataObjectId);
+      if (object.projectId !== table.projectId) {
+        throw new ValidationError('Data object does not belong to this project');
+      }
+    }
+    await this.repo.linkTableToObject(input.tableId, input.dataObjectId);
+  }
+}

@@ -19,6 +19,7 @@ import {
   type DfdNodeKind,
   type InformationType,
 } from '@/lib/dfd';
+import { dataObjectApi, type DataObjectDto } from '@/lib/data-objects';
 
 /**
  * 第1レベルDFD（プロジェクト全体）。
@@ -36,6 +37,8 @@ export default function ProjectDfdPage() {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'diagram' | 'table'>('diagram');
   const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
+  // オブジェクト（共通マスタ）一覧。DATA_STORE ノードの紐づけセレクタ・バッジに使う。
+  const [dataObjects, setDataObjects] = useState<DataObjectDto[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,9 +53,20 @@ export default function ProjectDfdPage() {
     }
   }, [projectId]);
 
+  // オブジェクト（共通マスタ）を取得（失敗してもDFD表示は継続）
+  const loadDataObjects = useCallback(async () => {
+    try {
+      const graph = await dataObjectApi.getGraph(projectId);
+      setDataObjects(graph.objects);
+    } catch (err) {
+      console.error('Failed to fetch data objects:', err);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadDataObjects();
+  }, [load, loadDataObjects]);
 
   const handleRegenerate = useCallback(async () => {
     setBusy(true);
@@ -270,6 +284,7 @@ export default function ProjectDfdPage() {
                 diagram={diagram}
                 projectId={projectId}
                 informationTypes={informationTypes}
+                dataObjects={dataObjects}
                 onAddNode={handleAddNode}
                 onUpdateNode={handleUpdateNode}
                 onDeleteNode={handleDeleteNode}

@@ -1,0 +1,4 @@
+.vercel
+.env.neon
+.env.prod-pull
+.env.prod-secrets

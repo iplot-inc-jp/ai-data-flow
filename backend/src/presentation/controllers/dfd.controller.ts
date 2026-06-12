@@ -30,6 +30,7 @@ class AddNodeDto {
   @IsOptional() @IsString() number?: string | null;
   @IsOptional() @IsString() refFlowId?: string | null;
   @IsOptional() @IsString() refNodeId?: string | null;
+  @IsOptional() @IsString() dataObjectId?: string | null;
   @IsOptional() @IsNumber() positionX?: number;
   @IsOptional() @IsNumber() positionY?: number;
 }
@@ -38,6 +39,7 @@ class UpdateNodeDto {
   @IsOptional() @IsString() label?: string;
   @IsOptional() @IsString() number?: string | null;
   @IsOptional() @IsIn(KINDS) kind?: DfdNodeKindValue;
+  @IsOptional() @IsString() dataObjectId?: string | null;
   @IsOptional() @IsNumber() positionX?: number;
   @IsOptional() @IsNumber() positionY?: number;
 }

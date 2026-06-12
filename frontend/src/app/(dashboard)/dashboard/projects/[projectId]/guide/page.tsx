@@ -20,6 +20,8 @@ import {
   ClipboardList,
   FileSpreadsheet,
   Share2,
+  Boxes,
+  Table2,
   Database,
   Target,
   GitBranch,
@@ -32,6 +34,8 @@ import {
   ScrollText,
   History,
   ChevronRight,
+  Sparkles,
+  Grid3X3,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -176,6 +180,8 @@ type GuideSection = {
   links: GuideLink[]
   /** このステップに対応する操作マニュアル（MANUAL_ENTRIES のキー） */
   manualKeys: string[]
+  /** このステップの操作手順（番号付きで表示。マニュアル未整備の機能向け） */
+  steps?: string[]
 }
 
 function buildSections(base: string): GuideSection[] {
@@ -231,7 +237,7 @@ function buildSections(base: string): GuideSection[] {
       title: '現状把握（ASIS）',
       accent: '#d97706',
       summary:
-        '現状の業務を業務フロー（ASIS）として書き起こし、業務定義・データの流れ・データの中身を整理して「いまどうなっているか」を見える化します。',
+        '現状の業務を業務フロー（ASIS）として書き起こし、業務定義を整理して「いまどうなっているか」を見える化します。',
       links: [
         {
           name: 'ASIS管理',
@@ -245,20 +251,48 @@ function buildSections(base: string): GuideSection[] {
           description: '業務の定義・手順・担当を一覧で整理します',
           icon: FileSpreadsheet,
         },
+      ],
+      manualKeys: ['asis-tobe', 'flows', 'business-definition'],
+    },
+    {
+      badge: 'システム',
+      title: '現状システム把握',
+      accent: '#4f46e5',
+      summary:
+        '現状システムのデータ構造を「粗 → 細」の階層で把握します。DFD で業務間のデータの流れを描き、データが溜まる場所（データストア）を「オブジェクト」として捉えます。オブジェクト関係性マップでオブジェクトどうしの関係とカーディナリティ（1対1 / 1対多 / 多対多）を整理し、ER図で各オブジェクトを実テーブルに細分化。テーブルの実体はデータカタログで一元管理し、カタログ・CRUD表・ER図で同じテーブルを共用します。',
+      links: [
         {
           name: 'DFD',
           href: `${base}/dfd`,
-          description: 'データの流れ（データフロー図）を俯瞰します',
+          description: 'データの流れ（データフロー図）を俯瞰し、データストアを洗い出します',
           icon: Share2,
+        },
+        {
+          name: 'オブジェクト関係性マップ',
+          href: `${base}/object-map`,
+          description: 'データストア＝オブジェクトの関係とカーディナリティを整理します',
+          icon: Boxes,
+        },
+        {
+          name: 'ER図',
+          href: `${base}/er-diagram`,
+          description: 'オブジェクトを実テーブルに細分化し、FK（外部キー）で関係を確認します',
+          icon: Table2,
         },
         {
           name: 'データカタログ',
           href: `${base}/catalog`,
-          description: 'テーブル・データ項目を整理し、データの中身を把握します',
+          description: 'テーブル実体（テーブル・カラム）を管理します。CRUD表・ER図と共用',
           icon: Database,
         },
       ],
-      manualKeys: ['asis-tobe', 'flows', 'business-definition', 'dfd', 'catalog'],
+      manualKeys: ['dfd', 'catalog'],
+      steps: [
+        'DFD（データフロー図）で業務間のデータの流れを描き、データが溜まる場所を「データストア」ノードとして置きます。データストアを選択すると編集パネルの「オブジェクト」selectで共通マスタのオブジェクトに紐づけられ、紐づくとノード上に小バッジが出ます。',
+        'オブジェクト関係性マップを開き、「DFDから取り込み」で第1レベルDFDのデータストアをオブジェクトとして一括登録（同名は再利用）。オブジェクトどうしを線で結び、カーディナリティ（1対1 / 1対多 / 多対多）を設定して関係を整理します。',
+        'ER図でオブジェクトの中身を実テーブルに細分化します。同じオブジェクトに属するテーブルは点線囲みでグループ表示され、カラム表示の切替や、FK（外部キー）線でテーブル間の参照関係を確認できます。',
+        'データカタログでテーブル実体（テーブル・カラムのメタデータ）を管理します。テーブルはカタログ・CRUD表・ER図で共用され、各テーブルカードの「オブジェクト」selectでどのオブジェクトに属するかを紐づけます。',
+      ],
     },
     {
       badge: 'STEP 2',
@@ -281,6 +315,63 @@ function buildSections(base: string): GuideSection[] {
         },
       ],
       manualKeys: ['asis-tobe', 'flows'],
+    },
+    {
+      badge: 'フロー編集',
+      title: '業務フローキャンバスの新機能',
+      accent: '#0ea5e9',
+      summary:
+        'ASIS/TOBE の業務フローキャンバスに、スコープ囲み・メモ（付箋）・DB/人アイコン・矢印へのAPI紐づけが加わりました。フローを「業務の説明図」としてだけでなく、システム設計（CRUD表のAPI）とつながる設計図として使えます。',
+      links: [
+        {
+          name: 'ASIS管理',
+          href: `${base}/asis`,
+          description: '現状フローのキャンバスで新機能を使えます',
+          icon: ClipboardList,
+        },
+        {
+          name: 'TOBE管理',
+          href: `${base}/tobe`,
+          description: 'あるべき姿フローのキャンバスでも同じ機能を使えます',
+          icon: Target,
+        },
+        {
+          name: 'CRUD表',
+          href: `${base}/crud-matrix`,
+          description: '矢印に紐づけるAPIエンドポイントはCRUD表で管理します',
+          icon: Grid3X3,
+        },
+      ],
+      manualKeys: [],
+      steps: [
+        'スコープ囲み: まとまりのある業務領域を点線枠＋背景色の矩形で囲って見える化します。枠線スタイル（実線/点線）と背景色の濃さは編集パネルで変更できます。',
+        'メモ（付箋）: 補足・申し送り・検討メモを付箋としてキャンバスの好きな位置に置けます。',
+        'DB/人アイコン: データベース（データの所在）や人（フロー外の登場人物）を表すアイコンをキャンバスに配置し、フローの文脈を補足します。',
+        '矢印へのAPI紐づけ: システム⇄人をまたぐ矢印を選択すると、CRUD表のAPIエンドポイントを複数紐づけられます。どの業務のやり取りがどのAPIで実現されるかをフロー上で確認できます。',
+      ],
+    },
+    {
+      badge: 'AI作成',
+      title: 'AI作成（業務KPI・AI精度KPI）',
+      accent: '#db2777',
+      summary:
+        '業務フローを起点に、AI が業務KPI を生成します。各KPIには SMART の5軸採点が付き、AI精度KPI（認識精度・自動化率など）は対象システムに紐づけて、baseline / target / current と達成率で継続的に管理します。',
+      links: [
+        {
+          name: 'AI作成',
+          href: `${base}/ai-create`,
+          description: '業務フローからAIが業務KPI・AI精度KPIを生成します',
+          icon: Sparkles,
+        },
+      ],
+      manualKeys: [],
+      steps: [
+        '対象の業務フローを選びます。',
+        'フロー上の INPUT/OUTPUT・帳票を複数選択します。種別（帳票/データ/物体）の紐づけはその場で変更できます。',
+        'AI が業務KPI を生成します。各KPIには SMART（Specific / Measurable / Achievable / Relevant / Time-bound）の5軸採点とコメントが付くので、KPIの質をその場で確認できます。',
+        'AI精度KPI（認識精度・自動化率などのプリセット、またはAI生成）は対象システムに紐づけて登録します。',
+        '各KPIは baseline（現状値）・target（目標値）・current（最新値）と達成率で管理し、測定頻度（日次/週次/月次/四半期）と測定方法・オーナー（ロール）を設定して運用します。',
+      ],
     },
     {
       badge: 'STEP 3',
@@ -532,6 +623,17 @@ export default function GuidePage() {
               <GuideLinkCard key={link.href} link={link} />
             ))}
           </div>
+          {/* このステップの操作手順（番号付き） */}
+          {section.steps && section.steps.length > 0 && (
+            <div className="blueprint-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">操作手順</h3>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-foreground/80">
+                {section.steps.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          )}
           {/* このステップの操作マニュアル（図解→操作説明）を折りたたみで埋め込み */}
           <ManualAccordion entryKeys={section.manualKeys} />
         </section>
