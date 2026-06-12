@@ -5,9 +5,10 @@
  *
  * 会議体のマスタ。ステークホルダーマップ・報告カレンダーと連動する。
  * - 一覧テーブル：会議名・目的/ゴール・頻度・曜日時間・所要時間・形式・主催・
- *   ステータス（開催中/休止 トグル）・対象ステークホルダー（チップ）。
+ *   ステータス（開催中/休止 トグル）・対象ステークホルダー（チップ）・対象領域（チップ）。
  * - 行クリック → 全項目の編集モーダル。新規作成・削除（confirm）。
  * - 主催・対象は Stakeholder マスタ（GET /api/projects/:projectId/stakeholders）から選択。
+ * - 対象領域は SubProject マスタ（領域→サブ領域の入れ子チェックボックス）から複数選択。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -26,6 +27,8 @@ import {
   Play,
   ExternalLink,
   ShieldAlert,
+  FolderTree,
+  CornerDownRight,
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
@@ -39,8 +42,11 @@ import {
   updateMeeting,
   deleteMeeting,
   setMeetingStakeholders,
+  setMeetingSubProjects,
   listStakeholders,
+  orderDomainTree,
 } from '@/lib/stakeholders';
+import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import {
   listRisks,
   riskScore,
@@ -102,6 +108,7 @@ interface Draft {
   preMaterials: string;
   note: string;
   stakeholderIds: string[];
+  subProjectIds: string[];
 }
 
 function meetingToDraft(m: Meeting | null): Draft {
@@ -123,6 +130,7 @@ function meetingToDraft(m: Meeting | null): Draft {
     preMaterials: m?.preMaterials ?? '',
     note: m?.note ?? '',
     stakeholderIds: m?.stakeholderIds ? [...m.stakeholderIds] : [],
+    subProjectIds: m?.subProjectIds ? [...m.subProjectIds] : [],
   };
 }
 
@@ -163,6 +171,7 @@ export default function MeetingsPage() {
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
+  const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
   const [risks, setRisks] = useState<Risk[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,14 +186,17 @@ export default function MeetingsPage() {
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [mt, sh, rs] = await Promise.all([
+      const [mt, sh, rs, sp] = await Promise.all([
         listMeetings(projectId),
         listStakeholders(projectId),
         listRisks(projectId),
+        // 領域は補助情報なので、取得失敗しても会議一覧は壊さない
+        subProjectApi.list(projectId).catch(() => [] as SubProjectMaster[]),
       ]);
       setMeetings(mt);
       setStakeholders(sh);
       setRisks(rs);
+      setSubProjects(sp);
     } catch (e) {
       setError(e instanceof Error ? e.message : '読み込みに失敗しました');
     }
@@ -205,6 +217,26 @@ export default function MeetingsPage() {
   const stakeholderById = useMemo(
     () => new Map(stakeholders.map((s) => [s.id, s])),
     [stakeholders],
+  );
+
+  const subProjectById = useMemo(
+    () => new Map(subProjects.map((s) => [s.id, s])),
+    [subProjects],
+  );
+
+  // 領域→サブ領域の入れ子順（親→子、循環は orderDomainTree がガード）。
+  const subProjectTree = useMemo(
+    () => orderDomainTree(subProjects),
+    [subProjects],
+  );
+
+  /** 領域チップの title 用：「親領域 > サブ領域」のパス表記。 */
+  const subProjectPath = useCallback(
+    (sp: SubProjectMaster): string => {
+      const parent = sp.parentId ? subProjectById.get(sp.parentId) : undefined;
+      return parent ? `${parent.name} > ${sp.name}` : sp.name;
+    },
+    [subProjectById],
   );
 
   // 会議 → レビュー対象リスク（Risk.reviewMeetingId による逆引き）。
@@ -250,14 +282,18 @@ export default function MeetingsPage() {
       if (editId) {
         await updateMeeting(editId, input);
         await setMeetingStakeholders(editId, draft.stakeholderIds);
+        await setMeetingSubProjects(editId, draft.subProjectIds);
       } else {
         const created = await createMeeting(projectId, input);
         // 作成直後に編集モードへ切り替える。これで後続の
-        // setMeetingStakeholders が失敗しても、再度「保存」を押したときに
-        // 同じ会議体の更新になり、重複作成を防げる。
+        // setMeetingStakeholders / setMeetingSubProjects が失敗しても、
+        // 再度「保存」を押したときに同じ会議体の更新になり、重複作成を防げる。
         setEditId(created.id);
         if (draft.stakeholderIds.length > 0) {
           await setMeetingStakeholders(created.id, draft.stakeholderIds);
+        }
+        if (draft.subProjectIds.length > 0) {
+          await setMeetingSubProjects(created.id, draft.subProjectIds);
         }
       }
       await reload();
@@ -303,6 +339,14 @@ export default function MeetingsPage() {
       stakeholderIds: prev.stakeholderIds.includes(id)
         ? prev.stakeholderIds.filter((x) => x !== id)
         : [...prev.stakeholderIds, id],
+    }));
+
+  const toggleDraftSubProject = (id: string) =>
+    setDraft((prev) => ({
+      ...prev,
+      subProjectIds: prev.subProjectIds.includes(id)
+        ? prev.subProjectIds.filter((x) => x !== id)
+        : [...prev.subProjectIds, id],
     }));
 
   return (
@@ -391,6 +435,9 @@ export default function MeetingsPage() {
                     </th>
                     <th className="min-w-[200px] bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
                       対象ステークホルダー
+                    </th>
+                    <th className="min-w-[160px] bg-indigo-50 px-3 py-2 text-left text-xs font-semibold text-indigo-700">
+                      対象領域
                     </th>
                     <th className="min-w-[180px] bg-rose-50 px-3 py-2 text-left text-xs font-semibold text-rose-700">
                       レビュー対象リスク
@@ -515,6 +562,28 @@ export default function MeetingsPage() {
                           </div>
                         </td>
 
+                        {/* 対象領域（SubProject チップ。サブ領域は「親 > 子」を title に） */}
+                        <td className="bg-indigo-50/40 px-3 py-2.5 align-middle">
+                          <div className="flex max-w-[240px] flex-wrap gap-1">
+                            {(m.subProjectIds ?? []).length === 0 && (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                            {(m.subProjectIds ?? []).map((spid) => {
+                              const sp = subProjectById.get(spid);
+                              return (
+                                <span
+                                  key={spid}
+                                  className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] text-indigo-800"
+                                  title={sp ? subProjectPath(sp) : undefined}
+                                >
+                                  <FolderTree className="h-3 w-3 shrink-0" />
+                                  {sp?.name ?? '（不明）'}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </td>
+
                         {/* レビュー対象リスク（Risk.reviewMeetingId の逆引き） */}
                         <td
                           className="bg-rose-50/40 px-3 py-2.5 align-middle"
@@ -573,7 +642,7 @@ export default function MeetingsPage() {
                   {meetings.length === 0 && (
                     <tr>
                       <td
-                        colSpan={12}
+                        colSpan={13}
                         className="px-4 py-10 text-center text-sm text-gray-400"
                       >
                         まだ会議体がありません。「会議体を追加」から始めましょう。
@@ -851,6 +920,80 @@ export default function MeetingsPage() {
                         </button>
                       </span>
                     ))}
+                  </div>
+                )}
+              </Field>
+
+              {/* 対象領域（領域→サブ領域の入れ子チェックボックスで複数選択） */}
+              <Field label="対象領域">
+                {subProjects.length === 0 ? (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+                    領域が未登録です。
+                    <Link
+                      href={`/dashboard/projects/${projectId}/domains`}
+                      className="ml-1 font-medium underline"
+                    >
+                      領域
+                    </Link>
+                    で領域・サブ領域を登録すると選択できます。
+                  </p>
+                ) : (
+                  <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-md border border-gray-200 p-1.5">
+                    {subProjectTree.map(({ row: sp, depth }) => {
+                      const checked = draft.subProjectIds.includes(sp.id);
+                      return (
+                        <label
+                          key={sp.id}
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-gray-50"
+                          style={{ paddingLeft: `${8 + depth * 20}px` }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleDraftSubProject(sp.id)}
+                            className="h-3.5 w-3.5"
+                          />
+                          {depth > 0 ? (
+                            <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                          ) : (
+                            <FolderTree className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
+                          )}
+                          <span
+                            className={`flex-1 ${
+                              depth > 0
+                                ? 'text-gray-700'
+                                : 'font-medium text-gray-800'
+                            }`}
+                          >
+                            {sp.name}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {draft.subProjectIds.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {draft.subProjectIds.map((spid) => {
+                      const sp = subProjectById.get(spid);
+                      return (
+                        <span
+                          key={spid}
+                          className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] text-indigo-800"
+                          title={sp ? subProjectPath(sp) : undefined}
+                        >
+                          {sp?.name ?? '（不明）'}
+                          <button
+                            type="button"
+                            onClick={() => toggleDraftSubProject(spid)}
+                            className="text-indigo-500 hover:text-indigo-800"
+                            aria-label="外す"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </Field>

@@ -45,6 +45,7 @@ export interface ReconstructMeetingProps {
   note: string | null;
   order: number;
   stakeholderIds?: string[];
+  subProjectIds?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -95,6 +96,7 @@ export class Meeting extends BaseEntity {
   private _note: string | null;
   private _order: number;
   private _stakeholderIds: string[];
+  private _subProjectIds: string[];
 
   private constructor(
     id: string,
@@ -118,6 +120,7 @@ export class Meeting extends BaseEntity {
     note: string | null,
     order: number,
     stakeholderIds: string[],
+    subProjectIds: string[],
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -142,6 +145,7 @@ export class Meeting extends BaseEntity {
     this._note = note;
     this._order = order;
     this._stakeholderIds = stakeholderIds;
+    this._subProjectIds = subProjectIds;
   }
 
   /**
@@ -187,6 +191,7 @@ export class Meeting extends BaseEntity {
       props.note?.trim() || null,
       props.order ?? 0,
       [],
+      [],
       now,
       now,
     );
@@ -218,6 +223,7 @@ export class Meeting extends BaseEntity {
       props.note,
       props.order,
       props.stakeholderIds ?? [],
+      props.subProjectIds ?? [],
       props.createdAt,
       props.updatedAt,
     );
@@ -302,6 +308,13 @@ export class Meeting extends BaseEntity {
     this.touch();
   }
 
+  /** 対象サブ領域を置き換える */
+  setSubProjects(subProjectIds: string[]): void {
+    // 重複排除
+    this._subProjectIds = Array.from(new Set(subProjectIds));
+    this.touch();
+  }
+
   // ========== Getter ==========
 
   get projectId(): string {
@@ -382,5 +395,9 @@ export class Meeting extends BaseEntity {
 
   get stakeholderIds(): string[] {
     return this._stakeholderIds;
+  }
+
+  get subProjectIds(): string[] {
+    return this._subProjectIds;
   }
 }

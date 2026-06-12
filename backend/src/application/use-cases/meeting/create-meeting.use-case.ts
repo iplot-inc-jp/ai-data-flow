@@ -59,6 +59,7 @@ export interface MeetingOutput {
   note: string | null;
   order: number;
   stakeholderIds: string[];
+  subProjectIds: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -86,6 +87,7 @@ export function toMeetingOutput(meeting: Meeting): MeetingOutput {
     note: meeting.note,
     order: meeting.order,
     stakeholderIds: meeting.stakeholderIds,
+    subProjectIds: meeting.subProjectIds,
     createdAt: meeting.createdAt,
     updatedAt: meeting.updatedAt,
   };

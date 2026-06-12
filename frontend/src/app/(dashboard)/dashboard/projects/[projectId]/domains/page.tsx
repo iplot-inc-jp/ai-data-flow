@@ -16,7 +16,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Loader2, Plus, Trash2, FolderTree, CornerDownRight, GitBranch } from 'lucide-react';
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  FolderTree,
+  CornerDownRight,
+  GitBranch,
+  CalendarClock,
+} from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
@@ -25,12 +33,14 @@ import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import {
   listStakeholders,
   listAssignments,
+  listMeetings,
   normalizeSide,
   sideMeta,
   raciMeta,
   pickRaci,
   type DomainAssignment,
   type Stakeholder,
+  type Meeting,
 } from '@/lib/stakeholders';
 
 /** 領域行に出す担当者チップ1件（ステークホルダー × RACI）。 */
@@ -101,6 +111,8 @@ export default function DomainsPage() {
   // 担当者チップの逆引き用（取得失敗時は空のまま＝領域一覧は動く）
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [assignments, setAssignments] = useState<DomainAssignment[]>([]);
+  // 関連会議チップの逆引き用（Meeting.subProjectIds。取得失敗時は空のまま）
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,15 +158,26 @@ export default function DomainsPage() {
     }
   }, [projectId]);
 
+  // 関連会議チップ用（Meeting.subProjectIds の逆引き）。失敗しても領域一覧は壊さない。
+  const loadMeetings = useCallback(async () => {
+    try {
+      setMeetings(await listMeetings(projectId));
+    } catch {
+      setMeetings([]);
+    }
+  }, [projectId]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // 領域一覧とフロー・担当者を並行取得（フロー/担当者の取得失敗は各 load 内で握りつぶす）
+      // 領域一覧とフロー・担当者・会議を並行取得
+      // （フロー/担当者/会議の取得失敗は各 load 内で握りつぶす）
       const [subProjects] = await Promise.all([
         subProjectApi.list(projectId),
         loadFlows(),
         loadAssignees(),
+        loadMeetings(),
       ]);
       setItems(subProjects);
     } catch (err) {
@@ -162,7 +185,7 @@ export default function DomainsPage() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, loadFlows, loadAssignees]);
+  }, [projectId, loadFlows, loadAssignees, loadMeetings]);
 
   useEffect(() => {
     void load();
@@ -222,6 +245,16 @@ export default function DomainsPage() {
   }
   for (const list of Array.from(assigneesBySubProject.values())) {
     list.sort((x, y) => raciRank(x.raci) - raciRank(y.raci));
+  }
+
+  // 関連会議チップの逆引き（領域ID → 会議。Meeting.subProjectIds から）。
+  const meetingsBySubProject = new Map<string, Meeting[]>();
+  for (const meeting of meetings) {
+    for (const sid of meeting.subProjectIds ?? []) {
+      const list = meetingsBySubProject.get(sid) ?? [];
+      list.push(meeting);
+      meetingsBySubProject.set(sid, list);
+    }
   }
 
   // 業務フローを subProjectId ごとに振り分け。存在しない/未割当の領域IDは「未分類」へ。
@@ -341,6 +374,7 @@ export default function DomainsPage() {
                 projectId={projectId}
                 flows={flowsBySubProject.get(row.id) ?? []}
                 assignees={assigneesBySubProject.get(row.id) ?? []}
+                meetings={meetingsBySubProject.get(row.id) ?? []}
                 onChanged={load}
               />
             ))}
@@ -413,6 +447,7 @@ function DomainRow({
   projectId,
   flows,
   assignees,
+  meetings,
   onChanged,
 }: {
   item: SubProjectMaster;
@@ -421,6 +456,8 @@ function DomainRow({
   flows: FlowLite[];
   /** この領域の担当者（ステークホルダー×RACI の逆引き）。 */
   assignees: Assignee[];
+  /** この領域を対象にしている会議（Meeting.subProjectIds の逆引き）。 */
+  meetings: Meeting[];
   onChanged: () => Promise<void> | void;
 }) {
   const [name, setName] = useState(item.name);
@@ -540,6 +577,29 @@ function DomainRow({
               </Link>
             );
           })}
+        </li>
+      )}
+
+      {/* この領域を対象にしている会議（Meeting.subProjectIds の逆引き）。
+          クリックで会議マスタへ。担当者チップと同じく領域行と一体に見せる。 */}
+      {meetings.length > 0 && (
+        <li
+          className="flex flex-wrap items-center gap-1.5 border-t-0 pb-1.5"
+          style={{ paddingLeft: `${flowIndent}px` }}
+        >
+          {meetings.map((meeting) => (
+            <Link
+              key={meeting.id}
+              href={`/dashboard/projects/${projectId}/meetings`}
+              className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-800 transition-colors hover:bg-indigo-100"
+              title={`${meeting.name || '（無題）'}${
+                meeting.frequency ? `（${meeting.frequency}）` : ''
+              }— 会議マスタで管理`}
+            >
+              <CalendarClock className="h-3 w-3 shrink-0" />
+              {meeting.name || '（無題）'}
+            </Link>
+          ))}
         </li>
       )}
 

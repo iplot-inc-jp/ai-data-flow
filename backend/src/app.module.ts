@@ -153,6 +153,7 @@ import {
   UpdateMeetingUseCase,
   DeleteMeetingUseCase,
   SetMeetingStakeholdersUseCase,
+  SetMeetingSubProjectsUseCase,
   // Risk
   CreateRiskUseCase,
   GetRisksUseCase,
@@ -694,6 +695,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     UpdateMeetingUseCase,
     DeleteMeetingUseCase,
     SetMeetingStakeholdersUseCase,
+    SetMeetingSubProjectsUseCase,
     // Risk
     CreateRiskUseCase,
     GetRisksUseCase,

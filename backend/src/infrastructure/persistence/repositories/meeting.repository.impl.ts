@@ -34,6 +34,7 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
     createdAt: Date;
     updatedAt: Date;
     stakeholders?: { stakeholderId: string }[];
+    subProjects?: { subProjectId: string }[];
   }): Meeting {
     return Meeting.reconstruct({
       id: data.id,
@@ -57,6 +58,7 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
       note: data.note,
       order: data.order,
       stakeholderIds: (data.stakeholders ?? []).map((s) => s.stakeholderId),
+      subProjectIds: (data.subProjects ?? []).map((s) => s.subProjectId),
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     });
@@ -65,7 +67,10 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
   async findById(id: string): Promise<Meeting | null> {
     const data = await this.prisma.meeting.findUnique({
       where: { id },
-      include: { stakeholders: { select: { stakeholderId: true } } },
+      include: {
+        stakeholders: { select: { stakeholderId: true } },
+        subProjects: { select: { subProjectId: true } },
+      },
     });
     if (!data) return null;
     return this.toDomain(data);
@@ -75,7 +80,10 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
     const data = await this.prisma.meeting.findMany({
       where: { projectId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
-      include: { stakeholders: { select: { stakeholderId: true } } },
+      include: {
+        stakeholders: { select: { stakeholderId: true } },
+        subProjects: { select: { subProjectId: true } },
+      },
     });
     return data.map((m) => this.toDomain(m));
   }
@@ -132,6 +140,28 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
                 id: randomUUID(),
                 meetingId,
                 stakeholderId,
+              })),
+              skipDuplicates: true,
+            }),
+          ]
+        : []),
+    ]);
+  }
+
+  async setSubProjects(
+    meetingId: string,
+    subProjectIds: string[],
+  ): Promise<void> {
+    const uniqueIds = Array.from(new Set(subProjectIds));
+    await this.prisma.$transaction([
+      this.prisma.meetingSubProject.deleteMany({ where: { meetingId } }),
+      ...(uniqueIds.length > 0
+        ? [
+            this.prisma.meetingSubProject.createMany({
+              data: uniqueIds.map((subProjectId) => ({
+                id: randomUUID(),
+                meetingId,
+                subProjectId,
               })),
               skipDuplicates: true,
             }),

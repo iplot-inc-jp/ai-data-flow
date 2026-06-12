@@ -191,6 +191,12 @@ export interface Meeting {
   note: string | null;
   order: number;
   stakeholderIds: string[];
+  /**
+   * 対象領域（SubProject の ID 配列）。
+   * バックエンド（MeetingOutput）は常に返すが、既存テスト・既存呼び出しの
+   * 後方互換のためフロント型では任意にしている。
+   */
+  subProjectIds?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -199,11 +205,16 @@ export interface Meeting {
 export type MeetingInput = Partial<
   Omit<
     Meeting,
-    'id' | 'projectId' | 'stakeholderIds' | 'createdAt' | 'updatedAt'
+    | 'id'
+    | 'projectId'
+    | 'stakeholderIds'
+    | 'subProjectIds'
+    | 'createdAt'
+    | 'updatedAt'
   >
 > & { name: string };
 
-/** ロール（Role テーブル）。責務・決裁範囲・KPI を含む。 */
+/** ロール（Role テーブル）。責務・決裁範囲・KPI・領域（SubProject）を含む。 */
 export interface Role {
   id: string;
   projectId: string;
@@ -216,6 +227,8 @@ export interface Role {
   responsibility?: string | null;
   decisionScope?: string | null;
   kpi?: string | null;
+  /** 領域（SubProject の FK。未割当は null）。 */
+  subProjectId?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -421,6 +434,20 @@ export async function setMeetingStakeholders(
   return res.json();
 }
 
+/** 会議体の対象領域（SubProject）を置き換える（PUT /meetings/:id/sub-projects）。 */
+export async function setMeetingSubProjects(
+  id: string,
+  subProjectIds: string[],
+): Promise<Meeting> {
+  const res = await fetch(`${API_URL}/api/meetings/${id}/sub-projects`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ subProjectIds }),
+  });
+  if (!res.ok) throw new Error('対象領域の更新に失敗しました');
+  return res.json();
+}
+
 // ---------------------------------------------------------------------------
 // Role API（責務・決裁範囲・KPI の参照／更新のみここで使う）
 // ---------------------------------------------------------------------------
@@ -436,7 +463,15 @@ export async function listRoles(projectId: string): Promise<Role[]> {
 export async function updateRole(
   id: string,
   input: Partial<
-    Pick<Role, 'responsibility' | 'decisionScope' | 'kpi' | 'name' | 'description'>
+    Pick<
+      Role,
+      | 'responsibility'
+      | 'decisionScope'
+      | 'kpi'
+      | 'name'
+      | 'description'
+      | 'subProjectId'
+    >
   >,
 ): Promise<Role> {
   const res = await fetch(`${API_URL}/api/roles/${id}`, {

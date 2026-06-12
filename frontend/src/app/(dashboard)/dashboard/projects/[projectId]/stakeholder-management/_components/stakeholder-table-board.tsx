@@ -104,6 +104,9 @@ const ROLE_DETAIL_FIELDS: {
   { key: 'kpi', label: '関心のあるKPI' },
 ];
 
+// 「未割当」を表すセンチネル（select の value に空文字を使わない作法）。
+const NONE = '__none__';
+
 /** 支持度→カードの色。 */
 function supportClasses(support: Support | ''): string {
   switch (support) {
@@ -235,6 +238,16 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
 
   // 領域の入れ子表示（循環ガード付きツリー順）
   const domainTreeRows = useMemo(() => orderDomainTree(domains), [domains]);
+
+  // ロールの「領域」select 用の選択肢（親→子をインデント。循環は orderDomainTree が防ぐ）
+  const domainOptions = useMemo(
+    () =>
+      domainTreeRows.map(({ row, depth }) => ({
+        id: row.id,
+        label: depth > 0 ? `${'　'.repeat(depth - 1)}　└ ${row.name}` : row.name,
+      })),
+    [domainTreeRows],
+  );
 
   // 一覧テーブルの2セクション（外部 → 内部）
   const sections = useMemo(
@@ -440,6 +453,23 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
       await reload();
     } finally {
       setSavingRoleId(null);
+    }
+  };
+
+  // ロールの領域（SubProject）変更。select 変更で即 PATCH（楽観更新・失敗時は reload）。
+  const handleRoleDomainChange = async (id: string, value: string) => {
+    const subProjectId = value === NONE ? null : value;
+    setRoles((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, subProjectId } : r)),
+    );
+    setActionError(null);
+    try {
+      await updateRole(id, { subProjectId });
+    } catch (e) {
+      setActionError(
+        e instanceof Error ? e.message : 'ロールの領域の更新に失敗しました',
+      );
+      await reload();
     }
   };
 
@@ -916,7 +946,7 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
           役割と責任
         </h3>
         <p className="text-xs text-gray-500">
-          ロールごとに責任・意思決定範囲・関心KPIを定義します。各ロールには、ステークホルダーの「役割」がそのロール名と一致する関係者がまとまります。
+          ロールごとに領域（サブプロジェクト）・責任・意思決定範囲・関心KPIを定義します。領域は変更するとすぐ保存されます。各ロールには、ステークホルダーの「役割」がそのロール名と一致する関係者がまとまります。
         </p>
 
         {roles.length === 0 ? (
@@ -929,26 +959,66 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
           <div className="space-y-3">
             {roles.map((role) => {
               const members = stakeholdersForRole(role.name);
+              const roleDomain = role.subProjectId
+                ? domainById.get(role.subProjectId)
+                : undefined;
               return (
                 <Card key={role.id} className="bg-white border-gray-200">
                   <CardContent className="space-y-3 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <h4 className="text-sm font-semibold text-[#050f3e]">
-                        {role.name}
-                      </h4>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveRole(role)}
-                        disabled={savingRoleId === role.id}
-                        className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        {savingRoleId === role.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Save className="h-3.5 w-3.5" />
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <h4 className="text-sm font-semibold text-[#050f3e]">
+                          {role.name}
+                        </h4>
+                        {/* 領域バッジ（割当があるときだけ） */}
+                        {roleDomain && (
+                          <span
+                            className="inline-flex max-w-[200px] items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700"
+                            title={`領域: ${roleDomain.name}`}
+                          >
+                            <span className="truncate">{roleDomain.name}</span>
+                          </span>
                         )}
-                        保存
-                      </button>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {/* 領域（SubProject）。変更で即保存（PATCH /api/roles/:id） */}
+                        <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                          領域
+                          <select
+                            value={
+                              role.subProjectId &&
+                              domainById.has(role.subProjectId)
+                                ? role.subProjectId
+                                : NONE
+                            }
+                            onChange={(e) =>
+                              handleRoleDomainChange(role.id, e.target.value)
+                            }
+                            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                            aria-label={`${role.name} の領域`}
+                          >
+                            <option value={NONE}>（未設定）</option>
+                            {domainOptions.map((o) => (
+                              <option key={o.id} value={o.id}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveRole(role)}
+                          disabled={savingRoleId === role.id}
+                          className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {savingRoleId === role.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Save className="h-3.5 w-3.5" />
+                          )}
+                          保存
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-3">

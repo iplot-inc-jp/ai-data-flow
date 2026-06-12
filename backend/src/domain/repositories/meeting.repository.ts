@@ -25,6 +25,11 @@ export interface IMeetingRepository {
   setStakeholders(meetingId: string, stakeholderIds: string[]): Promise<void>;
 
   /**
+   * 対象サブ領域の紐付けを置き換える（join行を入れ替え）
+   */
+  setSubProjects(meetingId: string, subProjectIds: string[]): Promise<void>;
+
+  /**
    * 削除
    */
   delete(id: string): Promise<void>;

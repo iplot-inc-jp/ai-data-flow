@@ -26,6 +26,7 @@ import {
   UpdateMeetingUseCase,
   DeleteMeetingUseCase,
   SetMeetingStakeholdersUseCase,
+  SetMeetingSubProjectsUseCase,
   MeetingOutput,
 } from '../../application';
 import {
@@ -242,6 +243,16 @@ class SetMeetingStakeholdersDto {
   stakeholderIds: string[];
 }
 
+class SetMeetingSubProjectsDto {
+  @ApiProperty({
+    description: '対象サブ領域IDの配列（置き換え）',
+    type: [String],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  subProjectIds: string[];
+}
+
 @ApiTags('会議体')
 @ApiBearerAuth()
 @Controller('projects/:projectId/meetings')
@@ -313,6 +324,7 @@ export class MeetingByIdController {
     private readonly updateMeetingUseCase: UpdateMeetingUseCase,
     private readonly deleteMeetingUseCase: DeleteMeetingUseCase,
     private readonly setMeetingStakeholdersUseCase: SetMeetingStakeholdersUseCase,
+    private readonly setMeetingSubProjectsUseCase: SetMeetingSubProjectsUseCase,
   ) {}
 
   @Patch(':id')
@@ -367,6 +379,27 @@ export class MeetingByIdController {
       userId: user.id,
       id,
       stakeholderIds: dto.stakeholderIds,
+    });
+  }
+
+  @Put(':id/sub-projects')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '会議体の対象サブ領域を設定（置き換え）',
+  })
+  @ApiParam({ name: 'id', description: '会議体ID' })
+  @ApiResponse({ status: 200, description: '更新成功' })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: '会議体が見つかりません' })
+  async setSubProjects(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: SetMeetingSubProjectsDto,
+  ): Promise<MeetingOutput> {
+    return this.setMeetingSubProjectsUseCase.execute({
+      userId: user.id,
+      id,
+      subProjectIds: dto.subProjectIds,
     });
   }
 

@@ -1063,6 +1063,7 @@ model SubProject {
   risks            Risk[]
   stakeholderAssignments StakeholderSubProject[]
   lessons          LessonLearned[]
+  meetingLinks     MeetingSubProject[]
 
   @@map("sub_projects")
 }
@@ -1470,6 +1471,7 @@ model Meeting {
   stakeholders    MeetingStakeholder[]
   reportCalendars ReportCalendar[]
   risks           Risk[]
+  subProjects     MeetingSubProject[]
 
   @@map("meetings")
 }
@@ -1489,6 +1491,23 @@ model MeetingStakeholder {
 
   @@unique([meetingId, stakeholderId])
   @@map("meeting_stakeholders")
+}
+
+// ===========================================
+// 会議体 ↔ サブ領域（多対多）
+// ===========================================
+
+model MeetingSubProject {
+  id           String   @id @default(uuid())
+  meetingId    String   @map("meeting_id")
+  subProjectId String   @map("sub_project_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  meeting    Meeting    @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  subProject SubProject @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, subProjectId])
+  @@map("meeting_sub_projects")
 }
 
 // ===========================================
