@@ -66,6 +66,10 @@ import {
 } from '@/lib/risks';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import {
+  SubProjectPicker,
+  collectSubProjectDescendants,
+} from '@/components/ui/sub-project-picker';
+import {
   listStakeholders,
   listMeetings,
   type Stakeholder,
@@ -401,6 +405,12 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
   const subOptions = useMemo(() => subProjectOptions(subProjects), [subProjects]);
 
   // select フィルタ適用後の集合（ヒートマップはこの集合から集計する）。
+  // 領域フィルタ: 選択領域＋その子孫の id 集合（親で絞れば配下も含む）
+  const filterSubProjectIds = useMemo(() => {
+    if (!filterSubProject || filterSubProject === NONE) return new Set<string>();
+    return collectSubProjectDescendants(filterSubProject, subProjects);
+  }, [filterSubProject, subProjects]);
+
   const filtered = useMemo(() => {
     return risks.filter((r) => {
       if (filterType) {
@@ -418,7 +428,13 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
         }
       }
       if (filterSubProject) {
-        if (filterSubProject === NONE ? r.subProjectId != null : r.subProjectId !== filterSubProject) {
+        if (filterSubProject === NONE) {
+          if (r.subProjectId != null) return false;
+        } else if (
+          // 親領域で絞ったときは子孫領域のリスクも含める
+          !r.subProjectId ||
+          !filterSubProjectIds.has(r.subProjectId)
+        ) {
           return false;
         }
       }
@@ -432,7 +448,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
       }
       return true;
     });
-  }, [risks, filterType, filterRiskType, filterCategory, filterSubProject, filterOwner, filterLifecycle]);
+  }, [risks, filterType, filterRiskType, filterCategory, filterSubProject, filterSubProjectIds, filterOwner, filterLifecycle]);
 
   const heatCounts = useMemo(() => countHeatmapCells(filtered), [filtered]);
 
@@ -802,15 +818,19 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
             ...categories.map((c) => ({ value: c.id, label: c.name })),
           ]}
         />
-        <FilterSelect
-          label="領域"
-          value={filterSubProject}
-          onChange={setFilterSubProject}
-          options={[
-            { value: NONE, label: '（未設定）' },
-            ...subOptions.map((o) => ({ value: o.id, label: o.label })),
-          ]}
-        />
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] font-medium text-gray-400">
+            領域（親を選ぶと配下も含む）
+          </span>
+          <SubProjectPicker
+            subProjects={subProjects}
+            value={filterSubProject}
+            onChange={setFilterSubProject}
+            noneValue={NONE}
+            allowAll
+            placeholder="すべて"
+          />
+        </label>
         <FilterSelect
           label="オーナー"
           value={filterOwner}
