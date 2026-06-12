@@ -129,6 +129,7 @@ model Project {
   adoptionStatuses        AdoptionStatus[]
   dataObjects             DataObject[]
   dataObjectRelations     DataObjectRelation[]
+  kpis                    Kpi[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -164,6 +165,7 @@ model Role {
   apiRolePermissions    ApiRolePermission[]
   statusRolePermissions StatusRolePermission[]
   assignedTasks         Task[]                 @relation("RoleAssignedTasks")
+  ownedKpis             Kpi[]
 
   @@unique([projectId, name])
   @@map("roles")
@@ -303,6 +305,8 @@ model BusinessFlow {
   asisTobeVisions     TobeVision[]             @relation("TobeVisionAsisFlow")
   // この業務フローに紐づく添付ファイル
   attachments         Attachment[]             @relation("FlowAttachments")
+  // この業務フローを対象に作成された KPI
+  kpis                Kpi[]
 
   @@map("business_flows")
 }
@@ -335,6 +339,7 @@ enum FlowAnnotationKind {
   STICKY   // 付箋
   COMMENT  // コメント
   ICON     // アイコン
+  SCOPE    // スコープ囲み（業務領域を点線/背景色つき矩形で囲う）
 }
 
 model FlowAnnotation {
@@ -349,6 +354,9 @@ model FlowAnnotation {
   height    Float?             @map("height")
   color     String?
   icon      String?            // kind=ICON のとき lucide アイコン名
+  // kind=SCOPE の枠線スタイル 'dashed' | 'solid' と背景塗りの不透明度(0-1)
+  borderStyle String?          @map("border_style")
+  fillOpacity Float?           @map("fill_opacity")
   order     Int                @default(0)
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")
@@ -463,8 +471,102 @@ model FlowEdge {
   targetNode           FlowNode              @relation("TargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
   informationType      InformationType?      @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
   interfaceDefinitions InterfaceDefinition[]
+  // この矢印に紐づくAPI（CRUDのAPI一覧。複数・任意）
+  apiLinks             FlowEdgeApiLink[]
 
   @@map("flow_edges")
+}
+
+// ===========================================
+// KPI（AI作成: フローのINPUT/OUTPUT・帳票から生成。SMART採点つき）
+// ===========================================
+
+enum KpiDirection {
+  INCREASE // 増やすほど良い
+  DECREASE // 減らすほど良い
+  MAINTAIN // 維持
+}
+
+enum KpiFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum KpiStatus {
+  DRAFT    // AI生成直後の下書き
+  ACTIVE   // 採用・運用中
+  ARCHIVED
+}
+
+model Kpi {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  // 対象業務フロー（任意）
+  flowId      String?  @map("flow_id")
+  name        String
+  description String?  @db.Text
+  // 計算式・定義（例: 欠品率 = 欠品件数 / 発注明細数）
+  definition  String?  @db.Text
+  unit        String?
+  baselineValue Float? @map("baseline_value")
+  targetValue   Float? @map("target_value")
+  currentValue  Float? @map("current_value")
+  direction   KpiDirection @default(INCREASE)
+  frequency   KpiFrequency @default(MONTHLY)
+  // 測定方法・データソースの説明
+  measurementMethod String? @map("measurement_method") @db.Text
+  // 責任者ロール（任意）
+  ownerRoleId String?  @map("owner_role_id")
+  // SMART採点（AI採点 0-5）と講評
+  smartSpecific   Int?    @map("smart_specific")
+  smartMeasurable Int?    @map("smart_measurable")
+  smartAchievable Int?    @map("smart_achievable")
+  smartRelevant   Int?    @map("smart_relevant")
+  smartTimeBound  Int?    @map("smart_time_bound")
+  smartComment    String? @map("smart_comment") @db.Text
+  aiGenerated Boolean   @default(false) @map("ai_generated")
+  status      KpiStatus @default(DRAFT)
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  flow      BusinessFlow? @relation(fields: [flowId], references: [id], onDelete: SetNull)
+  ownerRole Role?         @relation(fields: [ownerRoleId], references: [id], onDelete: SetNull)
+  // 測定対象の INPUT/OUTPUT（情報種別。複数）
+  informationLinks KpiInformationLink[]
+
+  @@map("kpis")
+}
+
+model KpiInformationLink {
+  id                String   @id @default(uuid())
+  kpiId             String   @map("kpi_id")
+  informationTypeId String   @map("information_type_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  kpi             Kpi             @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  informationType InformationType @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([kpiId, informationTypeId])
+  @@map("kpi_information_links")
+}
+
+// 業務フローの矢印 × API エンドポイント（多対多。システムと人を跨ぐ矢印などに紐づけ）
+model FlowEdgeApiLink {
+  id            String   @id @default(uuid())
+  edgeId        String   @map("edge_id")
+  apiEndpointId String   @map("api_endpoint_id")
+  order         Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  edge        FlowEdge    @relation(fields: [edgeId], references: [id], onDelete: Cascade)
+  apiEndpoint ApiEndpoint @relation(fields: [apiEndpointId], references: [id], onDelete: Cascade)
+
+  @@unique([edgeId, apiEndpointId])
+  @@map("flow_edge_api_links")
 }
 
 // ===========================================
@@ -997,6 +1099,7 @@ model ApiEndpoint {
 
   project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   rolePermissions ApiRolePermission[]
+  flowEdgeLinks   FlowEdgeApiLink[]
 
   @@unique([projectId, method, path])
   @@map("api_endpoints")
@@ -1444,6 +1547,8 @@ model InformationType {
   edges       FlowEdge[]
   // この情報種別に紐づくテーブル（共通マスタ基盤）
   tables      Table[]
+  // この情報種別を測定対象とする KPI
+  kpiLinks    KpiInformationLink[]
 
   @@map("information_types")
 }
