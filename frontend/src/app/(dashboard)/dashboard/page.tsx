@@ -285,7 +285,7 @@ export default function DashboardPage() {
                   クイックガイド
                   <HelpTooltip text="プロジェクト作成 → ロール定義 → 業務フロー作成 → データカタログ整備、の順で進めるのがおすすめです。" />
                 </h2>
-                <p className="text-sm text-muted-foreground">DataFlowの使い方</p>
+                <p className="text-sm text-muted-foreground">Brain Proの使い方</p>
               </div>
               <div className="p-4 space-y-3">
                 {[

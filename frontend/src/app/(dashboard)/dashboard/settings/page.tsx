@@ -426,7 +426,7 @@ export default function AccountSettingsPage() {
             <CardContent className="space-y-6">
               <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                 <p className="text-sm text-gray-600 mb-4">
-                  APIキーを使用して、外部ツールやAIエージェントからDataFlowのデータにアクセスできます。
+                  APIキーを使用して、外部ツールやAIエージェントからBrain Proのデータにアクセスできます。
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Input
