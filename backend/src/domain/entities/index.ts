@@ -21,6 +21,8 @@ export * from './task-comment.entity';
 export * from './dfd-diagram.entity';
 export * from './dfd-node.entity';
 export * from './dfd-flow.entity';
+export * from './data-object.entity';
+export * from './data-object-relation.entity';
 export * from './information-type.entity';
 export * from './system.entity';
 export * from './constraint.entity';

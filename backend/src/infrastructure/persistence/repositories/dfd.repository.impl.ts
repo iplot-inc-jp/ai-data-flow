@@ -27,6 +27,7 @@ interface NodeRow {
   number: string | null;
   refFlowId: string | null;
   refNodeId: string | null;
+  dataObjectId: string | null;
   positionX: number;
   positionY: number;
   createdAt: Date;
@@ -77,6 +78,7 @@ export class DfdRepositoryImpl implements IDfdRepository {
       number: r.number,
       refFlowId: r.refFlowId,
       refNodeId: r.refNodeId,
+      dataObjectId: r.dataObjectId,
       positionX: r.positionX,
       positionY: r.positionY,
       createdAt: r.createdAt,
@@ -210,6 +212,7 @@ export class DfdRepositoryImpl implements IDfdRepository {
       number: n.number,
       refFlowId: n.refFlowId,
       refNodeId: n.refNodeId,
+      dataObjectId: n.dataObjectId,
       positionX: n.positionX,
       positionY: n.positionY,
     };

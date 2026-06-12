@@ -4,6 +4,8 @@ export type DfdNodeKind = 'FUNCTION' | 'EXTERNAL_ENTITY' | 'DATA_STORE';
 export interface DfdNode {
   id: string; kind: DfdNodeKind; label: string; number: string | null;
   refFlowId?: string | null; refNodeId?: string | null;
+  /** DATA_STORE のデータオブジェクトマスタ紐づけ（未紐づけなら null）。 */
+  dataObjectId?: string | null;
   positionX: number; positionY: number;
 }
 export interface DfdFlow {

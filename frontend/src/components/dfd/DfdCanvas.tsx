@@ -60,9 +60,18 @@ import {
   FileText,
   Maximize2,
   Minimize2,
+  Boxes,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
+import type { DataObjectDto } from '@/lib/data-objects';
 import {
   assignFunctionNumbers,
   informationTypeApi,
@@ -128,6 +137,8 @@ export interface DfdCanvasProps {
   onFunctionOpen?: (refFlowId: string) => void;
   /** プロジェクトの情報種別一覧（エッジの情報チップ名・セレクタに使用）。 */
   informationTypes?: InformationType[];
+  /** プロジェクトのオブジェクト（共通マスタ）一覧。DATA_STORE ノードの紐づけセレクタ・バッジに使用。 */
+  dataObjects?: DataObjectDto[];
   /** 情報種別の新規追加先プロジェクト（未指定時は useParams から取得）。 */
   projectId?: string;
 }
@@ -141,6 +152,8 @@ type DfdNodeData = {
   label: string;
   number: string | null;
   hasRefFlow: boolean;
+  /** DATA_STORE に紐づくオブジェクト（共通マスタ）名。未紐づけなら null。 */
+  dataObjectName: string | null;
 };
 
 // 4辺の接続ハンドル定義。ConnectionMode.Loose 下では各ハンドルが source/target 両用。
@@ -240,6 +253,16 @@ function DataStoreNode({ data, selected }: { data: DfdNodeData; selected?: boole
       }}
     >
       <SideHandles color="#34d399" />
+      {/* 紐づくオブジェクト（共通マスタ）名の小バッジ */}
+      {data.dataObjectName && (
+        <span
+          className="absolute -top-2.5 left-1/2 -translate-x-1/2 inline-flex items-center gap-0.5 max-w-[150px] px-1.5 rounded-full border border-violet-300 bg-violet-50 text-violet-700 text-[9px] leading-4 shadow-sm"
+          title={`オブジェクト: ${data.dataObjectName}`}
+        >
+          <Boxes className="w-2.5 h-2.5 shrink-0" />
+          <span className="truncate">{data.dataObjectName}</span>
+        </span>
+      )}
       <div className="font-medium text-[13px] leading-tight line-clamp-2">{data.label}</div>
     </div>
   );
@@ -641,6 +664,13 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     [informationTypes],
   );
 
+  // オブジェクト（共通マスタ）。DATA_STORE のバッジ表示・紐づけセレクタに使う。
+  const dataObjects = props.dataObjects ?? [];
+  const dataObjectById = useMemo(
+    () => new Map(dataObjects.map((o) => [o.id, o] as const)),
+    [dataObjects],
+  );
+
   // システム境界（FUNCTION/DATA_STORE を囲む破線楕円, 背景）
   const boundaryNode = useMemo<Node | null>(() => {
     const inside = numberedNodes.filter((n) => n.kind === 'FUNCTION' || n.kind === 'DATA_STORE');
@@ -678,6 +708,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
         label: n.label,
         number: n.number,
         hasRefFlow: !!n.refFlowId,
+        dataObjectName: n.dataObjectId ? (dataObjectById.get(n.dataObjectId)?.name ?? null) : null,
       } as DfdNodeData,
       width: NODE_W,
       height: NODE_H,
@@ -686,7 +717,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
       zIndex: 1,
     } as Node));
     return boundaryNode ? [boundaryNode, ...content] : content;
-  }, [numberedNodes, boundaryNode]);
+  }, [numberedNodes, boundaryNode, dataObjectById]);
 
   const [dragNodes, setDragNodes, onNodesChange] = useNodesState(rfNodes);
   useEffect(() => {
@@ -1039,6 +1070,33 @@ function DfdCanvasInner(props: DfdCanvasProps) {
               }}
               className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
+            {/* DATA_STORE: オブジェクト（共通マスタ）紐づけ（dataObjects を渡す画面のみ表示） */}
+            {selectedNode.kind === 'DATA_STORE' && props.dataObjects && (
+              <div>
+                <label className="block text-[10px] text-gray-400 mb-0.5">オブジェクト</label>
+                <Select
+                  value={selectedNode.dataObjectId ?? '__none__'}
+                  onValueChange={(value) =>
+                    void props.onUpdateNode?.(selectedNode.id, {
+                      dataObjectId: value === '__none__' ? null : value,
+                    })
+                  }
+                  disabled={!props.onUpdateNode}
+                >
+                  <SelectTrigger className="h-8 w-full bg-white border-gray-300 text-gray-900 text-sm">
+                    <SelectValue placeholder="— 未設定 —" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value="__none__">— 未設定 —</SelectItem>
+                    {dataObjects.map((obj) => (
+                      <SelectItem key={obj.id} value={obj.id}>
+                        {obj.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {selectedNode.kind === 'FUNCTION' && selectedNode.refFlowId && props.onFunctionOpen && (
               <button
                 type="button"

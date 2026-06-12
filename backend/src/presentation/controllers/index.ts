@@ -12,6 +12,7 @@ export * from './issue-tree.controller';
 export * from './task.controller';
 export * from './task-comment.controller';
 export * from './dfd.controller';
+export * from './data-object.controller';
 export * from './stakeholder.controller';
 export * from './meeting.controller';
 export * from './risk.controller';

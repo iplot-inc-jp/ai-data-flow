@@ -40,6 +40,8 @@ import {
   Server,
   Lock,
   Compass,
+  Boxes,
+  Table2,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -503,6 +505,7 @@ const COLLAPSED_SHORT_LABELS: Record<string, string> = {
   'INPUT/OUTPUT': 'IN/OUT',
   '業務定義シート': '業務定義',
   'データカタログ': 'カタログ',
+  'オブジェクト関係性マップ': 'オブジェクト',
   'ステークホルダーマネジメント': 'ステーク…',
   'リスクマネジメント': 'リスク…',
   '背景・目的': '背景',
@@ -520,6 +523,7 @@ function collapsedLabel(name: string): string {
 const COLLAPSED_GROUP_LABELS: Record<string, string> = {
   '共通マスタ': 'マスタ',
   '現状把握': '現状',
+  '現状システム把握': '現シス',
   '課題・打ち手': '課題',
 }
 
@@ -625,7 +629,15 @@ export default function DashboardLayout({
         items: [
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
           { name: '業務定義シート', href: `${base}/business-definition`, icon: FileSpreadsheet },
+        ],
+      },
+      {
+        label: '現状システム把握',
+        items: [
+          { name: 'コード連携', href: `${base}/integrations`, icon: Github },
           { name: 'DFD', href: `${base}/dfd`, icon: Share2 },
+          { name: 'オブジェクト関係性マップ', href: `${base}/object-map`, icon: Boxes },
+          { name: 'ER図', href: `${base}/er-diagram`, icon: Table2 },
           { name: 'データカタログ', href: `${base}/catalog`, icon: Database },
         ],
       },
@@ -652,7 +664,6 @@ export default function DashboardLayout({
           { name: 'リスクマネジメント', href: `${base}/risk-management`, icon: ShieldAlert },
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
-          { name: 'コード連携', href: `${base}/integrations`, icon: Github },
           { name: '変更履歴', href: `${base}/history`, icon: History },
         ],
       },

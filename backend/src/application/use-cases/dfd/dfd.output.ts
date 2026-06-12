@@ -9,6 +9,8 @@ export interface DfdNodeOutput {
   number: string | null;
   refFlowId: string | null;
   refNodeId: string | null;
+  /** DATA_STORE のデータオブジェクトマスタ紐づけ（任意） */
+  dataObjectId: string | null;
   positionX: number;
   positionY: number;
 }
@@ -48,6 +50,7 @@ export function toDfdNodeOutput(n: DfdNode): DfdNodeOutput {
     number: n.number,
     refFlowId: n.refFlowId,
     refNodeId: n.refNodeId,
+    dataObjectId: n.dataObjectId,
     positionX: n.positionX,
     positionY: n.positionY,
   };

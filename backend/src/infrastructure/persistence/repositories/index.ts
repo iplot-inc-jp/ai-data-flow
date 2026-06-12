@@ -17,6 +17,7 @@ export * from './issue-node.repository.impl';
 export * from './task.repository.impl';
 export * from './task-comment.repository.impl';
 export * from './dfd.repository.impl';
+export * from './data-object.repository.impl';
 export * from './information-type.repository.impl';
 export * from './system.repository.impl';
 export * from './constraint.repository.impl';

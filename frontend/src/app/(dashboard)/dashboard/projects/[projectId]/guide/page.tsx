@@ -20,6 +20,8 @@ import {
   ClipboardList,
   FileSpreadsheet,
   Share2,
+  Boxes,
+  Table2,
   Database,
   Target,
   GitBranch,
@@ -176,6 +178,8 @@ type GuideSection = {
   links: GuideLink[]
   /** このステップに対応する操作マニュアル（MANUAL_ENTRIES のキー） */
   manualKeys: string[]
+  /** このステップの操作手順（番号付きで表示。マニュアル未整備の機能向け） */
+  steps?: string[]
 }
 
 function buildSections(base: string): GuideSection[] {
@@ -231,7 +235,7 @@ function buildSections(base: string): GuideSection[] {
       title: '現状把握（ASIS）',
       accent: '#d97706',
       summary:
-        '現状の業務を業務フロー（ASIS）として書き起こし、業務定義・データの流れ・データの中身を整理して「いまどうなっているか」を見える化します。',
+        '現状の業務を業務フロー（ASIS）として書き起こし、業務定義を整理して「いまどうなっているか」を見える化します。',
       links: [
         {
           name: 'ASIS管理',
@@ -245,20 +249,48 @@ function buildSections(base: string): GuideSection[] {
           description: '業務の定義・手順・担当を一覧で整理します',
           icon: FileSpreadsheet,
         },
+      ],
+      manualKeys: ['asis-tobe', 'flows', 'business-definition'],
+    },
+    {
+      badge: 'システム',
+      title: '現状システム把握',
+      accent: '#4f46e5',
+      summary:
+        '現状システムのデータ構造を「粗 → 細」の階層で把握します。DFD で業務間のデータの流れを描き、データが溜まる場所（データストア）を「オブジェクト」として捉えます。オブジェクト関係性マップでオブジェクトどうしの関係とカーディナリティ（1対1 / 1対多 / 多対多）を整理し、ER図で各オブジェクトを実テーブルに細分化。テーブルの実体はデータカタログで一元管理し、カタログ・CRUD表・ER図で同じテーブルを共用します。',
+      links: [
         {
           name: 'DFD',
           href: `${base}/dfd`,
-          description: 'データの流れ（データフロー図）を俯瞰します',
+          description: 'データの流れ（データフロー図）を俯瞰し、データストアを洗い出します',
           icon: Share2,
+        },
+        {
+          name: 'オブジェクト関係性マップ',
+          href: `${base}/object-map`,
+          description: 'データストア＝オブジェクトの関係とカーディナリティを整理します',
+          icon: Boxes,
+        },
+        {
+          name: 'ER図',
+          href: `${base}/er-diagram`,
+          description: 'オブジェクトを実テーブルに細分化し、FK（外部キー）で関係を確認します',
+          icon: Table2,
         },
         {
           name: 'データカタログ',
           href: `${base}/catalog`,
-          description: 'テーブル・データ項目を整理し、データの中身を把握します',
+          description: 'テーブル実体（テーブル・カラム）を管理します。CRUD表・ER図と共用',
           icon: Database,
         },
       ],
-      manualKeys: ['asis-tobe', 'flows', 'business-definition', 'dfd', 'catalog'],
+      manualKeys: ['dfd', 'catalog'],
+      steps: [
+        'DFD（データフロー図）で業務間のデータの流れを描き、データが溜まる場所を「データストア」ノードとして置きます。データストアを選択すると編集パネルの「オブジェクト」selectで共通マスタのオブジェクトに紐づけられ、紐づくとノード上に小バッジが出ます。',
+        'オブジェクト関係性マップを開き、「DFDから取り込み」で第1レベルDFDのデータストアをオブジェクトとして一括登録（同名は再利用）。オブジェクトどうしを線で結び、カーディナリティ（1対1 / 1対多 / 多対多）を設定して関係を整理します。',
+        'ER図でオブジェクトの中身を実テーブルに細分化します。同じオブジェクトに属するテーブルは点線囲みでグループ表示され、カラム表示の切替や、FK（外部キー）線でテーブル間の参照関係を確認できます。',
+        'データカタログでテーブル実体（テーブル・カラムのメタデータ）を管理します。テーブルはカタログ・CRUD表・ER図で共用され、各テーブルカードの「オブジェクト」selectでどのオブジェクトに属するかを紐づけます。',
+      ],
     },
     {
       badge: 'STEP 2',
@@ -532,6 +564,17 @@ export default function GuidePage() {
               <GuideLinkCard key={link.href} link={link} />
             ))}
           </div>
+          {/* このステップの操作手順（番号付き） */}
+          {section.steps && section.steps.length > 0 && (
+            <div className="blueprint-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">操作手順</h3>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-foreground/80">
+                {section.steps.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          )}
           {/* このステップの操作マニュアル（図解→操作説明）を折りたたみで埋め込み */}
           <ManualAccordion entryKeys={section.manualKeys} />
         </section>

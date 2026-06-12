@@ -12,6 +12,7 @@ export * from './flow-node';
 export * from './task';
 export * from './task-comment';
 export * from './dfd';
+export * from './data-object';
 export * from './information-type';
 export * from './system';
 export * from './constraint';
