@@ -56,6 +56,81 @@ class UpdateAttachmentDto {
 export class AttachmentController {
   constructor(private readonly prisma: PrismaService) {}
 
+  @Post('projects/:projectId/attachments')
+  @ApiOperation({ summary: 'プロジェクト直下に汎用資料ファイルをアップロード' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadToProject(
+    @Param('projectId') projectId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new NotFoundException('No file uploaded');
+    }
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    });
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    const id = uuid();
+    const sanitized = sanitizeFilename(file.originalname);
+
+    // 保存先ディレクトリを保証
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    const diskPath = path.join(UPLOAD_DIR, `${id}-${sanitized}`);
+    fs.writeFileSync(diskPath, file.buffer);
+
+    const kind = file.mimetype.startsWith('image/')
+      ? 'IMAGE'
+      : file.mimetype === 'application/pdf'
+        ? 'PDF'
+        : 'FILE';
+
+    // 既存添付数（プロジェクト直下のみ）を order の初期値に
+    const order = await this.prisma.attachment.count({
+      where: {
+        projectId,
+        phaseId: null,
+        taskId: null,
+        informationTypeId: null,
+        flowId: null,
+      },
+    });
+
+    const row = await this.prisma.attachment.create({
+      data: {
+        id,
+        projectId,
+        kind: kind as 'IMAGE' | 'PDF' | 'FILE',
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        url: `/api/attachments/${id}/file`,
+        size: file.size,
+        order,
+      },
+    });
+
+    return row;
+  }
+
+  @Get('projects/:projectId/attachments')
+  @ApiOperation({ summary: 'プロジェクト直下の汎用資料ファイル一覧を取得' })
+  async listForProject(@Param('projectId') projectId: string) {
+    return this.prisma.attachment.findMany({
+      where: {
+        projectId,
+        phaseId: null,
+        taskId: null,
+        informationTypeId: null,
+        flowId: null,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   @Post('projects/:projectId/phases/:phaseId/attachments')
   @ApiOperation({ summary: 'フェーズに添付ファイルをアップロード' })
   @ApiConsumes('multipart/form-data')

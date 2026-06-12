@@ -1,6 +1,7 @@
 import {
   IsString,
   IsOptional,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsUUID,
@@ -70,6 +71,14 @@ export class UpdateGapItemRequestDto {
   @IsOptional()
   @IsInt()
   order?: number;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'スコープ外フラグ（今回の取り組み範囲から除外した GAP）',
+  })
+  @IsOptional()
+  @IsBoolean()
+  outOfScope?: boolean;
 
   @ApiPropertyOptional({ example: 'uuid-flow-xxxx', description: 'ASISフローID' })
   @IsOptional()

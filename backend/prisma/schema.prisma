@@ -855,6 +855,8 @@ model GapItem {
   status          GapStatus   @default(OPEN)
   ownerName       String?     @map("owner_name")
   order           Int         @default(0)
+  // スコープ外フラグ（今回の取り組み範囲から除外した GAP）
+  outOfScope      Boolean     @default(false) @map("out_of_scope")
   // ASIS / TOBE フロー・ノードへの差分マッピング（全て任意）
   asisFlowId      String?     @map("asis_flow_id")
   asisNodeId      String?     @map("asis_node_id")

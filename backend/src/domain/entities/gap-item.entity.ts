@@ -22,6 +22,7 @@ export interface CreateGapItemProps {
   status?: GapStatus;
   ownerName?: string | null;
   order?: number;
+  outOfScope?: boolean;
   asisFlowId?: string | null;
   asisNodeId?: string | null;
   tobeFlowId?: string | null;
@@ -41,6 +42,7 @@ export interface ReconstructGapItemProps {
   status: GapStatus;
   ownerName: string | null;
   order: number;
+  outOfScope: boolean;
   asisFlowId: string | null;
   asisNodeId: string | null;
   tobeFlowId: string | null;
@@ -65,6 +67,7 @@ export class GapItem extends BaseEntity {
   private _status: GapStatus;
   private _ownerName: string | null;
   private _order: number;
+  private _outOfScope: boolean;
   private _asisFlowId: string | null;
   private _asisNodeId: string | null;
   private _tobeFlowId: string | null;
@@ -83,6 +86,7 @@ export class GapItem extends BaseEntity {
     status: GapStatus,
     ownerName: string | null,
     order: number,
+    outOfScope: boolean,
     asisFlowId: string | null,
     asisNodeId: string | null,
     tobeFlowId: string | null,
@@ -102,6 +106,7 @@ export class GapItem extends BaseEntity {
     this._status = status;
     this._ownerName = ownerName;
     this._order = order;
+    this._outOfScope = outOfScope;
     this._asisFlowId = asisFlowId;
     this._asisNodeId = asisNodeId;
     this._tobeFlowId = tobeFlowId;
@@ -138,6 +143,7 @@ export class GapItem extends BaseEntity {
       props.status ?? 'OPEN',
       props.ownerName?.trim() || null,
       props.order ?? 0,
+      props.outOfScope ?? false,
       props.asisFlowId ?? null,
       props.asisNodeId ?? null,
       props.tobeFlowId ?? null,
@@ -164,6 +170,7 @@ export class GapItem extends BaseEntity {
       props.status,
       props.ownerName,
       props.order,
+      props.outOfScope,
       props.asisFlowId,
       props.asisNodeId,
       props.tobeFlowId,
@@ -252,6 +259,11 @@ export class GapItem extends BaseEntity {
     this.touch();
   }
 
+  setOutOfScope(outOfScope: boolean): void {
+    this._outOfScope = outOfScope;
+    this.touch();
+  }
+
   // ========== Getter ==========
 
   get projectId(): string {
@@ -292,6 +304,10 @@ export class GapItem extends BaseEntity {
 
   get order(): number {
     return this._order;
+  }
+
+  get outOfScope(): boolean {
+    return this._outOfScope;
   }
 
   get asisFlowId(): string | null {

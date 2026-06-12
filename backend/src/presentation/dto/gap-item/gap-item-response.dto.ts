@@ -40,6 +40,12 @@ export class GapItemResponseDto {
   @ApiProperty({ example: 0 })
   order: number;
 
+  @ApiProperty({
+    example: false,
+    description: 'スコープ外フラグ（今回の取り組み範囲から除外した GAP）',
+  })
+  outOfScope: boolean;
+
   @ApiProperty({ example: 'uuid-flow-xxxx', nullable: true })
   asisFlowId: string | null;
 

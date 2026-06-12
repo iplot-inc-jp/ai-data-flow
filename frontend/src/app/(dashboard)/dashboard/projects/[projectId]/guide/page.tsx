@@ -348,12 +348,12 @@ function buildSections(base: string): GuideSection[] {
       title: 'プロジェクトを統制する',
       accent: '#0f766e',
       summary:
-        'プロジェクト憲章で立ち上げの合意を1枚にまとめ、変更要求は統合変更管理の流れで取り扱い、得られた教訓を登録簿に残して次へ引き継ぎます。',
+        '背景・目的で立ち上げの合意を1枚にまとめ、変更要求は統合変更管理の流れで取り扱い、得られた教訓を登録簿に残して次へ引き継ぎます。',
       links: [
         {
-          name: 'プロジェクト憲章',
-          href: `${base}/charter`,
-          description: '背景・目的・成功基準・スコープを1枚にまとめます',
+          name: '背景・目的',
+          href: `${base}/background`,
+          description: '背景・目的・成功基準を言語化し、関連資料を添付します',
           icon: ScrollText,
         },
         {

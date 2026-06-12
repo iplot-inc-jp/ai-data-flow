@@ -69,6 +69,8 @@ type GapItem = {
   tobeDescription: string | null;
   priority: Priority;
   status: string;
+  // スコープ外フラグ（GAP一覧で管理。ロードマップのGAPカードからは除外する）
+  outOfScope: boolean;
   // TOBE打ち手カードとの突き合わせ用（業務フローへの紐づけ）
   asisFlowId: string | null;
   tobeFlowId: string | null;
@@ -322,6 +324,13 @@ export default function RoadmapPage() {
     fetchAll();
   }, [fetchAll]);
 
+  // スコープ外GAPはロードマップのGAPカード（GAP/両方ビュー）に出さない（GAP一覧で管理）。
+  // persist は全GAPの台帳行を送る必要があるため gapItems（全件）のままにする。
+  const inScopeGapItems = useMemo(
+    () => gapItems.filter((g) => !g.outOfScope),
+    [gapItems],
+  );
+
   // order 昇順のフェーズ列
   const sortedPhases = useMemo(
     () =>
@@ -536,8 +545,9 @@ export default function RoadmapPage() {
         );
         return gapItems.filter(
           (g) =>
-            g.asisFlowId === vision.asisFlowId ||
-            (g.tobeFlowId != null && tobeFlowIds.has(g.tobeFlowId)),
+            !g.outOfScope && // スコープ外GAPはロードマップ上のチップにも出さない
+            (g.asisFlowId === vision.asisFlowId ||
+              (g.tobeFlowId != null && tobeFlowIds.has(g.tobeFlowId))),
         );
       };
       const sortedTobe = [...tobeRows].sort(
@@ -556,9 +566,10 @@ export default function RoadmapPage() {
 
     if (view !== 'TOBE') {
       // GAPカード（優先度→order）。GAP単独表示では領域フィルタを適用しない（従来どおり）。
+      // スコープ外GAPはカードにしない（GAP一覧の「スコープ外」トグルで管理）。
       const gapByCol: Record<string, GapCard[]> = {};
       phaseColumns.forEach((c) => (gapByCol[c.id] = []));
-      gapItems.forEach((g, i) => {
+      inScopeGapItems.forEach((g, i) => {
         const row: RoadmapRow = assignments[g.id] ?? {
           gapId: g.id,
           phase: UNASSIGNED_KEY,
@@ -591,6 +602,7 @@ export default function RoadmapPage() {
     tobeVisions,
     flows,
     gapItems,
+    inScopeGapItems,
     assignments,
     phaseColumns,
     sortedPhases,
@@ -1195,13 +1207,13 @@ export default function RoadmapPage() {
     );
   };
 
-  // 空状態の判定（GAP単独表示は再設計前と同一の条件）
+  // 空状態の判定（GAP側はスコープ外を除いた表示対象で判定する）
   const showEmptyState =
     view === 'GAP'
-      ? gapItems.length === 0
+      ? inScopeGapItems.length === 0
       : view === 'TOBE'
         ? tobeRows.length === 0
-        : gapItems.length === 0 && tobeRows.length === 0;
+        : inScopeGapItems.length === 0 && tobeRows.length === 0;
 
   return (
     <div className="space-y-6">

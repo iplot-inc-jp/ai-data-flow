@@ -159,6 +159,7 @@ export class GapItemByIdController {
       priority: dto.priority,
       ownerName: dto.ownerName,
       order: dto.order,
+      outOfScope: dto.outOfScope,
       asisFlowId: dto.asisFlowId,
       asisNodeId: dto.asisNodeId,
       tobeFlowId: dto.tobeFlowId,

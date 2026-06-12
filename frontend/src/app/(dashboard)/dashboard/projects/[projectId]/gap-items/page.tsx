@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  Ban,
   ChevronLeft,
   Plus,
   Loader2,
@@ -62,6 +63,7 @@ type GapItem = {
   status: GapStatus;
   ownerName: string | null;
   order: number;
+  outOfScope: boolean;
   asisFlowId: string | null;
   asisNodeId: string | null;
   tobeFlowId: string | null;
@@ -116,6 +118,14 @@ const ALL = 'ALL';
 // 選択式 Select の「未選択 / 指定なし」を表す番兵値（空文字は Radix Select で不可）
 const NONE = '__none__';
 
+// スコープフィルタ（既定「すべて」。スコープ外バッジで判別できるようにする）
+type ScopeFilter = 'ALL' | 'IN' | 'OUT';
+const SCOPE_FILTERS: { value: ScopeFilter; label: string }[] = [
+  { value: 'ALL', label: 'すべて' },
+  { value: 'IN', label: '対応対象のみ' },
+  { value: 'OUT', label: 'スコープ外のみ' },
+];
+
 export default function GapItemsPage() {
   const params = useParams();
   const router = useRouter();
@@ -131,6 +141,8 @@ export default function GapItemsPage() {
   // フィルタ
   const [priorityFilter, setPriorityFilter] = useState<string>(ALL);
   const [statusFilter, setStatusFilter] = useState<string>(ALL);
+  // スコープフィルタ（クライアント側で絞り込み。既定「すべて」）
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('ALL');
 
   // 作成ダイアログ
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -398,6 +410,11 @@ export default function GapItemsPage() {
     patchItem(item.id, { priority });
   };
 
+  // スコープ外トグル（既存のGAP更新経路 PUT /api/gap-items/:id で保存）
+  const handleToggleOutOfScope = (item: GapItem) => {
+    patchItem(item.id, { outOfScope: !item.outOfScope });
+  };
+
   // 解決 / 再オープン（status: OPEN ⇄ RESOLVED）
   const setStatus = async (item: GapItem, action: 'resolve' | 'reopen') => {
     try {
@@ -465,6 +482,13 @@ export default function GapItemsPage() {
 
   const openCount = items.filter((it) => it.status === 'OPEN').length;
   const resolvedCount = items.filter((it) => it.status === 'RESOLVED').length;
+  const outOfScopeCount = items.filter((it) => it.outOfScope).length;
+
+  // スコープフィルタ適用後の表示行（GAP一覧タブのみ。分析・台帳タブは全件のまま）
+  const visibleItems =
+    scopeFilter === 'ALL'
+      ? items
+      : items.filter((it) => (scopeFilter === 'OUT' ? it.outOfScope : !it.outOfScope));
 
   return (
     <div className="space-y-6">
@@ -498,6 +522,7 @@ export default function GapItemsPage() {
               '表の各セルはその場で編集でき、欄外をクリック（blur）すると自動保存されます。',
               '優先度（HIGH/MEDIUM/LOW）と担当を設定し、上部のフィルタで絞り込めます。',
               '解決したらチェックで RESOLVED に。「課題ツリーを作成」でこのGAPを起点にした打ち手の検討（なぜ型/どうやって型）へ展開できます。',
+              '今回の取り組み範囲から外すGAPは、状態列の「対象/スコープ外」バッジをクリックしてスコープ外にします（行がグレーになり、ロードマップのGAP表示から除外されます）。',
             ]}
             shortcuts={[
               { keys: '⌘/Ctrl+Enter', desc: 'GAP追加を開く' },
@@ -576,12 +601,35 @@ export default function GapItemsPage() {
                 </SelectContent>
               </Select>
             </div>
+            {/* スコープフィルタ（チップ。既定「すべて」） */}
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <Label className="text-gray-700 text-sm">スコープ</Label>
+              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+                {SCOPE_FILTERS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setScopeFilter(opt.value)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      scopeFilter === opt.value
+                        ? 'bg-gray-700 text-white'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="ml-auto flex items-center gap-3 text-sm">
               <span className="text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
                 OPEN {openCount}
               </span>
               <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
                 RESOLVED {resolvedCount}
+              </span>
+              <span className="text-gray-600 bg-gray-100 border border-gray-300 px-2 py-0.5 rounded">
+                スコープ外 {outOfScopeCount}
               </span>
             </div>
           </div>
@@ -620,6 +668,14 @@ export default function GapItemsPage() {
               <Plus className="h-4 w-4 mr-2" />
               最初のGAPを追加
             </Button>
+          </CardContent>
+        </Card>
+      ) : visibleItems.length === 0 ? (
+        <Card className="bg-white border-gray-200">
+          <CardContent className="py-10 text-center text-sm text-gray-500">
+            スコープフィルタ（
+            {SCOPE_FILTERS.find((f) => f.value === scopeFilter)?.label}
+            ）に一致するGAPがありません。
           </CardContent>
         </Card>
       ) : (
@@ -677,15 +733,22 @@ export default function GapItemsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => {
+                  {visibleItems.map((item) => {
                     const pm = priorityMeta[item.priority] ?? priorityMeta.MEDIUM;
                     const sm = statusMeta[item.status] ?? statusMeta.OPEN;
                     const resolved = item.status === 'RESOLVED';
+                    const outOfScope = item.outOfScope;
                     return (
                       <tr
                         key={item.id}
-                        className={`border-b border-gray-100 border-l-4 ${pm.row} align-top ${
-                          resolved ? 'bg-emerald-50/30' : 'hover:bg-gray-50/60'
+                        className={`border-b border-gray-100 border-l-4 ${
+                          outOfScope ? 'border-l-gray-300' : pm.row
+                        } align-top ${
+                          outOfScope
+                            ? 'bg-gray-50/80 opacity-60 hover:opacity-90'
+                            : resolved
+                              ? 'bg-emerald-50/30'
+                              : 'hover:bg-gray-50/60'
                         }`}
                       >
                         {/* 業務領域 */}
@@ -803,13 +866,32 @@ export default function GapItemsPage() {
                             className="w-full bg-transparent text-gray-700 outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-1 placeholder:text-gray-300"
                           />
                         </td>
-                        {/* 状態 */}
+                        {/* 状態 + スコープ外トグルバッジ */}
                         <td className="px-3 py-2 align-top">
-                          <span
-                            className={`inline-block text-xs px-2 py-0.5 rounded border ${sm.badge}`}
-                          >
-                            {sm.label}
-                          </span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span
+                              className={`inline-block text-xs px-2 py-0.5 rounded border ${sm.badge}`}
+                            >
+                              {sm.label}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleOutOfScope(item)}
+                              title={
+                                outOfScope
+                                  ? 'スコープ外（クリックで対応対象に戻す）'
+                                  : '対応対象（クリックでスコープ外にする）'
+                              }
+                              className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs transition-colors ${
+                                outOfScope
+                                  ? 'border-gray-400 bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                  : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300 hover:text-gray-600'
+                              }`}
+                            >
+                              <Ban className="h-3 w-3" />
+                              {outOfScope ? 'スコープ外' : '対象'}
+                            </button>
+                          </div>
                         </td>
                         {/* 課題ツリー */}
                         <td className="px-3 py-2 align-top">

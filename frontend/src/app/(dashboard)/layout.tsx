@@ -34,7 +34,7 @@ import {
   Map as MapIcon,
   ShieldAlert,
   FileSpreadsheet,
-  ScrollText,
+  Landmark,
   GitPullRequestArrow,
   GraduationCap,
   ArrowLeftRight,
@@ -506,7 +506,7 @@ const COLLAPSED_SHORT_LABELS: Record<string, string> = {
   'データカタログ': 'カタログ',
   'ステークホルダーマネジメント': 'ステーク…',
   'リスクマネジメント': 'リスク…',
-  'プロジェクト憲章': '憲章',
+  '背景・目的': '背景',
   '教訓登録簿': '教訓',
 }
 
@@ -581,11 +581,12 @@ export default function DashboardLayout({
   const { subProjects, flows } = useFlowTree(projectId)
   const { isSuperAdmin } = useCurrentUser()
 
-  // ガイド（全体マニュアル）。プロジェクト選択時のみ・サイドメニュー最上部に表示
+  // ガイド（全体マニュアル＋背景・目的）。プロジェクト選択時のみ・サイドメニュー最上部に表示
   const guideNav = useMemo(() => {
     if (!projectId) return []
     return [
       { name: 'ガイド', href: `/dashboard/projects/${projectId}/guide`, icon: Compass },
+      { name: '背景・目的', href: `/dashboard/projects/${projectId}/background`, icon: Landmark },
     ]
   }, [projectId])
 
@@ -653,7 +654,6 @@ export default function DashboardLayout({
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
           { name: 'コード連携', href: `${base}/integrations`, icon: Github },
-          { name: 'プロジェクト憲章', href: `${base}/charter`, icon: ScrollText },
           { name: '変更管理', href: `${base}/change-requests`, icon: GitPullRequestArrow },
           { name: '教訓登録簿', href: `${base}/lessons`, icon: GraduationCap },
         ],

@@ -23,6 +23,7 @@ export interface UpdateGapItemInput {
   priority?: GapPriority;
   ownerName?: string | null;
   order?: number;
+  outOfScope?: boolean;
   asisFlowId?: string | null;
   asisNodeId?: string | null;
   tobeFlowId?: string | null;
@@ -92,6 +93,9 @@ export class UpdateGapItemUseCase {
     }
     if (input.order !== undefined) {
       gapItem.reorder(input.order);
+    }
+    if (input.outOfScope !== undefined) {
+      gapItem.setOutOfScope(input.outOfScope);
     }
     if (input.asisFlowId !== undefined || input.asisNodeId !== undefined) {
       gapItem.linkAsis(input.asisFlowId ?? null, input.asisNodeId ?? null);

@@ -28,6 +28,7 @@ export class GapItemRepositoryImpl implements IGapItemRepository {
     status: string;
     ownerName: string | null;
     order: number;
+    outOfScope: boolean;
     asisFlowId: string | null;
     asisNodeId: string | null;
     tobeFlowId: string | null;
@@ -48,6 +49,7 @@ export class GapItemRepositoryImpl implements IGapItemRepository {
       status: data.status as GapStatus,
       ownerName: data.ownerName,
       order: data.order,
+      outOfScope: data.outOfScope,
       asisFlowId: data.asisFlowId,
       asisNodeId: data.asisNodeId,
       tobeFlowId: data.tobeFlowId,
@@ -100,6 +102,7 @@ export class GapItemRepositoryImpl implements IGapItemRepository {
         status: gapItem.status,
         ownerName: gapItem.ownerName,
         order: gapItem.order,
+        outOfScope: gapItem.outOfScope,
         asisFlowId: gapItem.asisFlowId,
         asisNodeId: gapItem.asisNodeId,
         tobeFlowId: gapItem.tobeFlowId,
@@ -118,6 +121,7 @@ export class GapItemRepositoryImpl implements IGapItemRepository {
         status: gapItem.status,
         ownerName: gapItem.ownerName,
         order: gapItem.order,
+        outOfScope: gapItem.outOfScope,
         asisFlowId: gapItem.asisFlowId,
         asisNodeId: gapItem.asisNodeId,
         tobeFlowId: gapItem.tobeFlowId,

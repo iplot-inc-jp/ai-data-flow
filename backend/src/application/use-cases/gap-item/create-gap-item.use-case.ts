@@ -43,6 +43,7 @@ export interface GapItemOutput {
   status: GapStatus;
   ownerName: string | null;
   order: number;
+  outOfScope: boolean;
   asisFlowId: string | null;
   asisNodeId: string | null;
   tobeFlowId: string | null;
@@ -65,6 +66,7 @@ export function toGapItemOutput(gapItem: GapItem): GapItemOutput {
     status: gapItem.status,
     ownerName: gapItem.ownerName,
     order: gapItem.order,
+    outOfScope: gapItem.outOfScope,
     asisFlowId: gapItem.asisFlowId,
     asisNodeId: gapItem.asisNodeId,
     tobeFlowId: gapItem.tobeFlowId,
