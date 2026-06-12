@@ -2,7 +2,16 @@ import { describe, it, expect } from 'vitest'
 import { MANUAL_ENTRIES, getManualEntry } from './manual-content'
 
 const EXPECTED_KEYS = [
+  // 共通マスタ
+  'domains',
+  'io-types',
+  'systems',
+  'constraints',
+  'roles',
+  'meetings',
+  // 業務フロー / ASIS-TOBE
   'flows',
+  'asis-tobe',
   'issue-trees',
   'gap-items',
   'dfd',
@@ -15,6 +24,10 @@ const EXPECTED_KEYS = [
   'business-definition',
   'roadmap',
   'requirements',
+  // PMBOK
+  'charter',
+  'change-requests',
+  'lessons',
 ]
 
 describe('MANUAL_ENTRIES', () => {

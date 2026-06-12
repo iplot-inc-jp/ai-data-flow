@@ -511,25 +511,441 @@ const RequirementsIllustration: ManualIllustration = () => (
   </SvgFrame>
 )
 
+const DomainsIllustration: ManualIllustration = () => (
+  <SvgFrame label="領域とサブ領域のツリー（担当者・関連会議チップ）図解">
+    {/* 領域 → サブ領域のツリー */}
+    <Box x={12} y={14} w={150} h={26} text="受注管理（領域）" fill={NAVY} stroke={NAVY} textFill="#fff" />
+    <Box x={40} y={52} w={140} h={24} text="見積（サブ領域）" fill={GRAY_FILL} />
+    <Box x={40} y={86} w={140} h={24} text="出荷（サブ領域）" fill={GRAY_FILL} />
+    <line x1={26} y1={40} x2={26} y2={98} stroke={GRAY_LINE} strokeWidth={1.4} />
+    <line x1={26} y1={64} x2={40} y2={64} stroke={GRAY_LINE} strokeWidth={1.4} />
+    <line x1={26} y1={98} x2={40} y2={98} stroke={GRAY_LINE} strokeWidth={1.4} />
+    {/* 担当者チップ（RACI）と関連会議チップ */}
+    <rect x={200} y={55} width={52} height={18} rx={9} fill={BLUE_SOFT} stroke={BLUE} />
+    <text x={226} y={64} fill={BLUE} fontSize={7.5} textAnchor="middle" dominantBaseline="central">
+      佐藤 A
+    </text>
+    <rect x={200} y={89} width={84} height={18} rx={9} fill="#fff" stroke={GRAY_LINE} />
+    <text x={242} y={98} fill={TEXT} fontSize={7.5} textAnchor="middle" dominantBaseline="central">
+      定例会議
+    </text>
+    <text x={160} y={146} fill={TEXT} fontSize={8} textAnchor="middle">
+      担当者(RACI)・関連会議をチップで確認
+    </text>
+  </SvgFrame>
+)
+
+const IoTypesIllustration: ManualIllustration = () => (
+  <SvgFrame label="INPUT/OUTPUTマスタ（具体データ添付・カタログ表紐付け）図解">
+    <Box x={12} y={14} w={296} h={22} text="INPUT/OUTPUT（物体・情報・帳票）" fill={NAVY} stroke={NAVY} textFill="#fff" fontSize={8.5} />
+    {/* 1行（分類バッジ + カタログ表チップ） */}
+    <rect x={12} y={44} width={296} height={30} rx={4} fill="#fff" stroke={GRAY_LINE} />
+    <text x={24} y={59} fill={TEXT} fontSize={8.5} dominantBaseline="central">
+      注文書
+    </text>
+    <rect x={86} y={51} width={34} height={16} rx={8} fill={BLUE_SOFT} stroke={BLUE} />
+    <text x={103} y={59} fill={BLUE} fontSize={7} textAnchor="middle" dominantBaseline="central">
+      帳票
+    </text>
+    <rect x={196} y={51} width={100} height={16} rx={8} fill="#fff" stroke={GRAY_LINE} />
+    <text x={246} y={59} fill={TEXT} fontSize={7} textAnchor="middle" dominantBaseline="central">
+      カタログ表: orders
+    </text>
+    {/* 具体データの D&D 添付ゾーン */}
+    <rect x={12} y={88} width={296} height={50} rx={6} fill={GRAY_FILL} stroke={BLUE} strokeDasharray="5 4" />
+    <text x={160} y={107} fill={BLUE} fontSize={8.5} textAnchor="middle">
+      具体データをドラッグ＆ドロップで添付
+    </text>
+    <text x={160} y={123} fill="#64748b" fontSize={7.5} textAnchor="middle">
+      PDF・画像など（行を展開して閲覧）
+    </text>
+  </SvgFrame>
+)
+
+const SystemsIllustration: ManualIllustration = () => (
+  <SvgFrame label="システムマスタ（対象/周辺の区分と領域紐付け）図解">
+    <Box x={12} y={14} w={296} h={22} text="システム一覧" fill={NAVY} stroke={NAVY} textFill="#fff" fontSize={9} />
+    {(
+      [
+        ['基幹システム', '対象', BLUE, '領域: 受注管理'],
+        ['会計ソフト', '周辺', '#64748b', '領域: 経理'],
+      ] as const
+    ).map(([name, kind, color, domain], i) => {
+      const y = 48 + i * 44
+      return (
+        <g key={name}>
+          <rect x={12} y={y} width={296} height={36} rx={4} fill={i % 2 ? GRAY_FILL : '#fff'} stroke={GRAY_LINE} />
+          <text x={24} y={y + 18} fill={TEXT} fontSize={8.5} dominantBaseline="central">
+            {name}
+          </text>
+          <rect x={120} y={y + 9} width={40} height={18} rx={9} fill={color} />
+          <text x={140} y={y + 18} fill="#fff" fontSize={7.5} textAnchor="middle" dominantBaseline="central">
+            {kind}
+          </text>
+          <text x={200} y={y + 18} fill="#64748b" fontSize={7.5} dominantBaseline="central">
+            {domain}
+          </text>
+        </g>
+      )
+    })}
+    <text x={160} y={156} fill={TEXT} fontSize={8} textAnchor="middle">
+      対象/周辺の区分と領域への紐付けで整理
+    </text>
+  </SvgFrame>
+)
+
+const ConstraintsIllustration: ManualIllustration = () => (
+  <SvgFrame label="制約条件/前提条件のタブ切り替えと一覧の図解">
+    {/* kind タブ */}
+    <rect x={12} y={14} width={92} height={22} rx={4} fill={NAVY} />
+    <text x={58} y={25} fill="#fff" fontSize={8.5} textAnchor="middle" dominantBaseline="central">
+      制約条件
+    </text>
+    <rect x={110} y={14} width={92} height={22} rx={4} fill="#fff" stroke={GRAY_LINE} />
+    <text x={156} y={25} fill={TEXT} fontSize={8.5} textAnchor="middle" dominantBaseline="central">
+      前提条件
+    </text>
+    {['法令: 個人情報は社外に出さない', '社内ルール: 承認は2段階まで'].map((t, i) => {
+      const y = 48 + i * 40
+      return (
+        <g key={t}>
+          <rect x={12} y={y} width={296} height={32} rx={4} fill={i % 2 ? GRAY_FILL : '#fff'} stroke={GRAY_LINE} />
+          <circle cx={28} cy={y + 16} r={5} fill={BLUE} />
+          <text x={44} y={y + 16} fill={TEXT} fontSize={8.5} dominantBaseline="central">
+            {t}
+          </text>
+        </g>
+      )
+    })}
+    <text x={160} y={150} fill={TEXT} fontSize={8} textAnchor="middle">
+      タブで制約/前提を切り替えて管理
+    </text>
+  </SvgFrame>
+)
+
+const RolesIllustration: ManualIllustration = () => (
+  <SvgFrame label="ロールマスタ（人/システムの区分）図解">
+    {(
+      [
+        ['営業担当', '人', BLUE],
+        ['受注システム', 'システム', NAVY],
+      ] as const
+    ).map(([name, kind, color], i) => {
+      const x = 16 + i * 152
+      return (
+        <g key={name}>
+          <rect x={x} y={24} width={136} height={88} rx={6} fill="#fff" stroke={GRAY_LINE} />
+          <circle cx={x + 24} cy={48} r={12} fill={color} />
+          <text x={x + 24} y={48} fill="#fff" fontSize={8} textAnchor="middle" dominantBaseline="central">
+            {kind === '人' ? '人' : 'PC'}
+          </text>
+          <text x={x + 46} y={48} fill={NAVY} fontSize={9} dominantBaseline="central">
+            {name}
+          </text>
+          <rect x={x + 12} y={72} width={56} height={18} rx={9} fill={BLUE_SOFT} stroke={BLUE} />
+          <text x={x + 40} y={81} fill={BLUE} fontSize={7.5} textAnchor="middle" dominantBaseline="central">
+            {kind}
+          </text>
+        </g>
+      )
+    })}
+    <text x={160} y={150} fill={TEXT} fontSize={8} textAnchor="middle">
+      ロールは業務フローのスイムレーンになる
+    </text>
+  </SvgFrame>
+)
+
+const MeetingsIllustration: ManualIllustration = () => (
+  <SvgFrame label="会議マスタ（形式・所要・主催・ステータス）の表図解">
+    <rect x={12} y={14} width={296} height={20} fill={NAVY} />
+    {['会議名', '形式', '所要', '主催', '状態'].map((h, i) => (
+      <text
+        key={h}
+        x={[56, 130, 180, 230, 282][i]}
+        y={24}
+        fill="#fff"
+        fontSize={8}
+        textAnchor="middle"
+        dominantBaseline="central"
+      >
+        {h}
+      </text>
+    ))}
+    <rect x={12} y={34} width={296} height={36} fill="#fff" stroke={GRAY_LINE} />
+    <text x={56} y={52} fill={TEXT} fontSize={8} textAnchor="middle" dominantBaseline="central">
+      定例会議
+    </text>
+    <text x={130} y={52} fill={TEXT} fontSize={8} textAnchor="middle" dominantBaseline="central">
+      オンライン
+    </text>
+    <text x={180} y={52} fill={TEXT} fontSize={8} textAnchor="middle" dominantBaseline="central">
+      60分
+    </text>
+    <text x={230} y={52} fill={TEXT} fontSize={8} textAnchor="middle" dominantBaseline="central">
+      佐藤
+    </text>
+    <rect x={262} y={43} width={40} height={18} rx={9} fill={BLUE} />
+    <text x={282} y={52} fill="#fff" fontSize={7.5} textAnchor="middle" dominantBaseline="central">
+      開催中
+    </text>
+    {/* 対象ステークホルダー / 対象領域 / レビュー対象リスク のチップ */}
+    {(
+      [
+        ['対象: 役員・現場', BLUE_SOFT, BLUE],
+        ['領域: 受注管理', GRAY_FILL, TEXT],
+        ['リスク: 納期遅延', '#fee2e2', '#dc2626'],
+      ] as const
+    ).map(([t, fill, color], i) => (
+      <g key={t}>
+        <rect x={12 + i * 102} y={86} width={94} height={20} rx={10} fill={fill} stroke={GRAY_LINE} />
+        <text x={59 + i * 102} y={96} fill={color} fontSize={7} textAnchor="middle" dominantBaseline="central">
+          {t}
+        </text>
+      </g>
+    ))}
+    <text x={160} y={140} fill={TEXT} fontSize={8} textAnchor="middle">
+      行クリックで全項目を編集
+    </text>
+  </SvgFrame>
+)
+
+const AsisTobeIllustration: ManualIllustration = () => (
+  <SvgFrame label="ASIS⇔TOBE比較（上下分割）の図解">
+    {/* 上ペイン: ASIS */}
+    <rect x={12} y={14} width={296} height={70} rx={4} fill="#fff" stroke="#d97706" strokeWidth={1.4} />
+    <text x={26} y={28} fill="#d97706" fontSize={8} fontWeight={700}>
+      ASIS（現状）
+    </text>
+    <Box x={40} y={40} w={70} h={26} text="受付" fill={GRAY_FILL} fontSize={8} />
+    <Box x={180} y={40} w={70} h={26} text="手作業転記" fill={GRAY_FILL} fontSize={8} />
+    <Arrow x1={110} y1={53} x2={178} y2={53} />
+    {/* 下ペイン: TOBE */}
+    <rect x={12} y={94} width={296} height={70} rx={4} fill="#fff" stroke="#059669" strokeWidth={1.4} />
+    <text x={26} y={108} fill="#059669" fontSize={8} fontWeight={700}>
+      TOBE（あるべき姿）
+    </text>
+    <Box x={40} y={120} w={70} h={26} text="受付" fill={BLUE_SOFT} fontSize={8} />
+    <Box x={180} y={120} w={70} h={26} text="自動連携" fill={BLUE_SOFT} fontSize={8} />
+    <Arrow x1={110} y1={133} x2={178} y2={133} />
+  </SvgFrame>
+)
+
+const CharterIllustration: ManualIllustration = () => (
+  <SvgFrame label="プロジェクト憲章（1枚もの）の図解">
+    <rect x={12} y={14} width={296} height={20} fill={NAVY} />
+    <text x={160} y={24} fill="#fff" fontSize={8.5} textAnchor="middle" dominantBaseline="central">
+      プロジェクト憲章
+    </text>
+    {[
+      ['背景', 'なぜ始めるのか'],
+      ['目的', '達成したいこと'],
+      ['成功基準', '測定可能な基準'],
+      ['スコープ', 'やること / やらないこと'],
+      ['承認者', 'スポンサー・承認者'],
+    ].map((row, i) => {
+      const y = 34 + i * 28
+      return (
+        <g key={row[0]}>
+          <rect x={12} y={y} width={78} height={28} fill={GRAY_FILL} stroke={GRAY_LINE} />
+          <text x={51} y={y + 14} fill={NAVY} fontSize={8} textAnchor="middle" dominantBaseline="central">
+            {row[0]}
+          </text>
+          <rect x={90} y={y} width={218} height={28} fill="#fff" stroke={GRAY_LINE} />
+          <text x={100} y={y + 14} fill={TEXT} fontSize={8} dominantBaseline="central">
+            {row[1]}
+          </text>
+        </g>
+      )
+    })}
+  </SvgFrame>
+)
+
+const ChangeRequestsIllustration: ManualIllustration = () => (
+  <SvgFrame label="変更要求の一覧と状態バッジの図解">
+    <Box x={12} y={14} w={296} h={22} text="変更要求一覧" fill={NAVY} stroke={NAVY} textFill="#fff" fontSize={9} />
+    {(
+      [
+        ['CR-1 納品書レイアウト変更', '承認', BLUE],
+        ['CR-2 対象範囲の追加', '申請中', '#64748b'],
+        ['CR-3 リリース時期の延期', '却下', '#dc2626'],
+      ] as const
+    ).map(([t, status, color], i) => {
+      const y = 46 + i * 40
+      return (
+        <g key={t}>
+          <rect x={12} y={y} width={296} height={34} rx={4} fill={i % 2 ? GRAY_FILL : '#fff'} stroke={GRAY_LINE} />
+          <text x={24} y={y + 17} fill={TEXT} fontSize={8} dominantBaseline="central">
+            {t}
+          </text>
+          <rect x={252} y={y + 8} width={44} height={18} rx={9} fill={color} />
+          <text x={274} y={y + 17} fill="#fff" fontSize={7.5} textAnchor="middle" dominantBaseline="central">
+            {status}
+          </text>
+        </g>
+      )
+    })}
+    <text x={160} y={172} fill={TEXT} fontSize={8} textAnchor="middle">
+      承認済みは「タスク化」で実行へ
+    </text>
+  </SvgFrame>
+)
+
+const LessonsIllustration: ManualIllustration = () => (
+  <SvgFrame label="教訓登録簿（分類バッジ付き）の図解">
+    <Box x={12} y={14} w={296} h={22} text="教訓登録簿" fill={NAVY} stroke={NAVY} textFill="#fff" fontSize={9} />
+    {(
+      [
+        ['朝会で手戻りが減った', 'うまくいった', '#16a34a'],
+        ['要件確認の漏れが多発', '問題', '#dc2626'],
+        ['チェックリストを導入する', '改善提案', BLUE],
+      ] as const
+    ).map(([t, kind, color], i) => {
+      const y = 46 + i * 40
+      return (
+        <g key={t}>
+          <rect x={12} y={y} width={296} height={34} rx={4} fill={i % 2 ? GRAY_FILL : '#fff'} stroke={GRAY_LINE} />
+          <rect x={20} y={y + 8} width={64} height={18} rx={9} fill={color} />
+          <text x={52} y={y + 17} fill="#fff" fontSize={7} textAnchor="middle" dominantBaseline="central">
+            {kind}
+          </text>
+          <text x={94} y={y + 17} fill={TEXT} fontSize={8} dominantBaseline="central">
+            {t}
+          </text>
+        </g>
+      )
+    })}
+    <text x={160} y={172} fill={TEXT} fontSize={8} textAnchor="middle">
+      分類バッジはクリックで切り替え
+    </text>
+  </SvgFrame>
+)
+
 // ---- レジストリ本体 ----------------------------------------------------------
 
 export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
+  domains: {
+    key: 'domains',
+    title: '領域（共通マスタ）',
+    purpose:
+      'ASIS/TOBE・課題・成果物を分類する「領域」を管理します。領域の下にサブ領域をぶら下げ、担当者や関連会議もチップで確認できます。',
+    steps: [
+      '「領域を追加」で最上位の分類軸となる領域を作成します。',
+      '「サブ領域を追加」で親領域を選び、領域の下に入れ子のサブ領域を作成します。',
+      '名前はクリックして直接編集し、フォーカスを外すと自動保存されます。',
+      '各行の担当者チップで、その領域の担当（ステークホルダー×RACI）を確認します。',
+      '関連会議チップで、その領域を対象とする会議体を確認します（編集は会議マスタ）。',
+      '不要になった領域はゴミ箱アイコンで削除します（サブ領域を持つ領域は先にサブ領域を削除）。',
+    ],
+    Illustration: DomainsIllustration,
+  },
+  'io-types': {
+    key: 'io-types',
+    title: 'INPUT/OUTPUT（共通マスタ）',
+    purpose:
+      '業務フローやDFDで扱う入出力（物体・情報・帳票）のマスタを管理します。具体データの添付や、データカタログの表との紐付けも確認できます。',
+    steps: [
+      '追加フォームに名前を入力し、分類（情報／物体／帳票）を選んで「追加」します。',
+      '名前・説明・分類・領域はインライン編集し、フォーカスを外すと自動保存されます。',
+      '行頭の「>」をクリックして展開し、具体データ（PDF・画像など）をドラッグ＆ドロップで添付・閲覧します。',
+      '「紐づくカタログ表」チップでデータカタログの表との対応を確認します（紐付け操作はカタログ側）。',
+      '業務フロー側では、矢印が運ぶ情報やノードの入出力としてこのマスタから選択します。',
+      '不要になった項目はゴミ箱で削除します（紐づく具体データも削除されます）。',
+    ],
+    Illustration: IoTypesIllustration,
+  },
+  systems: {
+    key: 'systems',
+    title: 'システム（共通マスタ）',
+    purpose:
+      '業務で使っているシステム・ツールを登録します。対象システム／周辺システムの区分と、領域への紐付けで整理します。',
+    steps: [
+      '上部フォームで名前と区分（対象システム／周辺システム）を入力して追加します。',
+      '名前・説明はインライン編集し、フォーカスを外すと自動保存されます。',
+      '区分セレクトで対象／周辺を切り替えます（アイコン色で区別されます）。',
+      '領域セレクトで、そのシステムが属する領域を紐づけます（任意）。',
+      '業務フローのロールや業務定義シートのシステム欄は、このマスタから選択します。',
+      '不要になったシステムは削除します。',
+    ],
+    Illustration: SystemsIllustration,
+  },
+  constraints: {
+    key: 'constraints',
+    title: '制約条件（共通マスタ）',
+    purpose:
+      '設計の前提となる「制約条件（守るべき条件）」と「前提条件（成り立つと仮定する条件）」をタブで区別して管理します。',
+    steps: [
+      '上部のタブで「制約条件」「前提条件」を切り替えて一覧を絞り込みます。',
+      '「追加」で条件を登録し、種別（制約／前提）を選びます。',
+      '内容はインライン編集し、フォーカスを外すと自動保存されます。',
+      '各条件は領域に紐づけられます（任意）。',
+      '登録した制約・前提条件はプロジェクト憲章にもチップ表示されます。',
+      '不要になった条件は削除します。',
+    ],
+    Illustration: ConstraintsIllustration,
+  },
+  roles: {
+    key: 'roles',
+    title: 'ロール（共通マスタ）',
+    purpose:
+      '業務フローの担当（スイムレーン）になるロールを管理します。人／システムの区分と、システムマスタ・領域への紐付けで整理します。',
+    steps: [
+      '「ロール追加」でロール名（例: 顧客、受注システム）を入力して登録します。',
+      '種別を 人／システム／その他 から選びます（人＝User／システム＝Server のアイコンと色で区別）。',
+      '種別が「システム」のときは、共通マスタのシステム（対象／周辺）を紐付けます。',
+      '各カードの編集ボタンから種別・紐付けシステム・色などを変更します。',
+      'ステークホルダー管理の「役割と責任」では、ロールごとに領域・責任・KPI を定義できます。',
+      '使用中フロー数を確認のうえ、不要になったロールは削除します。',
+    ],
+    Illustration: RolesIllustration,
+  },
+  meetings: {
+    key: 'meetings',
+    title: '会議マスタ',
+    purpose:
+      '定例・レビューなどの会議体を管理します。形式・所要時間・主催・ステータスのほか、対象ステークホルダー・対象領域・レビュー対象リスクを紐づけます。',
+    steps: [
+      '「会議体を追加」で会議名・目的を登録します。',
+      '行クリックの編集モーダルで、頻度・曜日時間・所要時間・形式（対面／オンラインなど）を設定します。',
+      '主催と対象ステークホルダーをステークホルダーマスタから選びます。',
+      '対象領域を領域マスタ（領域→サブ領域の入れ子チェック）から複数選択します。',
+      'ステータス列のトグルで開催中／休止を切り替えます。',
+      'レビュー対象リスクのチップで、その会議でレビューするリスクを確認します（設定はリスク管理側）。',
+      '不要になった会議体はゴミ箱アイコンで削除します。',
+    ],
+    Illustration: MeetingsIllustration,
+  },
   flows: {
     key: 'flows',
     title: '業務フロー（スイムレーン）',
     purpose:
       '担当（ロール）ごとのレーンに処理を並べ、矢印でつないで業務の流れを可視化します。ASIS/TOBE の見える化に使います。',
     steps: [
-      '「ロール追加」で担当レーンを作成します。',
-      '「処理ノード追加」でノードを追加し、ドラッグで配置します。',
-      'ノードの上下左右(4辺)の接続点から相手ノードへドラッグして矢印を接続します。',
-      '矢印の付け替えは端点をドラッグして別ノードへ繋ぎ直します。',
-      '接続線の途中の「＋」を押すと、その間にノードを挿入できます。',
-      '「整形」ボタンで自動レイアウト、ボタンで縦／横の向きを切り替えます。',
-      '「PNG出力」で画像として書き出します。',
-      'ノードをダブルクリックすると、その処理の詳細フロー(ドリルダウン)に入れます。',
+      '「ロール追加」で担当レーンを作成し、「処理ノード追加」でノードを置いてドラッグで配置します。',
+      'ツールバーで「選択／移動」モードを切り替えます。選択モード中も Space を押しながらドラッグで画面を移動できます。',
+      'ノードの上下左右(4辺)の接続点から相手ノードへドラッグして矢印を接続します。端点のドラッグで付け替え、途中の「＋」でノード挿入もできます。',
+      '付箋・コメント・アイコンの注釈を追加できます。ノードや付箋は選択するとハンドルが出て、マウスでリサイズできます。',
+      '「整形」で自動レイアウトします。矢印が運ぶ情報（チップ）の幅も考慮して間隔が決まります。',
+      '縦／横の切り替えは、向きを変えたうえで再整形されます（位置は整形後の配置になります）。',
+      '操作は ⌘Z で元に戻す、⌘⇧Z でやり直しできます（ツールバーの Undo/Redo ボタンでも可）。',
+      '全画面表示に切り替えて広く編集できます（Esc で解除）。「PNG出力」で書き出し、ダブルクリックで詳細フローへドリルダウンします。',
     ],
     Illustration: FlowsIllustration,
+  },
+  'asis-tobe': {
+    key: 'asis-tobe',
+    title: 'ASIS/TOBE管理・比較',
+    purpose:
+      '現状(ASIS)とあるべき姿(TOBE)の業務フローを領域ごとに管理し、互いに対応付けて上下に並べて比較します。',
+    steps: [
+      'ASIS管理／TOBE管理では、業務フローのカードが領域（サブ領域）ごとにグループ表示されます。',
+      'カードをクリックすると、そのフローの編集画面を開きます。',
+      'ASISカードの「対応TOBE」、TOBEカードの「対応ASIS」セレクタで両者を対応付けます。',
+      '対応付けたカードには「ASIS⇔TOBE比較」への導線が表示されます。',
+      '比較ビュー(/flows/compare)では、ASIS が上・TOBE が下の上下50/50分割で表示されます。',
+      '上部のセレクタで ASIS フローを選ぶと、対応する TOBE フローが自動選択されます。',
+      '右上のボタンで比較ビュー全体を全画面表示できます（Esc で解除）。',
+    ],
+    Illustration: AsisTobeIllustration,
   },
   'issue-trees': {
     key: 'issue-trees',
@@ -541,6 +957,7 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
       '「なぜ」を追加して CAUSE(原因)ノードを下にぶら下げます。',
       'さらに「なぜ」を重ねて原因を深掘りします。',
       '原因に対して「打ち手(COUNTERMEASURE)」ノードを追加します。',
+      '子ノードの種別は親ノードの種別に応じて選択肢が絞り込まれます。取り違えを直すときは「全種別を表示」トグルで全種別から選べます。',
       '「発想法アシスト」を使うと分解の切り口を提案してもらえます。',
       'ノードから調査タスク／実行タスクを作成し、タスク管理に連携します。',
     ],
@@ -601,12 +1018,14 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
     purpose:
       'タスクを時間軸のバーで表し、日程・依存関係・進捗を一目で管理します。スケジュール調整に使います。',
     steps: [
-      'タスクが日付軸上のバーとして表示されます。',
-      'バー全体をドラッグして開始／終了日をまとめて移動します。',
-      'バーの端をドラッグして期間(日数)をリサイズします。',
-      'バー同士をつないで依存関係(先行→後続)を設定します。',
-      'バー内の塗りで進捗(%)を確認・更新します。',
-      '依存に沿ってスケジュール全体の整合性をチェックします。',
+      '左の WBS ツリーで階層を確認します。親の開閉（折りたたんだ子孫はガントからも隠れる）と完了数の表示があります。',
+      'バー本体を左右にドラッグすると滑らかに動き、離した位置で日付にスナップして保存されます。',
+      'バーの左右の端をドラッグして期間(日数)を伸縮し、進捗ハンドルで進捗(%)を更新します。',
+      'バー右端の丸い接続ハンドルをドラッグし、後続タスクのバーの上で離すと依存(先行→後続の矢印)が引けます。矢印クリックで削除できます。',
+      '親タスクのバーは子タスクの期間(最小開始日〜最大期限)に自動で追従します。親を手動で動かした値は、子を変更するまで維持されます。',
+      'バーやツリーの行をクリックすると右側に編集サイドバーが開き、その場で編集できます。',
+      'バーにマウスを乗せるとポップアップで期間・進捗などの詳細を確認できます。',
+      '右上で「日／週／月」の目盛り粒度を切り替え、全画面表示で広く編集できます。',
     ],
     Illustration: TasksGanttIllustration,
   },
@@ -629,14 +1048,14 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
     key: 'stakeholder-management',
     title: 'ステークホルダー管理',
     purpose:
-      '関係者を影響度×支持度のマトリクスで把握し、巻き込み方を設計します。関心ごとや会議体、役割分担も管理します。',
+      '関係者を内部／外部に分けて把握し、影響度×支持度のマトリクスや RACI で巻き込み方を設計します。関心ごとや会議体、役割分担も管理します。',
     steps: [
-      'ステークホルダーを登録します。',
-      '影響度×支持度のマトリクス上にカードを配置します。',
-      'カードをクリックすると全項目を編集できます。',
-      '各ステークホルダーの「関心ごと」を記録します。',
-      '「会議体」を定義し、誰がどの会議に参加するか整理します。',
-      '「役割と責任」を割り当てて推進体制を明確にします。',
+      '「ステークホルダー」タブで関係者を登録し、側（内部／外部）を設定します。一覧は外部→内部のセクションで表示されます。',
+      '影響度×支持度のマトリクス上にカードを配置し、カードをクリックすると全項目を編集できます。',
+      'RACIマトリクス（領域×人）のセルをクリックして R→A→C→I→なし を切り替えます。A が不在／複数の領域行には警告アイコンが出ます。',
+      '人の名前をクリックすると人単位ビュー（詳細サイドパネル）が開き、その人の担当領域・参加会議をまとめて確認できます。',
+      '「役割と責任」でロールごとに領域・責任・意思決定範囲・関心KPIを定義します。',
+      '「関心ごと」「会議・報告」タブで、関心マトリクスと会議体・報告連絡を設計します。',
     ],
     Illustration: StakeholderIllustration,
   },
@@ -644,14 +1063,15 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
     key: 'risk-management',
     title: 'リスク管理',
     purpose:
-      'プロジェクトのリスクを発生確率×影響度×優先度で洗い出し、対策の優先順位を決めて管理します。',
+      'プロジェクトのリスク（脅威／好機）を確率×影響(P×I)スコアで洗い出し、対応戦略と優先順位を決めて管理します。',
     steps: [
-      'リスクを登録して内容を記述します。',
-      '発生確率(高/中/低)を設定します。',
-      '影響度(大/中/小)を設定します。',
-      '確率と影響度から優先度を判断します。',
-      '優先度の高いリスクから対応方針を検討します。',
-      'リスク表で全体を俯瞰し、定期的に見直します。',
+      '「行を追加」でリスク（脅威／好機）を登録します。一覧では区分・事象内容・種別・スコア・期限・対応策などの主要列を確認できます。',
+      '行クリックの編集モーダルで、種別（RBSカテゴリ）・領域・オーナー・レビュー会議を設定します。',
+      '発生確率×影響度（1-5）を設定すると、スコア(P×I)が自動計算されます。',
+      '脅威／好機の切替で対応戦略の選択肢が変わります（脅威：回避/転嫁/軽減/受容、好機：活用/共有/強化/受容）。',
+      '上部の確率×影響ヒートマップのセルをクリックすると、そのセルのリスクに絞り込めます。',
+      '編集モーダルの「対応タスク作成」でリスク対応タスクを起票し、タスク管理に連携します。',
+      '区分・期限・ライフサイクルで対応状況を見渡し、下部の「種別管理」で RBS カテゴリを整備します。',
     ],
     Illustration: RiskIllustration,
   },
@@ -676,12 +1096,13 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
     purpose:
       '全業務フローを一覧し、各業務の定義(目的/担当/INPUT/DO/OUTPUT/手順)を1枚のシートとして整備します。',
     steps: [
-      '全業務フローの一覧から対象の業務を選びます。',
-      'その業務の「目的」を記述します。',
-      '「担当」を割り当てます。',
-      'INPUT(入力)・DO(実施)・OUTPUT(出力)を順に埋めます。',
-      '具体的な「手順」を記述します。',
-      '各業務の個別定義を編集し、シートを完成させます。',
+      '行は1つの業務フローです。親フロー→子フローの親子階層の順に並びます。',
+      '業務フロー名をクリックすると、そのフローの「個別定義」タブを開きます。',
+      '目的・頻度などのセルは直接入力でき、フォーカスを外すと自動保存されます。',
+      'INPUT/OUTPUT は、フローのノードに紐づけた情報リンク（情報種別）から自動集計したチップ表示です。変更は業務フロー側で行います。',
+      '「編集」モーダルで DO手順・例外処理などをまとめて編集します。担当・次工程・システム・INPUT/OUTPUT 補足はマスタから選択でき、「＋」でその場で追加もできます。',
+      '写真・スクリーンショットはモーダル下部にドラッグ＆ドロップで添付します（複数可）。',
+      '「業務フローへ」ボタンで、そのフローの業務フローエディタへ移動します。',
     ],
     Illustration: BusinessDefinitionIllustration,
   },
@@ -689,14 +1110,15 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
     key: 'roadmap',
     title: 'ロードマップ',
     purpose:
-      'GAP(やるべきこと)を3ヶ月／1年／3年のフェーズに割り当て、改善の進め方を時間軸で計画します。',
+      'TOBE打ち手や GAP をフェーズ列（初期値: 3ヶ月／1年／3年）に割り当て、改善の進め方を時間軸で計画します。フェーズ列は自由に編集できます。',
     steps: [
-      'ロードマップ画面で 3ヶ月／1年／3年のフェーズ列を確認します。',
-      '未割当の GAP を一覧から選びます。',
-      'GAP を該当するフェーズ列へ割り当てます。',
-      'フェーズ内で優先順位を並べ替えます。',
-      '全体のバランスを見てフェーズ間を調整します。',
-      '計画として共有し、進捗に応じて見直します。',
+      '「表示」で TOBE打ち手／GAP／両方 を切り替えます（選択は保存されます）。',
+      'カードはカード全体を掴んでドラッグでき、別のフェーズ列へドロップして振り分けます。',
+      'フェーズ列は自由に編集できます。列名クリック（または鉛筆）で改名、「＋フェーズ追加」で追加、←/→で並べ替え、ゴミ箱で削除（カードは未分類へ）。',
+      '領域フィルタで領域（親子）を絞り込み、「領域ごとにグループ表示」で列内を領域見出しで束ねます。',
+      'TOBE打ち手カードの「GAP n件」バッジをクリックすると、紐づく GAP を展開して確認できます。',
+      'GAPカードでは期日／目標とメモを入力できます（各列で優先度→並び順にソート）。',
+      '変更は自動保存されます。手動で保存したいときは「保存」を押します。',
     ],
     Illustration: RoadmapIllustration,
   },
@@ -713,6 +1135,48 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
       '重複や粒度を調整して要求を磨き込みます。',
     ],
     Illustration: RequirementsIllustration,
+  },
+  charter: {
+    key: 'charter',
+    title: 'プロジェクト憲章',
+    purpose:
+      'プロジェクトの背景・目的・成功基準・スコープを1枚にまとめる、PMBOK のプロジェクト憲章を編集・参照します。',
+    steps: [
+      '背景・目的・成功基準・スコープ内／スコープ外・予算メモを記入します（フォーカスを外すと自動保存）。',
+      '承認者・スポンサーをステークホルダーから選択します（変更すると即保存）。',
+      '前提条件・制約条件は制約マスタからチップ表示されます（編集は制約条件ページ）。',
+      'マイルストーンはタスクのマイルストーンが期日順に一覧表示されます（編集はガント）。',
+      '関係者と合意したら、キックオフや迷ったときの判断のよりどころとして参照します。',
+    ],
+    Illustration: CharterIllustration,
+  },
+  'change-requests': {
+    key: 'change-requests',
+    title: '変更管理（変更要求）',
+    purpose:
+      'スコープ・スケジュール・コストに影響する変更要求を登録し、PMBOK の統合変更管理の流れで承認・却下を管理します。',
+    steps: [
+      '上部のフォームに変更のタイトルを入力して「追加」します（状態は「申請」で作成されます）。',
+      '行クリックで編集モーダルを開き、変更の理由とスコープ・スケジュール・コストへの影響を記入します。',
+      '状態（申請／承認／却下／適用）を行内のセレクトまたは編集モーダルで更新します（承認／却下にすると決定日が記録されます）。',
+      '承認者を編集モーダルで記録します。',
+      '承認済み(APPROVED)の変更は「タスク化」で実行タスクとして起票します。',
+    ],
+    Illustration: ChangeRequestsIllustration,
+  },
+  lessons: {
+    key: 'lessons',
+    title: '教訓登録簿',
+    purpose:
+      'プロジェクトで得た教訓（レッスンズラーンド）を「うまくいった／問題／改善提案」の分類付きで記録します。',
+    steps: [
+      '上部のフォームで分類を選んで内容を入力し、「追加」で教訓を登録します。',
+      '分類バッジをクリックすると「うまくいった→問題→改善提案」の順に切り替わります。',
+      '内容と推奨（次にどうするか）を記入します（フォーカスを外すと自動保存）。',
+      '関連する領域をセレクトで紐づけます（任意）。',
+      '振り返りの場で一覧を見直し、次のプロジェクトへ引き継ぎます。',
+    ],
+    Illustration: LessonsIllustration,
   },
 }
 

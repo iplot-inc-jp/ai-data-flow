@@ -34,7 +34,9 @@ import {
   Map as MapIcon,
   ShieldAlert,
   FileSpreadsheet,
-  BookOpen,
+  ScrollText,
+  GitPullRequestArrow,
+  GraduationCap,
   ArrowLeftRight,
   Server,
   Lock,
@@ -504,6 +506,8 @@ const COLLAPSED_SHORT_LABELS: Record<string, string> = {
   'データカタログ': 'カタログ',
   'ステークホルダーマネジメント': 'ステーク…',
   'リスクマネジメント': 'リスク…',
+  'プロジェクト憲章': '憲章',
+  '教訓登録簿': '教訓',
 }
 
 function collapsedLabel(name: string): string {
@@ -649,12 +653,14 @@ export default function DashboardLayout({
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
           { name: 'コード連携', href: `${base}/integrations`, icon: Github },
+          { name: 'プロジェクト憲章', href: `${base}/charter`, icon: ScrollText },
+          { name: '変更管理', href: `${base}/change-requests`, icon: GitPullRequestArrow },
+          { name: '教訓登録簿', href: `${base}/lessons`, icon: GraduationCap },
         ],
       },
       {
         label: '設定',
         items: [
-          { name: 'マニュアル', href: `${base}/manual`, icon: BookOpen },
           { name: '設定', href: `${base}/settings`, icon: Settings },
         ],
       },

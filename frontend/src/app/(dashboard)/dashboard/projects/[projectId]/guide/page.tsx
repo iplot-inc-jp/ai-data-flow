@@ -4,7 +4,14 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { PageHeader } from '@/components/ui/page-header'
 import {
+  MANUAL_ENTRIES,
+  getManualEntry,
+  type ManualEntry,
+} from '@/components/manual/manual-content'
+import {
   Compass,
+  BookOpen,
+  ChevronDown,
   Layers,
   UserCog,
   Server,
@@ -21,6 +28,10 @@ import {
   ListTodo,
   GanttChartSquare,
   Map as MapIcon,
+  CalendarClock,
+  ScrollText,
+  GitPullRequestArrow,
+  GraduationCap,
   ChevronRight,
   type LucideIcon,
 } from 'lucide-react'
@@ -164,6 +175,8 @@ type GuideSection = {
   accent: string
   summary: string
   links: GuideLink[]
+  /** このステップに対応する操作マニュアル（MANUAL_ENTRIES のキー） */
+  manualKeys: string[]
 }
 
 function buildSections(base: string): GuideSection[] {
@@ -173,7 +186,7 @@ function buildSections(base: string): GuideSection[] {
       title: '共通マスタを整える',
       accent: 'hsl(var(--navy))',
       summary:
-        'はじめに、フローや成果物の土台になる共通マスタ（領域・ロール・システム・INPUT/OUTPUT・制約条件）を登録します。あとから追加・修正もできます。',
+        'はじめに、フローや成果物の土台になる共通マスタ（領域・ロール・システム・INPUT/OUTPUT・制約条件・会議マスタ）を登録します。あとから追加・修正もできます。',
       links: [
         {
           name: '領域',
@@ -205,7 +218,14 @@ function buildSections(base: string): GuideSection[] {
           description: '法令・社内ルールなど設計の前提となる制約を記録します',
           icon: Lock,
         },
+        {
+          name: '会議マスタ',
+          href: `${base}/meetings`,
+          description: '定例・レビューなどの会議体（形式・所要・主催・対象）を整理します',
+          icon: CalendarClock,
+        },
       ],
+      manualKeys: ['domains', 'roles', 'systems', 'io-types', 'constraints', 'meetings'],
     },
     {
       badge: 'STEP 1',
@@ -239,6 +259,7 @@ function buildSections(base: string): GuideSection[] {
           icon: Database,
         },
       ],
+      manualKeys: ['asis-tobe', 'flows', 'business-definition', 'dfd', 'catalog'],
     },
     {
       badge: 'STEP 2',
@@ -260,6 +281,7 @@ function buildSections(base: string): GuideSection[] {
           icon: GitBranch,
         },
       ],
+      manualKeys: ['asis-tobe', 'flows'],
     },
     {
       badge: 'STEP 3',
@@ -275,6 +297,7 @@ function buildSections(base: string): GuideSection[] {
           icon: GitCompare,
         },
       ],
+      manualKeys: ['gap-items'],
     },
     {
       badge: 'STEP 4',
@@ -290,6 +313,7 @@ function buildSections(base: string): GuideSection[] {
           icon: Network,
         },
       ],
+      manualKeys: ['issue-trees'],
     },
     {
       badge: 'STEP 5',
@@ -317,8 +341,127 @@ function buildSections(base: string): GuideSection[] {
           icon: MapIcon,
         },
       ],
+      manualKeys: ['tasks', 'tasks-gantt', 'roadmap'],
+    },
+    {
+      badge: 'PMBOK',
+      title: 'プロジェクトを統制する',
+      accent: '#0f766e',
+      summary:
+        'プロジェクト憲章で立ち上げの合意を1枚にまとめ、変更要求は統合変更管理の流れで取り扱い、得られた教訓を登録簿に残して次へ引き継ぎます。',
+      links: [
+        {
+          name: 'プロジェクト憲章',
+          href: `${base}/charter`,
+          description: '背景・目的・成功基準・スコープを1枚にまとめます',
+          icon: ScrollText,
+        },
+        {
+          name: '変更管理',
+          href: `${base}/change-requests`,
+          description: 'スコープ等に影響する変更要求の承認・却下を管理します',
+          icon: GitPullRequestArrow,
+        },
+        {
+          name: '教訓登録簿',
+          href: `${base}/lessons`,
+          description: 'うまくいった/問題/改善提案の教訓を記録します',
+          icon: GraduationCap,
+        },
+      ],
+      manualKeys: ['charter', 'change-requests', 'lessons'],
     },
   ]
+}
+
+// ===== 操作マニュアルの埋め込み（manual-content の内容をアコーディオンで表示） =====
+
+// マニュアル1件分の本文（目的 → 簡易図解 → すぐ下に操作手順）
+function ManualEntryBlock({
+  entry,
+  showTitle = true,
+}: {
+  entry: ManualEntry
+  showTitle?: boolean
+}) {
+  return (
+    <div className="space-y-3">
+      {showTitle && <h4 className="text-sm font-semibold text-foreground">{entry.title}</h4>}
+      <p className="text-xs leading-relaxed text-muted-foreground">{entry.purpose}</p>
+      <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-50 p-2">
+        <entry.Illustration />
+      </div>
+      <ol className="list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-foreground/80">
+        {entry.steps.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+// 各ステップ用「操作方法を見る」折りたたみ。
+// manual-content から該当キーのマニュアルを引いて、図解→操作手順の順で埋め込む。
+function ManualAccordion({ entryKeys }: { entryKeys: string[] }) {
+  const entries = entryKeys
+    .map((key) => getManualEntry(key))
+    .filter((e): e is ManualEntry => Boolean(e))
+  if (entries.length === 0) return null
+
+  return (
+    <details className="blueprint-card group/manual">
+      <summary className="flex cursor-pointer select-none items-center gap-2 p-4 text-sm font-semibold text-foreground list-none [&::-webkit-details-marker]:hidden">
+        <BookOpen className="h-4 w-4 flex-shrink-0 text-primary" />
+        <span className="flex-shrink-0">操作方法を見る</span>
+        <span className="truncate text-xs font-normal text-muted-foreground">
+          {entries.map((e) => e.title).join(' / ')}
+        </span>
+        <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform group-open/manual:rotate-180" />
+      </summary>
+      <div className="space-y-6 border-t border-border p-4">
+        {entries.map((entry) => (
+          <ManualEntryBlock key={entry.key} entry={entry} />
+        ))}
+      </div>
+    </details>
+  )
+}
+
+// ページ末尾の「全画面の操作マニュアル一覧」アコーディオン（全セクション）。
+// 開くと機能ごとのアコーディオンが並び、個別に開閉できる。
+function AllManualsAccordion() {
+  const entries = Object.values(MANUAL_ENTRIES)
+
+  return (
+    <details className="blueprint-card group/all">
+      <summary className="flex cursor-pointer select-none items-center gap-2 p-5 list-none [&::-webkit-details-marker]:hidden">
+        <BookOpen className="h-5 w-5 flex-shrink-0 text-primary" />
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-foreground">全画面の操作マニュアル一覧</h2>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            全機能（{entries.length}件）の目的・画面イメージ（簡易図解）・操作手順をまとめて確認できます。
+          </p>
+        </div>
+        <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform group-open/all:rotate-180" />
+      </summary>
+      <div className="space-y-2 border-t border-border p-4">
+        {entries.map((entry) => (
+          <details
+            key={entry.key}
+            className="group/entry rounded-md border border-border bg-card"
+          >
+            <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-foreground list-none [&::-webkit-details-marker]:hidden">
+              <span className="truncate">{entry.title}</span>
+              <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform group-open/entry:rotate-180" />
+            </summary>
+            <div className="border-t border-border p-3">
+              <ManualEntryBlock entry={entry} showTitle={false} />
+            </div>
+          </details>
+        ))}
+      </div>
+    </details>
+  )
 }
 
 // 機能ページへのリンクカード
@@ -396,8 +539,13 @@ export default function GuidePage() {
               <GuideLinkCard key={link.href} link={link} />
             ))}
           </div>
+          {/* このステップの操作マニュアル（図解→操作説明）を折りたたみで埋め込み */}
+          <ManualAccordion entryKeys={section.manualKeys} />
         </section>
       ))}
+
+      {/* 全画面の操作マニュアル一覧（全セクション） */}
+      <AllManualsAccordion />
     </div>
   )
 }
