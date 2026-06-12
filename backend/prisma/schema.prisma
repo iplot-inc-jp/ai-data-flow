@@ -2036,7 +2036,7 @@ model AdoptionStatus {
   stakeholderId String    @map("stakeholder_id")
   // 対象システム。null = プロジェクト全体
   systemId      String?   @map("system_id")
-  // NOT_STARTED=未着手 / INFORMED=周知済 / TRAINED=教育済 / TRIAL=試行中 / LIVE=本稼働 / ESTABLISHED=定着
+  // NOT_STARTED=未着手 / INFORMED=説明済 / TRAINED=トレーニング済 / TRIAL=試行中 / LIVE=本稼働 / ESTABLISHED=定着
   stage         String?   @default("NOT_STARTED")
   blockers      String?   @db.Text
   nextAction    String?   @map("next_action") @db.Text
@@ -2050,6 +2050,9 @@ model AdoptionStatus {
   stakeholder Stakeholder @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
   system      System?     @relation(fields: [systemId], references: [id], onDelete: SetNull)
 
+  // NOTE: Postgres は NULL 同士を distinct 扱いするため、systemId が null（全体）の
+  // 行はこの複合ユニークでは重複を防げない。マイグレーションフェーズで部分ユニーク
+  // インデックス (project_id, stakeholder_id) WHERE system_id IS NULL を追加予定。
   @@unique([projectId, stakeholderId, systemId])
   @@map("adoption_statuses")
 }
