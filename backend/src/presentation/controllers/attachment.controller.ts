@@ -20,8 +20,49 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { Public } from '../decorators/public.decorator';
+import {
+  CurrentUser,
+  CurrentUserPayload,
+} from '../decorators/current-user.decorator';
+import { EntityNotFoundError, ForbiddenError } from '../../domain';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
+
+// ========== 共通認可ヘルパー ==========
+
+// project → org メンバー確認（スーパー管理者は常に許可）
+async function assertProjectMember(
+  prisma: PrismaService,
+  projectId: string,
+  userId: string,
+): Promise<void> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { organizationId: true },
+  });
+  if (!project) {
+    throw new EntityNotFoundError('Project', projectId);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isSuperAdmin: true },
+  });
+  if (user?.isSuperAdmin) return;
+
+  const member = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: project.organizationId,
+        userId,
+      },
+    },
+    select: { id: true },
+  });
+  if (!member) {
+    throw new ForbiddenError('You are not a member of this organization');
+  }
+}
 
 /**
  * ファイル名をディスク保存用にサニタイズ（パス区切り・制御文字を除去）
@@ -61,6 +102,7 @@ export class AttachmentController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   async uploadToProject(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
@@ -72,8 +114,10 @@ export class AttachmentController {
       where: { id: projectId },
     });
     if (!project) {
-      throw new NotFoundException('Project not found');
+      throw new EntityNotFoundError('Project', projectId);
     }
+
+    await assertProjectMember(this.prisma, projectId, user.id);
 
     const id = uuid();
     const sanitized = sanitizeFilename(file.originalname);
@@ -118,7 +162,12 @@ export class AttachmentController {
 
   @Get('projects/:projectId/attachments')
   @ApiOperation({ summary: 'プロジェクト直下の汎用資料ファイル一覧を取得' })
-  async listForProject(@Param('projectId') projectId: string) {
+  async listForProject(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+  ) {
+    await assertProjectMember(this.prisma, projectId, user.id);
+
     return this.prisma.attachment.findMany({
       where: {
         projectId,
@@ -136,6 +185,7 @@ export class AttachmentController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   async upload(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
     @Param('phaseId') phaseId: string,
     @UploadedFile() file: Express.Multer.File,
@@ -143,6 +193,16 @@ export class AttachmentController {
     if (!file) {
       throw new NotFoundException('No file uploaded');
     }
+
+    const phase = await this.prisma.projectPhase.findUnique({
+      where: { id: phaseId },
+      select: { projectId: true },
+    });
+    if (!phase) {
+      throw new EntityNotFoundError('Phase', phaseId);
+    }
+
+    await assertProjectMember(this.prisma, phase.projectId, user.id);
 
     const id = uuid();
     const sanitized = sanitizeFilename(file.originalname);
@@ -159,14 +219,17 @@ export class AttachmentController {
         : 'FILE';
 
     // 既存添付数を order の初期値に
+    // NOTE: パスの projectId は検証していないため、必ず phase.projectId を使う
+    // （別テナントの projectId を指定して他組織プロジェクトに紐づく行が
+    //   作られるのを防ぐ）
     const order = await this.prisma.attachment.count({
-      where: { projectId, phaseId },
+      where: { projectId: phase.projectId, phaseId },
     });
 
     const row = await this.prisma.attachment.create({
       data: {
         id,
-        projectId,
+        projectId: phase.projectId,
         phaseId,
         kind: kind as 'IMAGE' | 'PDF' | 'FILE',
         filename: file.originalname,
@@ -183,11 +246,22 @@ export class AttachmentController {
   @Get('projects/:projectId/phases/:phaseId/attachments')
   @ApiOperation({ summary: 'フェーズの添付ファイル一覧を取得' })
   async list(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
     @Param('phaseId') phaseId: string,
   ) {
+    const phase = await this.prisma.projectPhase.findUnique({
+      where: { id: phaseId },
+      select: { projectId: true },
+    });
+    if (!phase) {
+      throw new EntityNotFoundError('Phase', phaseId);
+    }
+
+    await assertProjectMember(this.prisma, phase.projectId, user.id);
+
     return this.prisma.attachment.findMany({
-      where: { projectId, phaseId },
+      where: { projectId: phase.projectId, phaseId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     });
   }
@@ -197,6 +271,7 @@ export class AttachmentController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   async uploadToTask(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('taskId') taskId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
@@ -206,8 +281,10 @@ export class AttachmentController {
 
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
     if (!task) {
-      throw new NotFoundException('Task not found');
+      throw new EntityNotFoundError('Task', taskId);
     }
+
+    await assertProjectMember(this.prisma, task.projectId, user.id);
 
     const id = uuid();
     const sanitized = sanitizeFilename(file.originalname);
@@ -247,7 +324,20 @@ export class AttachmentController {
 
   @Get('tasks/:taskId/attachments')
   @ApiOperation({ summary: 'タスクの添付ファイル一覧を取得' })
-  async listForTask(@Param('taskId') taskId: string) {
+  async listForTask(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('taskId') taskId: string,
+  ) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { projectId: true },
+    });
+    if (!task) {
+      throw new EntityNotFoundError('Task', taskId);
+    }
+
+    await assertProjectMember(this.prisma, task.projectId, user.id);
+
     return this.prisma.attachment.findMany({
       where: { taskId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
@@ -259,6 +349,7 @@ export class AttachmentController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   async uploadToInformationType(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('informationTypeId') informationTypeId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
@@ -270,8 +361,10 @@ export class AttachmentController {
       where: { id: informationTypeId },
     });
     if (!informationType) {
-      throw new NotFoundException('InformationType not found');
+      throw new EntityNotFoundError('InformationType', informationTypeId);
     }
+
+    await assertProjectMember(this.prisma, informationType.projectId, user.id);
 
     const id = uuid();
     const sanitized = sanitizeFilename(file.originalname);
@@ -312,8 +405,19 @@ export class AttachmentController {
   @Get('information-types/:informationTypeId/attachments')
   @ApiOperation({ summary: '情報種別の具体帳票ファイル一覧を取得' })
   async listForInformationType(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('informationTypeId') informationTypeId: string,
   ) {
+    const informationType = await this.prisma.informationType.findUnique({
+      where: { id: informationTypeId },
+      select: { projectId: true },
+    });
+    if (!informationType) {
+      throw new EntityNotFoundError('InformationType', informationTypeId);
+    }
+
+    await assertProjectMember(this.prisma, informationType.projectId, user.id);
+
     return this.prisma.attachment.findMany({
       where: { informationTypeId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
@@ -325,6 +429,7 @@ export class AttachmentController {
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
   async uploadToFlow(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('flowId') flowId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
@@ -336,8 +441,10 @@ export class AttachmentController {
       where: { id: flowId },
     });
     if (!flow) {
-      throw new NotFoundException('BusinessFlow not found');
+      throw new EntityNotFoundError('BusinessFlow', flowId);
     }
+
+    await assertProjectMember(this.prisma, flow.projectId, user.id);
 
     const id = uuid();
     const sanitized = sanitizeFilename(file.originalname);
@@ -377,7 +484,20 @@ export class AttachmentController {
 
   @Get('business-flows/:flowId/attachments')
   @ApiOperation({ summary: '業務フローの添付ファイル一覧を取得' })
-  async listForFlow(@Param('flowId') flowId: string) {
+  async listForFlow(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+  ) {
+    const flow = await this.prisma.businessFlow.findUnique({
+      where: { id: flowId },
+      select: { projectId: true },
+    });
+    if (!flow) {
+      throw new EntityNotFoundError('BusinessFlow', flowId);
+    }
+
+    await assertProjectMember(this.prisma, flow.projectId, user.id);
+
     return this.prisma.attachment.findMany({
       where: { flowId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
@@ -390,7 +510,7 @@ export class AttachmentController {
   async serveFile(@Param('id') id: string, @Res() res: Response) {
     const row = await this.prisma.attachment.findUnique({ where: { id } });
     if (!row) {
-      throw new NotFoundException('Attachment not found');
+      throw new EntityNotFoundError('Attachment', id);
     }
 
     const sanitized = sanitizeFilename(row.filename);
@@ -409,11 +529,17 @@ export class AttachmentController {
 
   @Put('attachments/:id')
   @ApiOperation({ summary: '添付ファイルのメタ情報を更新' })
-  async update(@Param('id') id: string, @Body() dto: UpdateAttachmentDto) {
+  async update(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateAttachmentDto,
+  ) {
     const row = await this.prisma.attachment.findUnique({ where: { id } });
     if (!row) {
-      throw new NotFoundException('Attachment not found');
+      throw new EntityNotFoundError('Attachment', id);
     }
+
+    await assertProjectMember(this.prisma, row.projectId, user.id);
 
     return this.prisma.attachment.update({
       where: { id },
@@ -427,11 +553,16 @@ export class AttachmentController {
 
   @Delete('attachments/:id')
   @ApiOperation({ summary: '添付ファイルを削除' })
-  async delete(@Param('id') id: string) {
+  async delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
     const row = await this.prisma.attachment.findUnique({ where: { id } });
     if (!row) {
-      throw new NotFoundException('Attachment not found');
+      throw new EntityNotFoundError('Attachment', id);
     }
+
+    await assertProjectMember(this.prisma, row.projectId, user.id);
 
     await this.prisma.attachment.delete({ where: { id } });
 
