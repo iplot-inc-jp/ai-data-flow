@@ -1277,7 +1277,11 @@ export default function ProjectFlowDetailPage() {
           }
         );
         if (!res.ok) throw new Error('Failed to tidy node positions');
-        fetchFlowData(flowData.id);
+        // 再取得完了まで await して返す Promise に含める。
+        // SwimlaneCanvas 側はこの Promise の解決を「flowData の座標が新レイアウトへ
+        // 入れ替わった」合図として整形/縦横ボタンの連打ガードに使う（解決前に次の
+        // 縦横切替が走ると、旧座標のノードと移動済みの注釈を突き合わせてしまう）。
+        await fetchFlowData(flowData.id);
       } catch (err) {
         console.error('Failed to tidy node positions:', err);
       }

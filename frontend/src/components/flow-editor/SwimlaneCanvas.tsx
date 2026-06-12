@@ -1188,6 +1188,27 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
+/**
+ * 注釈の実効描画サイズ（保存済み width/height があればそれ、無ければ種別ごとの既定）。
+ * 縦横切替の追従（アンカー相対の再配置）と SCOPE の内外判定で共通に使う。
+ */
+function annotationSizeOf(
+  a: Pick<FlowAnnotation, 'kind' | 'width' | 'height'>,
+): { w: number; h: number } {
+  const defW =
+    a.kind === 'ICON' ? ICON_ANNOTATION_SIZE : a.kind === 'SCOPE' ? SCOPE_DEFAULT_W : ANNOTATION_W;
+  const defH =
+    a.kind === 'ICON'
+      ? ICON_ANNOTATION_SIZE
+      : a.kind === 'SCOPE'
+      ? SCOPE_DEFAULT_H
+      : ANNOTATION_MIN_H;
+  return {
+    w: typeof a.width === 'number' && a.width > 0 ? a.width : defW,
+    h: typeof a.height === 'number' && a.height > 0 ? a.height : defH,
+  };
+}
+
 // アイコン注釈で選べる固定パレット（lucide 名）。順序がパレットの並び。
 const ICON_PALETTE = [
   'Star',
@@ -2199,6 +2220,18 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   // アイコン注釈パレット（ツールバーの「アイコン」ボタンのポップオーバー）の開閉。
   const [iconPaletteOpen, setIconPaletteOpen] = useState(false);
+  // クリック選択中の SCOPE 注釈。右サイドに「この囲みが何を受け取り何を出すか」
+  // （境界をまたぐ INPUT/OUTPUT 矢印一覧）パネルを表示する。
+  const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
+  // 選択中の SCOPE が消えた（削除・フロー切替での再取得）らパネルを閉じる。
+  useEffect(() => {
+    if (
+      selectedScopeId &&
+      !(props.annotations ?? []).some((a) => a.id === selectedScopeId && a.kind === 'SCOPE')
+    ) {
+      setSelectedScopeId(null);
+    }
+  }, [props.annotations, selectedScopeId]);
   // 操作モード（選択 / 移動）。embedded（比較ビュー）では使わない。
   //   - 'select': 左ドラッグで範囲選択・ノード移動。中/右ドラッグで画面パン。Space 押しながら左ドラッグでもパン。
   //   - 'move'  : 左ドラッグで画面パン。
@@ -2240,6 +2273,15 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   );
 
   const isVertical = orientation === 'vertical';
+
+  // --- 整形/縦横切替の保存往復ガード ---
+  // persistLayout（onTidyNodes = PUT + 再取得）が完了するまで flowData.nodes の座標は
+  // 旧レイアウト世代のまま残る。一方、注釈は onUpdateAnnotation の楽観更新で即座に
+  // 新世代の座標へ移る。完了前に次の縦横切替が走ると、toggleOrientation が
+  // 「新世代の注釈座標 × 旧世代のノード座標」を突き合わせて誤アンカー選択・誤った
+  // SCOPE メンバー判定を行い、壊れた配置を PATCH で永続化してしまう。
+  // そのため保存往復中は 整形/縦横 ボタンを無効化し、ハンドラ側でも早期 return する。
+  const [layoutSaving, setLayoutSaving] = useState(false);
 
   // ロール → computeFlowLayout / computeLaneBands 共通のロール入力。
   const laneRoles = useMemo<LayoutRole[]>(
@@ -3008,7 +3050,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
       }));
-      void props.onTidyNodes?.(positions, edges);
+      // 保存往復（PUT + 再取得）の完了まで layoutSaving を立て、整形/縦横の連打を防ぐ。
+      const pending = props.onTidyNodes?.(positions, edges);
+      if (pending) {
+        setLayoutSaving(true);
+        void Promise.resolve(pending).finally(() => setLayoutSaving(false));
+      }
     },
     [roles, props],
   );
@@ -3016,9 +3063,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // --- 「整形」: computeFlowLayout で綺麗な座標を作り、一括保存して再取得 ---
   // ぐちゃぐちゃになった自由配置を、ロール×前後関係の決定的レイアウトへ戻す安全網。
   const handleTidy = useCallback(() => {
+    if (layoutSaving) return; // 前回の整形/切替の保存往復が完了するまで受け付けない
     setMenu(null);
     persistLayout(tidyLayout);
-  }, [tidyLayout, persistLayout]);
+  }, [tidyLayout, persistLayout, layoutSaving]);
 
   // --- 向きトグル: 「整形」ではなく座標変換（転置）で手動配置を保持する ---
   // 縦↔横の切替で再整形すると、手で並べた配置が毎回潰れてしまう。
@@ -3027,6 +3075,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // エッジの接続ハンドルだけは転置後の中心から最近接サイドへ取り直す。
   // localStorage 永続化は applyOrientation が担う。
   const toggleOrientation = useCallback(() => {
+    // 前回の切替/整形の保存往復（PUT + 再取得）が完了するまで受け付けない。
+    // 完了前に実行すると effectivePositions（flowData 由来＝旧世代）と
+    // 楽観更新済みの注釈座標（新世代）を突き合わせ、壊れた注釈配置を永続化してしまう。
+    if (layoutSaving) return;
     const next: FlowOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
     applyOrientation(next);
     // 縦横切替は「ノード実サイズ＋矢印前後関係を考慮した再整形」で並べ直す。
@@ -3037,6 +3089,154 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       orientation: next,
       laneHeightOverrides,
     } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
+
+    // --- 注釈（付箋/コメント/アイコン/スコープ）のアンカー相対追従 ---
+    // flowData.nodes は再整形で動くが annotations は絶対座標のため置き去りになる。
+    // 切替の直前に各注釈の「アンカー」＝最寄りのノード（矩形中心）またはエッジ（両端
+    // ノード中心の中点）を決め、アンカーからの相対オフセット (dx,dy) を記録 →
+    // 切替後のアンカー新座標に、縦横転置へ合わせて入れ替えたオフセット (dy,dx) を足して
+    // 再配置する（オフセットが極端に大きい場合は方向を保ったまま 200px 程度にクランプ）。
+    // SCOPE 囲みは「切替前に矩形へ中心が入っていたノード集合」の新バウンディングボックス
+    // ＋元のパディング（転置で 左右↔上下 を入替）で再配置・リサイズする。
+    // 各注釈は onUpdateAnnotation（楽観更新＋PATCH を並列 fire）で即時反映・永続化する。
+    // 注釈は従来どおり Undo/Redo の対象外。
+    const annos = props.annotations ?? [];
+    if (annos.length > 0 && props.onUpdateAnnotation) {
+      // 切替前のノード中心・半サイズ（保存座標 or シード座標 + 実サイズ）
+      const oldCenter = new Map<string, { x: number; y: number }>();
+      const oldHalf = new Map<string, { hw: number; hh: number }>();
+      for (const n of flowData.nodes) {
+        const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
+        const w = typeof n.width === 'number' && n.width > 0 ? n.width : NODE_W;
+        const h = typeof n.height === 'number' && n.height > 0 ? n.height : NODE_H;
+        oldCenter.set(n.id, { x: pos.x + w / 2, y: pos.y + h / 2 });
+        oldHalf.set(n.id, { hw: w / 2, hh: h / 2 });
+      }
+      // 切替後のノード中心・半サイズ（computeFlowLayout は中心座標を返す）
+      const newCenter = new Map<string, { x: number; y: number }>();
+      const newHalf = new Map<string, { hw: number; hh: number }>();
+      for (const pn of relaid.nodes) {
+        newCenter.set(pn.id, { x: pn.x, y: pn.y });
+        newHalf.set(pn.id, { hw: pn.width / 2, hh: pn.height / 2 });
+      }
+      // アンカー候補 = 全ノード中心 + 全エッジ中点。旧/新座標のペアで持つ。
+      const anchors: Array<{ ox: number; oy: number; nx: number; ny: number }> = [];
+      for (const [id, oc] of Array.from(oldCenter.entries())) {
+        const nc = newCenter.get(id);
+        if (nc) anchors.push({ ox: oc.x, oy: oc.y, nx: nc.x, ny: nc.y });
+      }
+      for (const e of flowData.edges) {
+        const so = oldCenter.get(e.sourceNodeId);
+        const to = oldCenter.get(e.targetNodeId);
+        const sn = newCenter.get(e.sourceNodeId);
+        const tn = newCenter.get(e.targetNodeId);
+        if (so && to && sn && tn) {
+          anchors.push({
+            ox: (so.x + to.x) / 2,
+            oy: (so.y + to.y) / 2,
+            nx: (sn.x + tn.x) / 2,
+            ny: (sn.y + tn.y) / 2,
+          });
+        }
+      }
+      if (anchors.length > 0) {
+        // アンカーから離れすぎた注釈は、方向を保ったまま 200px 程度に寄せる。
+        const MAX_ANNOTATION_OFFSET = 200;
+        // SCOPE 再配置時に最低限確保するパディング（元が負でも枠がノード群を覆う）。
+        const SCOPE_MIN_PAD = 12;
+        for (const a of annos) {
+          const { w, h } = annotationSizeOf(a);
+          if (a.kind === 'SCOPE') {
+            // 囲みノード集合 = 切替前に SCOPE 矩形へ中心が入っていたノード
+            const memberIds: string[] = [];
+            for (const [id, c] of Array.from(oldCenter.entries())) {
+              if (
+                c.x >= a.positionX &&
+                c.x <= a.positionX + w &&
+                c.y >= a.positionY &&
+                c.y <= a.positionY + h
+              ) {
+                memberIds.push(id);
+              }
+            }
+            if (memberIds.length > 0) {
+              // 旧/新バウンディングボックス（メンバーノード矩形の外接）
+              let oL = Infinity;
+              let oT = Infinity;
+              let oR = -Infinity;
+              let oB = -Infinity;
+              let nL = Infinity;
+              let nT = Infinity;
+              let nR = -Infinity;
+              let nB = -Infinity;
+              let complete = true;
+              for (const id of memberIds) {
+                const oc = oldCenter.get(id)!;
+                const oh = oldHalf.get(id)!;
+                const nc = newCenter.get(id);
+                const nh = newHalf.get(id);
+                if (!nc || !nh) {
+                  complete = false;
+                  break;
+                }
+                oL = Math.min(oL, oc.x - oh.hw);
+                oT = Math.min(oT, oc.y - oh.hh);
+                oR = Math.max(oR, oc.x + oh.hw);
+                oB = Math.max(oB, oc.y + oh.hh);
+                nL = Math.min(nL, nc.x - nh.hw);
+                nT = Math.min(nT, nc.y - nh.hh);
+                nR = Math.max(nR, nc.x + nh.hw);
+                nB = Math.max(nB, nc.y + nh.hh);
+              }
+              if (complete) {
+                // 元のパディング（負なら最小値へクランプ）。転置に合わせて 左右↔上下 を入れ替える。
+                const padL = Math.max(SCOPE_MIN_PAD, oL - a.positionX);
+                const padT = Math.max(SCOPE_MIN_PAD, oT - a.positionY);
+                const padR = Math.max(SCOPE_MIN_PAD, a.positionX + w - oR);
+                const padB = Math.max(SCOPE_MIN_PAD, a.positionY + h - oB);
+                const newLeft = nL - padT;
+                const newTop = nT - padL;
+                const newRight = nR + padB;
+                const newBottom = nB + padR;
+                props.onUpdateAnnotation(a.id, {
+                  positionX: Math.round(newLeft),
+                  positionY: Math.round(newTop),
+                  width: Math.round(newRight - newLeft),
+                  height: Math.round(newBottom - newTop),
+                });
+                continue;
+              }
+            }
+            // メンバー 0 件の SCOPE は付箋と同じ最寄りアンカー追従（サイズ維持）へフォールバック
+          }
+          // 最寄りアンカー（ノード中心 or エッジ中点のうち、注釈中心に最も近いもの）
+          const cx = a.positionX + w / 2;
+          const cy = a.positionY + h / 2;
+          let best = anchors[0];
+          let bestD = Infinity;
+          for (const an of anchors) {
+            const d = (an.ox - cx) * (an.ox - cx) + (an.oy - cy) * (an.oy - cy);
+            if (d < bestD) {
+              bestD = d;
+              best = an;
+            }
+          }
+          // 相対オフセット (dx,dy) を縦横転置に合わせて (dy,dx) に入れ替える
+          let offX = cy - best.oy;
+          let offY = cx - best.ox;
+          const len = Math.hypot(offX, offY);
+          if (len > MAX_ANNOTATION_OFFSET) {
+            offX = (offX / len) * MAX_ANNOTATION_OFFSET;
+            offY = (offY / len) * MAX_ANNOTATION_OFFSET;
+          }
+          props.onUpdateAnnotation(a.id, {
+            positionX: Math.round(best.nx + offX - w / 2),
+            positionY: Math.round(best.ny + offY - h / 2),
+          });
+        }
+      }
+    }
+
     persistLayout(relaid);
   }, [
     orientation,
@@ -3046,6 +3246,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     laneRoles,
     laneHeightOverrides,
     persistLayout,
+    flowData.nodes,
+    flowData.edges,
+    effectivePositions,
+    props,
+    layoutSaving,
   ]);
 
   return (
@@ -3090,11 +3295,24 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         proOptions={{ hideAttribution: true }}
         onNodeDragStop={handleNodeDragStop}
         onSelectionDragStop={handleSelectionDragStop}
-        onPaneClick={() => { setSelectedEdgeId(null); closeMenu(); }}
+        onPaneClick={() => { setSelectedEdgeId(null); setSelectedScopeId(null); closeMenu(); }}
         onEdgeClick={(_, edge) => { if (props.embedded) return; setSelectedEdgeId(edge.id); }}
         onNodeClick={(_, node) => {
           if (props.embedded) return;
-          if (node.type === 'content') setEditingNodeId(node.id);
+          if (node.type === 'content') {
+            // ノードプロパティと SCOPE 入出力パネルは右サイドを取り合うため排他にする。
+            setSelectedScopeId(null);
+            setEditingNodeId(node.id);
+            return;
+          }
+          // SCOPE 囲みクリック → 境界 INPUT/OUTPUT パネルを開く（付箋/コメント/アイコンは対象外）。
+          if (node.type === 'annotation') {
+            const ann = (props.annotations ?? []).find((a) => a.id === node.id);
+            if (ann?.kind === 'SCOPE') {
+              setEditingNodeId(null);
+              setSelectedScopeId(node.id);
+            }
+          }
         }}
         onNodeDoubleClick={(_, node) => {
           if (props.embedded) return;
@@ -3239,7 +3457,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
               variant="outline"
               size="sm"
               onClick={handleTidy}
-              disabled={!props.onTidyNodes || flowData.nodes.length === 0}
+              disabled={!props.onTidyNodes || flowData.nodes.length === 0 || layoutSaving}
               className="text-gray-700"
               title="ぐちゃぐちゃな配置を、ロール×順序の綺麗なレイアウトに自動整列して保存します"
             >
@@ -3250,6 +3468,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
               variant="outline"
               size="sm"
               onClick={toggleOrientation}
+              disabled={layoutSaving}
               className="text-gray-700"
               title="スイムレーンの向きを切り替え"
             >
@@ -3484,6 +3703,30 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onCreateInformationType={props.onCreateInformationType}
         />
       )}
+
+      {/* スコープ境界 INPUT/OUTPUT パネル（SCOPE 注釈クリックで表示。
+          ノードプロパティが開いている間はそちらを優先する） */}
+      {!props.embedded && !editingNodeId && selectedScopeId && (() => {
+        const scope = (props.annotations ?? []).find(
+          (a) => a.id === selectedScopeId && a.kind === 'SCOPE',
+        );
+        if (!scope) return null;
+        return (
+          <ScopeIoPanel
+            key={scope.id}
+            scope={scope}
+            nodes={flowData.nodes}
+            edges={flowData.edges}
+            positions={effectivePositions}
+            onClose={() => setSelectedScopeId(null)}
+            onSelectNode={(nodeId) => {
+              setSelectedScopeId(null);
+              setEditingNodeId(nodeId);
+            }}
+            onUpdateAnnotation={props.onUpdateAnnotation}
+          />
+        );
+      })()}
 
       {/* エッジ編集パネル（矢印が選択されている間） */}
       {selectedEdgeId && (() => {
@@ -4812,6 +5055,193 @@ function NodePropertyPanel({
         <Button size="sm" onClick={() => { save(); onClose(); }} className="bg-blue-600 hover:bg-blue-700 text-white">
           保存
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================
+// スコープ境界 INPUT/OUTPUT パネル（右サイドバー）
+// SCOPE 注釈をクリック選択すると表示。内側ノード集合（中心が SCOPE 矩形内）を求め、
+// 境界をまたぐ矢印を「受け取り(INPUT)=外→内」「出力(OUTPUT)=内→外」に分けて一覧する。
+// これで「この囲みが何を受け取り何を出すか」が一目で分かる。
+// ===========================================
+
+function ScopeIoPanel({
+  scope,
+  nodes,
+  edges,
+  positions,
+  onClose,
+  onSelectNode,
+  onUpdateAnnotation,
+}: {
+  scope: FlowAnnotation;
+  nodes: FlowDataNode[];
+  edges: FlowDataEdge[];
+  /** 各ノードの実効左上座標（保存値 or 整形シード）。内外判定に使う。 */
+  positions: Map<string, { x: number; y: number }>;
+  onClose: () => void;
+  /** ノード名クリックでそのノードのプロパティを開く（任意）。 */
+  onSelectNode?: (nodeId: string) => void;
+  /** ラベル（annotation.text）の編集保存（任意。embedded では渡されない）。 */
+  onUpdateAnnotation?: (id: string, patch: { text?: string }) => void;
+}) {
+  // ラベル編集（SCOPE 上のダブルクリックインライン編集と同じ text を編集する別経路）。
+  const [label, setLabel] = useState(scope.text ?? '');
+  useEffect(() => {
+    setLabel(scope.text ?? '');
+  }, [scope.text]);
+
+  const { insideNodes, inputs, outputs } = useMemo(() => {
+    const { w, h } = annotationSizeOf(scope);
+    const right = scope.positionX + w;
+    const bottom = scope.positionY + h;
+    // 内側ノード集合 = 中心が SCOPE 矩形内のノード
+    const inside = new Set<string>();
+    for (const n of nodes) {
+      const pos = positions.get(n.id) ?? { x: n.positionX, y: n.positionY };
+      const nw = typeof n.width === 'number' && n.width > 0 ? n.width : NODE_W;
+      const nh = typeof n.height === 'number' && n.height > 0 ? n.height : NODE_H;
+      const cx = pos.x + nw / 2;
+      const cy = pos.y + nh / 2;
+      if (cx >= scope.positionX && cx <= right && cy >= scope.positionY && cy <= bottom) {
+        inside.add(n.id);
+      }
+    }
+    return {
+      insideNodes: nodes.filter((n) => inside.has(n.id)),
+      // 受け取り(INPUT) = 外→内 / 出力(OUTPUT) = 内→外 の境界をまたぐ矢印
+      inputs: edges.filter((e) => inside.has(e.targetNodeId) && !inside.has(e.sourceNodeId)),
+      outputs: edges.filter((e) => inside.has(e.sourceNodeId) && !inside.has(e.targetNodeId)),
+    };
+  }, [scope, nodes, edges, positions]);
+
+  const scopeColor = scope.color || SCOPE_DEFAULT_COLOR;
+  const labelOf = (nodeId: string) => nodes.find((n) => n.id === nodeId)?.label ?? '不明なノード';
+
+  // ノード名チップ（クリックでそのノードのプロパティを開く）。inner はスコープ色で強調。
+  const nodeChip = (nodeId: string, inner: boolean) => (
+    <button
+      type="button"
+      onClick={onSelectNode ? () => onSelectNode(nodeId) : undefined}
+      disabled={!onSelectNode}
+      title={onSelectNode ? 'クリックでノードのプロパティを開く' : undefined}
+      className={`max-w-[120px] truncate rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+        onSelectNode ? 'hover:ring-1 hover:ring-blue-300' : 'cursor-default'
+      } ${inner ? '' : 'bg-gray-100 text-gray-700'}`}
+      style={inner ? { color: scopeColor, backgroundColor: hexToRgba(scopeColor, 0.12) } : undefined}
+    >
+      {labelOf(nodeId)}
+    </button>
+  );
+
+  // 境界をまたぐ矢印 1 本分の行: 「外側ノード名 → 内側ノード名」＋情報種別チップ。
+  const edgeRow = (e: FlowDataEdge, direction: 'INPUT' | 'OUTPUT') => {
+    const category = e.informationType?.category as InformationCategory | undefined;
+    const badgeClass =
+      (category && INFO_CATEGORY_BADGE[category]) || 'bg-sky-100 text-sky-700 border-sky-200';
+    return (
+      <div key={e.id} className="rounded border border-gray-200 px-2 py-1.5">
+        <div className="flex flex-wrap items-center gap-1">
+          {nodeChip(e.sourceNodeId, direction === 'OUTPUT')}
+          <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" />
+          {nodeChip(e.targetNodeId, direction === 'INPUT')}
+        </div>
+        {e.informationType?.name && (
+          <div className="mt-1">
+            <span className={`inline-block rounded border px-1.5 py-0.5 text-[10px] ${badgeClass}`}>
+              {e.informationType.name}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="absolute top-0 right-0 h-full w-full sm:w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-gray-900">
+          <span
+            className="inline-block h-3.5 w-3.5 shrink-0 rounded-sm border-2 border-dashed"
+            style={{ borderColor: scopeColor, backgroundColor: hexToRgba(scopeColor, 0.15) }}
+          />
+          <span className="truncate">スコープ「{scope.text || 'スコープ'}」</span>
+        </h3>
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1 rounded hover:bg-gray-100 text-gray-500"
+          title="閉じる"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto px-4 py-3 space-y-4">
+        {/* ラベル編集（text 空なら図上は「スコープ」とフォールバック表示される） */}
+        <div>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">ラベル</label>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => {
+              if (onUpdateAnnotation && label !== (scope.text ?? '')) {
+                onUpdateAnnotation(scope.id, { text: label });
+              }
+            }}
+            placeholder="スコープ"
+            disabled={!onUpdateAnnotation}
+            className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-gray-50"
+          />
+        </div>
+
+        {/* 内側ノード集合（中心が SCOPE 矩形内） */}
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-gray-500">
+            <BoxSelect className="h-3.5 w-3.5" style={{ color: scopeColor }} />
+            囲んでいるノード
+            <span className="text-gray-400">{insideNodes.length}件</span>
+          </div>
+          {insideNodes.length === 0 ? (
+            <div className="text-xs text-gray-400">なし（枠内に中心があるノードがありません）</div>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {insideNodes.map((n) => (
+                <span key={n.id}>{nodeChip(n.id, true)}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 受け取り(INPUT) = 外→内 の矢印一覧 */}
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-gray-500">
+            <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-600" />
+            受け取り（INPUT: 外 → 内）
+            <span className="text-gray-400">{inputs.length}件</span>
+          </div>
+          {inputs.length === 0 ? (
+            <div className="text-xs text-gray-400">なし</div>
+          ) : (
+            <div className="space-y-1">{inputs.map((e) => edgeRow(e, 'INPUT'))}</div>
+          )}
+        </div>
+
+        {/* 出力(OUTPUT) = 内→外 の矢印一覧 */}
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-gray-500">
+            <ArrowUpRight className="h-3.5 w-3.5 text-blue-600" />
+            出力（OUTPUT: 内 → 外）
+            <span className="text-gray-400">{outputs.length}件</span>
+          </div>
+          {outputs.length === 0 ? (
+            <div className="text-xs text-gray-400">なし</div>
+          ) : (
+            <div className="space-y-1">{outputs.map((e) => edgeRow(e, 'OUTPUT'))}</div>
+          )}
+        </div>
       </div>
     </div>
   );
