@@ -127,6 +127,8 @@ model Project {
   changeRequests          ChangeRequest[]
   lessons                 LessonLearned[]
   adoptionStatuses        AdoptionStatus[]
+  dataObjects             DataObject[]
+  dataObjectRelations     DataObjectRelation[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -182,15 +184,21 @@ model Table {
   projectId   String   @map("project_id")
   // 紐づく情報種別マスタ（共通マスタ基盤。任意）
   informationTypeId String? @map("information_type_id")
+  // 所属オブジェクト（DFDデータストア＝オブジェクト関係性マップの共通マスタ。任意）
+  dataObjectId String? @map("data_object_id")
   name        String
   displayName String?  @map("display_name")
   description String?
   tags        String[] @default([])
+  // ER図キャンバス上の位置
+  erPositionX Float    @default(0) @map("er_position_x")
+  erPositionY Float    @default(0) @map("er_position_y")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
+  dataObject DataObject? @relation(fields: [dataObjectId], references: [id], onDelete: SetNull)
   columns  Column[]
   statuses TableStatus[]
 
@@ -1313,6 +1321,8 @@ model DfdNode {
   number     String?
   refFlowId  String?     @map("ref_flow_id")
   refNodeId  String?     @map("ref_node_id")
+  // データストア（kind=DATA_STORE）の場合に紐づくオブジェクト（共通マスタ。任意）
+  dataObjectId String?   @map("data_object_id")
   positionX  Float       @default(0) @map("position_x")
   positionY  Float       @default(0) @map("position_y")
   createdAt  DateTime    @default(now()) @map("created_at")
@@ -1321,6 +1331,7 @@ model DfdNode {
   diagram    DfdDiagram    @relation(fields: [diagramId], references: [id], onDelete: Cascade)
   refFlow    BusinessFlow? @relation("DfdNodeRefFlow", fields: [refFlowId], references: [id], onDelete: SetNull)
   refNode    FlowNode?     @relation("DfdNodeRefNode", fields: [refNodeId], references: [id], onDelete: SetNull)
+  dataObject DataObject?   @relation(fields: [dataObjectId], references: [id], onDelete: SetNull)
   outFlows   DfdFlow[]     @relation("DfdFlowSource")
   inFlows    DfdFlow[]     @relation("DfdFlowTarget")
 
@@ -1351,6 +1362,58 @@ model DfdFlow {
   informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
 
   @@map("dfd_flows")
+}
+
+// ===========================================
+// データオブジェクト
+// （DFDデータストア＝オブジェクト関係性マップの「オブジェクト」＝ER図のグループ囲み。共通マスタ）
+// ===========================================
+
+enum RelationCardinality {
+  ONE_TO_ONE
+  ONE_TO_MANY
+  MANY_TO_MANY
+}
+
+model DataObject {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  name        String
+  description String?  @db.Text
+  color       String?
+  // オブジェクト関係性マップ上の位置
+  positionX   Float    @default(0) @map("position_x")
+  positionY   Float    @default(0) @map("position_y")
+  order       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dfdNodes     DfdNode[]
+  tables       Table[]
+  outRelations DataObjectRelation[] @relation("DataObjectRelSource")
+  inRelations  DataObjectRelation[] @relation("DataObjectRelTarget")
+
+  @@unique([projectId, name])
+  @@map("data_objects")
+}
+
+model DataObjectRelation {
+  id             String              @id @default(uuid())
+  projectId      String              @map("project_id")
+  sourceObjectId String              @map("source_object_id")
+  targetObjectId String              @map("target_object_id")
+  cardinality    RelationCardinality @default(ONE_TO_MANY)
+  label          String?
+  description    String?             @db.Text
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceObject DataObject @relation("DataObjectRelSource", fields: [sourceObjectId], references: [id], onDelete: Cascade)
+  targetObject DataObject @relation("DataObjectRelTarget", fields: [targetObjectId], references: [id], onDelete: Cascade)
+
+  @@map("data_object_relations")
 }
 
 enum InformationCategory {
