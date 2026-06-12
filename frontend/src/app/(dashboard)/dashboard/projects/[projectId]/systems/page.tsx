@@ -26,6 +26,23 @@ import {
   type SystemKind,
   type SubProjectMaster,
 } from '@/lib/masters';
+import {
+  adoptionApi,
+  listStakeholders,
+  normalizeAdoptionStage,
+} from '@/lib/stakeholders';
+
+/** 導入サマリ集計（全ステークホルダー数 + システム別の定着+本稼働 人数）。 */
+interface AdoptionAggregate {
+  total: number;
+  liveBySystem: Map<string, number>;
+}
+
+/** TARGET 行に出す導入サマリ（定着+本稼働 n / 全 m 人）。 */
+interface AdoptionSummary {
+  adopted: number;
+  total: number;
+}
 
 /** kind の表示ラベル。 */
 const KIND_LABELS: Record<SystemKind, string> = {
@@ -53,6 +70,8 @@ export default function SystemsPage() {
 
   const [systems, setSystems] = useState<SystemMaster[]>([]);
   const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
+  // 導入サマリ（取得失敗時は null のまま = 非表示）
+  const [adoptionAgg, setAdoptionAgg] = useState<AdoptionAggregate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,12 +85,30 @@ export default function SystemsPage() {
     setError(null);
     try {
       // 領域 select 用に領域一覧も同時取得（取得失敗してもシステム一覧は出す）
-      const [list, subs] = await Promise.all([
+      const [list, subs, agg] = await Promise.all([
         systemApi.list(projectId),
         subProjectApi.list(projectId).catch(() => [] as SubProjectMaster[]),
+        // TARGET 行の導入サマリ用（定着+本稼働 n / 全 m 人）。取得失敗時は非表示。
+        Promise.all([listStakeholders(projectId), adoptionApi.list(projectId)])
+          .then(([stakeholders, adoptions]): AdoptionAggregate => {
+            const liveBySystem = new Map<string, number>();
+            for (const a of adoptions) {
+              if (!a.systemId) continue;
+              const stage = normalizeAdoptionStage(a.stage);
+              if (stage === 'LIVE' || stage === 'ESTABLISHED') {
+                liveBySystem.set(
+                  a.systemId,
+                  (liveBySystem.get(a.systemId) ?? 0) + 1,
+                );
+              }
+            }
+            return { total: stakeholders.length, liveBySystem };
+          })
+          .catch(() => null),
       ]);
       setSystems(list);
       setSubProjects(subs);
+      setAdoptionAgg(agg);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -166,7 +203,20 @@ export default function SystemsPage() {
         ) : (
           <ul className="divide-y divide-gray-100">
             {systems.map((s) => (
-              <SystemRow key={s.id} system={s} subProjects={subProjects} onChanged={load} />
+              <SystemRow
+                key={s.id}
+                system={s}
+                subProjects={subProjects}
+                adoption={
+                  s.kind === 'TARGET' && adoptionAgg
+                    ? {
+                        adopted: adoptionAgg.liveBySystem.get(s.id) ?? 0,
+                        total: adoptionAgg.total,
+                      }
+                    : null
+                }
+                onChanged={load}
+              />
             ))}
           </ul>
         )}
@@ -179,10 +229,13 @@ export default function SystemsPage() {
 function SystemRow({
   system,
   subProjects,
+  adoption,
   onChanged,
 }: {
   system: SystemMaster;
   subProjects: SubProjectMaster[];
+  /** TARGET 行の導入サマリ（定着+本稼働 n / 全 m 人）。null は非表示。 */
+  adoption: AdoptionSummary | null;
   onChanged: () => Promise<void> | void;
 }) {
   const [name, setName] = useState(system.name);
@@ -253,6 +306,30 @@ function SystemRow({
           disabled={busy}
           className="flex-1 rounded border border-transparent px-2 py-1 text-sm font-medium text-gray-800 hover:border-gray-200 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
         />
+
+        {/* 導入サマリ（TARGET のみ。定着+本稼働 n / 全 m 人） */}
+        {adoption && (
+          <div
+            className="flex shrink-0 items-center gap-1.5"
+            title={`導入状況: 定着+本稼働 ${adoption.adopted} / 全 ${adoption.total} 人`}
+          >
+            <span className="whitespace-nowrap text-[11px] font-medium text-emerald-700">
+              導入 {adoption.adopted}/{adoption.total} 人
+            </span>
+            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-100">
+              <div
+                className="h-full bg-emerald-500"
+                style={{
+                  width: `${
+                    adoption.total > 0
+                      ? Math.round((adoption.adopted / adoption.total) * 100)
+                      : 0
+                  }%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* 種別（即保存） */}
         <select

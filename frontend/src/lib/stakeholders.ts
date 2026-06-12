@@ -289,6 +289,113 @@ export type InterestMatrixRowInput = Partial<
 >;
 
 // ---------------------------------------------------------------------------
+// 導入状況（AdoptionStatus テーブル：ステークホルダー × システム の定着度）
+// ---------------------------------------------------------------------------
+
+/** 定着度の6段階（ファネル順）。 */
+export type AdoptionStage =
+  | 'NOT_STARTED'
+  | 'INFORMED'
+  | 'TRAINED'
+  | 'TRIAL'
+  | 'LIVE'
+  | 'ESTABLISHED';
+
+/** 段階メタ。badge=バッジ/チップ/段階select、bar=割合バーの塗り。 */
+export interface AdoptionStageMeta {
+  key: AdoptionStage;
+  label: string;
+  badge: string;
+  bar: string;
+}
+
+/** 定着度6段階のメタ（ファネル順。未着手→説明済→…→定着）。 */
+export const ADOPTION_STAGES: AdoptionStageMeta[] = [
+  {
+    key: 'NOT_STARTED',
+    label: '未着手',
+    badge: 'border-gray-200 bg-gray-50 text-gray-600',
+    bar: 'bg-gray-300',
+  },
+  {
+    key: 'INFORMED',
+    label: '説明済',
+    badge: 'border-sky-200 bg-sky-50 text-sky-700',
+    bar: 'bg-sky-400',
+  },
+  {
+    key: 'TRAINED',
+    label: 'トレーニング済',
+    badge: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+    bar: 'bg-indigo-400',
+  },
+  {
+    key: 'TRIAL',
+    label: '試行中',
+    badge: 'border-amber-200 bg-amber-50 text-amber-800',
+    bar: 'bg-amber-400',
+  },
+  {
+    key: 'LIVE',
+    label: '本稼働',
+    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    bar: 'bg-emerald-500',
+  },
+  {
+    key: 'ESTABLISHED',
+    label: '定着',
+    badge: 'border-green-400 bg-green-100 text-green-900',
+    bar: 'bg-green-600',
+  },
+];
+
+/** key → 段階メタの逆引き。 */
+export const adoptionStageMeta = Object.fromEntries(
+  ADOPTION_STAGES.map((s) => [s.key, s]),
+) as Record<AdoptionStage, AdoptionStageMeta>;
+
+/** 生値を AdoptionStage に正規化する（未設定・不明は未着手扱い）。 */
+export function normalizeAdoptionStage(
+  raw: string | null | undefined,
+): AdoptionStage {
+  return ADOPTION_STAGES.some((s) => s.key === raw)
+    ? (raw as AdoptionStage)
+    : 'NOT_STARTED';
+}
+
+/** 導入状況（AdoptionStatus テーブル）。systemId=null はプロジェクト全体。 */
+export interface AdoptionStatus {
+  id: string;
+  projectId: string;
+  stakeholderId: string;
+  /** 対象システム（System の FK）。null = プロジェクト全体。 */
+  systemId: string | null;
+  /** 定着度段階（ADOPTION_STAGES のいずれか。未設定は未着手扱い）。 */
+  stage: string | null;
+  /** 阻害要因 */
+  blockers: string | null;
+  /** 次のアクション */
+  nextAction: string | null;
+  note: string | null;
+  /** 最終接触日時（ISO 8601） */
+  lastContactAt: string | null;
+  order: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** upsert で送る入力（(projectId, stakeholderId, systemId) で一意）。 */
+export interface AdoptionStatusInput {
+  stakeholderId: string;
+  systemId?: string | null;
+  stage?: AdoptionStage;
+  blockers?: string | null;
+  nextAction?: string | null;
+  note?: string | null;
+  lastContactAt?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Stakeholder API
 // ---------------------------------------------------------------------------
 
@@ -584,6 +691,46 @@ export const interestRowsApi = {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error('関心ごとマトリクスの削除に失敗しました');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// AdoptionStatus API（導入状況）
+// ---------------------------------------------------------------------------
+
+export const adoptionApi = {
+  async list(projectId: string): Promise<AdoptionStatus[]> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/adoption-statuses`,
+      { headers: getHeaders() },
+    );
+    if (!res.ok) throw new Error('導入状況の読み込みに失敗しました');
+    return res.json();
+  },
+
+  /** (projectId, stakeholderId, systemId) で一意に upsert する。 */
+  async upsert(
+    projectId: string,
+    input: AdoptionStatusInput,
+  ): Promise<AdoptionStatus> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/adoption-statuses/upsert`,
+      {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) throw new Error('導入状況の保存に失敗しました');
+    return res.json();
+  },
+
+  async remove(id: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/adoption-statuses/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error('導入状況の削除に失敗しました');
   },
 };
 

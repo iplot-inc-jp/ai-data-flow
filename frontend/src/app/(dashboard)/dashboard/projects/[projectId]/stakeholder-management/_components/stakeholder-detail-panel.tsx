@@ -5,10 +5,11 @@
 // 1人のステークホルダーに関する情報を集約表示する:
 // - 側（内部/外部）・役職・役割・関心・懸念
 // - 担当領域（RACI 一覧）
+// - 導入状況（対象システムごとの段階バッジ＋次アクション。無ければ未着手）
 // - 所有リスク（Risk.ownerStakeholderId の逆引き。スコア/ライフサイクル付き）
 // - 主催/参加会議（Meeting の逆引き。主催は王冠アイコン）
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   X,
@@ -18,6 +19,7 @@ import {
   ShieldAlert,
   CalendarClock,
   ExternalLink,
+  Rocket,
 } from 'lucide-react';
 import {
   normalizeSide,
@@ -25,6 +27,10 @@ import {
   raciMeta,
   pickRaci,
   orderDomainTree,
+  adoptionApi,
+  adoptionStageMeta,
+  normalizeAdoptionStage,
+  type AdoptionStage,
   type DomainAssignment,
   type Meeting,
   type Stakeholder,
@@ -36,7 +42,15 @@ import {
   lifecycleMeta,
   type Risk,
 } from '@/lib/risks';
-import type { SubProjectMaster } from '@/lib/masters';
+import { systemApi, type SubProjectMaster, type SystemMaster } from '@/lib/masters';
+
+/** 導入状況セクションの1行（システム or 全体 × 段階 × 次アクション）。 */
+interface AdoptionEntry {
+  key: string;
+  label: string;
+  stage: AdoptionStage;
+  nextAction: string | null;
+}
 
 export function StakeholderDetailPanel({
   projectId,
@@ -85,6 +99,73 @@ export function StakeholderDetailPanel({
     () => risks.filter((r) => r.ownerStakeholderId === stakeholder.id),
     [risks, stakeholder.id],
   );
+
+  // 導入状況（この人 × 対象システム）。パネル内で自前取得。
+  // 取得失敗は「記録なし（未着手）」と区別して控えめに表示する。
+  const [adoptionEntries, setAdoptionEntries] = useState<
+    AdoptionEntry[] | null
+  >(null);
+  const [adoptionLoadFailed, setAdoptionLoadFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setAdoptionEntries(null);
+    setAdoptionLoadFailed(false);
+    (async () => {
+      try {
+        const [adoptions, systems] = await Promise.all([
+          adoptionApi.list(projectId),
+          systemApi.list(projectId).catch(() => [] as SystemMaster[]),
+        ]);
+        if (cancelled) return;
+        const mine = adoptions.filter(
+          (a) => a.stakeholderId === stakeholder.id,
+        );
+        const byKey = new Map(mine.map((a) => [a.systemId ?? '', a]));
+        const entries: AdoptionEntry[] = [];
+        // 全体（systemId null）の記録があれば先頭に
+        const whole = byKey.get('');
+        if (whole) {
+          entries.push({
+            key: '__whole__',
+            label: '全体（プロジェクト共通）',
+            stage: normalizeAdoptionStage(whole.stage),
+            nextAction: whole.nextAction,
+          });
+        }
+        // 対象システム（TARGET）は記録が無くても未着手として並べる
+        for (const sys of systems.filter((s) => s.kind === 'TARGET')) {
+          const a = byKey.get(sys.id);
+          entries.push({
+            key: sys.id,
+            label: sys.name,
+            stage: normalizeAdoptionStage(a?.stage),
+            nextAction: a?.nextAction ?? null,
+          });
+        }
+        // 対象外システムへの記録も漏らさず表示
+        for (const a of mine) {
+          if (!a.systemId) continue;
+          if (entries.some((e) => e.key === a.systemId)) continue;
+          const sys = systems.find((s) => s.id === a.systemId);
+          entries.push({
+            key: a.systemId,
+            label: sys?.name ?? '（不明なシステム）',
+            stage: normalizeAdoptionStage(a.stage),
+            nextAction: a.nextAction,
+          });
+        }
+        setAdoptionEntries(entries);
+      } catch {
+        if (!cancelled) {
+          setAdoptionLoadFailed(true);
+          setAdoptionEntries([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, stakeholder.id]);
 
   return (
     <div
@@ -206,6 +287,58 @@ export function StakeholderDetailPanel({
                 担当領域はありません（編集モーダル、または下の RACI
                 マトリクスで割り当てられます）。
               </p>
+            )}
+          </section>
+
+          {/* 導入状況（対象システムごとの段階＋次アクション） */}
+          <section className="space-y-2">
+            <h4 className="flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+              <Rocket className="h-3.5 w-3.5 text-emerald-600" />
+              導入状況
+            </h4>
+            {adoptionEntries == null ? (
+              <p className="text-xs text-gray-400">読み込み中…</p>
+            ) : adoptionLoadFailed ? (
+              <p className="text-xs text-gray-400">
+                導入状況を読み込めませんでした（再度開くと再取得します）。
+              </p>
+            ) : adoptionEntries.length === 0 ? (
+              <p className="flex items-center gap-1.5 text-xs text-gray-400">
+                <span
+                  className={`rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${adoptionStageMeta.NOT_STARTED.badge}`}
+                >
+                  {adoptionStageMeta.NOT_STARTED.label}
+                </span>
+                導入状況の記録はまだありません（「導入状況」タブで更新できます）。
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {adoptionEntries.map((entry) => (
+                  <li
+                    key={entry.key}
+                    className="rounded-md border border-gray-100 bg-gray-50/60 px-2.5 py-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span
+                        className="min-w-0 truncate text-gray-800"
+                        title={entry.label}
+                      >
+                        {entry.label}
+                      </span>
+                      <span
+                        className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${adoptionStageMeta[entry.stage].badge}`}
+                      >
+                        {adoptionStageMeta[entry.stage].label}
+                      </span>
+                    </div>
+                    {entry.nextAction && (
+                      <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-gray-500">
+                        次アクション: {entry.nextAction}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
 
