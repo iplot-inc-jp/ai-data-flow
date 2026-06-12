@@ -481,6 +481,11 @@ model FlowEdge {
 // KPI（AI作成: フローのINPUT/OUTPUT・帳票から生成。SMART採点つき）
 // ===========================================
 
+enum KpiCategory {
+  BUSINESS   // 業務KPI（ASIS/TOBE業務フローの改善指標）
+  AI_QUALITY // AI精度KPI（導入するAI/システム自体の精度・品質指標）
+}
+
 enum KpiDirection {
   INCREASE // 増やすほど良い
   DECREASE // 減らすほど良い
@@ -503,8 +508,12 @@ enum KpiStatus {
 model Kpi {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
-  // 対象業務フロー（任意）
+  // 業務KPI / AI精度KPI の区分
+  category    KpiCategory @default(BUSINESS)
+  // 対象業務フロー（任意。主に業務KPI）
   flowId      String?  @map("flow_id")
+  // 対象システム（任意。主にAI精度KPI: どのAI/システムの精度か）
+  systemId    String?  @map("system_id")
   name        String
   description String?  @db.Text
   // 計算式・定義（例: 欠品率 = 欠品件数 / 発注明細数）
@@ -534,6 +543,7 @@ model Kpi {
 
   project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   flow      BusinessFlow? @relation(fields: [flowId], references: [id], onDelete: SetNull)
+  system    System?       @relation(fields: [systemId], references: [id], onDelete: SetNull)
   ownerRole Role?         @relation(fields: [ownerRoleId], references: [id], onDelete: SetNull)
   // 測定対象の INPUT/OUTPUT（情報種別。複数）
   informationLinks KpiInformationLink[]
@@ -1207,6 +1217,7 @@ model System {
   subProject       SubProject?      @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   roles            Role[]
   adoptionStatuses AdoptionStatus[]
+  kpis             Kpi[]
 
   @@map("systems")
 }
