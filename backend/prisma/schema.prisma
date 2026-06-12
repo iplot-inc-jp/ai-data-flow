@@ -1247,6 +1247,10 @@ model Attachment {
   taskId    String?        @map("task_id")
   kind      AttachmentKind @default(FILE)
   filename  String
+  // 表示名（編集可能。null=filename を表示）
+  displayName String?      @map("display_name")
+  // フォルダ分け（自由入力のフォルダ名。null=未分類）
+  folder    String?
   mimeType  String         @map("mime_type")
   url       String // 配信パス（/uploads/...）
   size      Int            @default(0)
@@ -1420,11 +1424,36 @@ model DfdDiagram {
 
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   flow    BusinessFlow? @relation("FlowDfd", fields: [flowId], references: [id], onDelete: Cascade)
-  nodes   DfdNode[]
-  flows   DfdFlow[]
+  nodes       DfdNode[]
+  flows       DfdFlow[]
+  annotations DfdAnnotation[]
 
   @@unique([projectId, flowId])
   @@map("dfd_diagrams")
+}
+
+// DFD キャンバス上の注釈（付箋・メモ。業務フローの FlowAnnotation と同じ概念）
+model DfdAnnotation {
+  id        String             @id @default(uuid())
+  diagramId String             @map("diagram_id")
+  kind      FlowAnnotationKind @default(STICKY)
+  text      String             @default("") @db.Text
+  positionX Float              @default(0) @map("position_x")
+  positionY Float              @default(0) @map("position_y")
+  width     Float?             @map("width")
+  height    Float?             @map("height")
+  color     String?
+  icon      String?
+  borderStyle String?          @map("border_style")
+  fillOpacity Float?           @map("fill_opacity")
+  order     Int                @default(0)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  diagram DfdDiagram @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+
+  @@index([diagramId])
+  @@map("dfd_annotations")
 }
 
 model DfdNode {
