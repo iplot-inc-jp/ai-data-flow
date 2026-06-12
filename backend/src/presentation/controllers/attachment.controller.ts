@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, ValidateIf } from 'class-validator';
 import { Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import * as fs from 'fs';
@@ -45,6 +45,8 @@ const ATTACHMENT_SELECT = {
   taskId: true,
   kind: true,
   filename: true,
+  displayName: true,
+  folder: true,
   mimeType: true,
   url: true,
   size: true,
@@ -117,6 +119,31 @@ class UpdateAttachmentDto {
   @IsInt()
   @Min(0)
   order?: number;
+
+  /** 表示名（null/空文字 = filename 表示に戻す） */
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  displayName?: string | null;
+
+  /** フォルダ名（null/空文字 = 未分類に戻す） */
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  folder?: string | null;
+}
+
+/**
+ * displayName / folder の更新値を正規化する。
+ * undefined はそのまま（未指定 = 変更しない）、空文字・空白のみは null（未設定に戻す）。
+ */
+function normalizeNullableText(
+  value: string | null | undefined,
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 @ApiTags('添付')
@@ -575,6 +602,8 @@ export class AttachmentController {
         caption: dto.caption,
         pageRange: dto.pageRange,
         order: dto.order,
+        displayName: normalizeNullableText(dto.displayName),
+        folder: normalizeNullableText(dto.folder),
       },
       select: ATTACHMENT_SELECT,
     });

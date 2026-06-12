@@ -56,6 +56,8 @@ export class ProjectByIdController {
       name: project.name,
       slug: project.slug,
       description: project.description,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
     };
   }
 }

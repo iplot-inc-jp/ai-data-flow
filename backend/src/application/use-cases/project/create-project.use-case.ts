@@ -23,6 +23,8 @@ export interface CreateProjectOutput {
   name: string;
   slug: string;
   description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 /**
@@ -80,6 +82,8 @@ export class CreateProjectUseCase {
       name: project.name,
       slug: project.slug,
       description: project.description,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
     };
   }
 }

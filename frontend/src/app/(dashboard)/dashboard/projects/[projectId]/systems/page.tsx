@@ -26,6 +26,7 @@ import {
   type SystemKind,
   type SubProjectMaster,
 } from '@/lib/masters';
+import { SubProjectPicker } from '@/components/ui/sub-project-picker';
 import {
   adoptionApi,
   listStakeholders,
@@ -346,21 +347,14 @@ function SystemRow({
           ))}
         </select>
 
-        {/* 所属領域（任意・即保存） */}
-        <select
+        {/* 所属領域（任意・即保存）。共通の領域ピッカー（ツリー＋検索）。クリアで '' → null 保存。 */}
+        <SubProjectPicker
+          subProjects={subProjects}
           value={system.subProjectId ?? ''}
-          onChange={(e) => void runUpdate({ subProjectId: e.target.value === '' ? null : e.target.value })}
+          onChange={(v) => void runUpdate({ subProjectId: v === '' ? null : v })}
           disabled={busy}
-          className="max-w-[10rem] rounded border border-gray-300 bg-white px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
-          title="所属領域"
-        >
-          <option value="">領域：未設定</option>
-          {subProjects.map((sp) => (
-            <option key={sp.id} value={sp.id}>
-              {sp.name}
-            </option>
-          ))}
-        </select>
+          placeholder="領域を選択"
+        />
 
         {busy && <Loader2 className="h-4 w-4 animate-spin text-blue-600" />}
         <button

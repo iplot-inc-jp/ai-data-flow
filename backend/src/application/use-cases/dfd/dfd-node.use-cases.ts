@@ -49,8 +49,19 @@ export class AddDfdNodeUseCase {
 
   async execute(input: AddDfdNodeInput): Promise<DfdNodeOutput> {
     const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.userId);
-    if (input.dataObjectId != null) {
-      await assertDataObjectInProject(this.dataObjectRepo, diagram.projectId, input.dataObjectId);
+    let dataObjectId = input.dataObjectId ?? null;
+    if (dataObjectId != null) {
+      await assertDataObjectInProject(this.dataObjectRepo, diagram.projectId, dataObjectId);
+    } else if (input.kind === 'DATA_STORE') {
+      // データストア＝オブジェクト統合: dataObjectId 未指定の DATA_STORE は
+      // ラベルと同名の DataObject を get-or-create して自動リンクする
+      // （並行作成の一意制約 P2002 は repo 側で吸収し勝者を返す）
+      const name = input.label?.trim();
+      if (name) {
+        const order = await this.dataObjectRepo.nextOrder(diagram.projectId);
+        const { object } = await this.dataObjectRepo.getOrCreateByName(diagram.projectId, name, order);
+        dataObjectId = object.id;
+      }
     }
     const node = DfdNode.create(
       {
@@ -60,7 +71,7 @@ export class AddDfdNodeUseCase {
         number: input.number ?? null,
         refFlowId: input.refFlowId ?? null,
         refNodeId: input.refNodeId ?? null,
-        dataObjectId: input.dataObjectId ?? null,
+        dataObjectId,
         positionX: input.positionX ?? 0,
         positionY: input.positionY ?? 0,
       },
@@ -101,10 +112,36 @@ export class UpdateDfdNodeUseCase {
       await assertDataObjectInProject(this.dataObjectRepo, diagram.projectId, input.dataObjectId);
     }
 
+    // データストア＝オブジェクト統合: リンク済み DATA_STORE の label 変更は
+    // 紐づく DataObject の rename として扱う。rename 先が既存オブジェクト名と
+    // 衝突（@@unique projectId+name）する場合は rename せず、その既存オブジェクトへ
+    // リンクを付け替える（元オブジェクトはそのまま残す）。
+    const newLabel = input.label?.trim();
+    const effectiveKind = input.kind ?? node.kind;
+    let relinkObjectId: string | undefined;
+    if (
+      newLabel &&
+      effectiveKind === 'DATA_STORE' &&
+      input.dataObjectId === undefined &&
+      node.dataObjectId != null
+    ) {
+      const linked = await this.dataObjectRepo.findById(node.dataObjectId);
+      if (linked && linked.name !== newLabel) {
+        const existing = await this.dataObjectRepo.findByName(diagram.projectId, newLabel);
+        if (existing && existing.id !== linked.id) {
+          relinkObjectId = existing.id;
+        } else {
+          linked.updateName(newLabel);
+          await this.dataObjectRepo.save(linked);
+        }
+      }
+    }
+
     if (input.label !== undefined) node.updateLabel(input.label);
     if (input.number !== undefined) node.updateNumber(input.number);
     if (input.kind !== undefined) node.updateKind(input.kind);
     if (input.dataObjectId !== undefined) node.updateDataObjectId(input.dataObjectId);
+    else if (relinkObjectId !== undefined) node.updateDataObjectId(relinkObjectId);
     if (input.positionX !== undefined || input.positionY !== undefined) {
       node.updatePosition(
         input.positionX ?? node.positionX,

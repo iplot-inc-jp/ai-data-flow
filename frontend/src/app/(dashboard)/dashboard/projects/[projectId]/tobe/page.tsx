@@ -40,6 +40,7 @@ import {
 } from '@/lib/asis-tobe';
 // 領域（SubProject）は ASIS と共通の SubProject マスタから取得する（@/lib/masters に統一）。
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
+import { SubProjectPicker } from '@/components/ui/sub-project-picker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -627,20 +628,18 @@ export default function TobeManagementPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="tobe-flow-subproject">領域／サブ領域</Label>
-              <select
-                id="tobe-flow-subproject"
-                value={newSubProjectId}
-                onChange={(e) => setNewSubProjectId(e.target.value)}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-              >
-                <option value={UNASSIGNED}>未分類</option>
-                {flatSubProjects.map(({ sub, depth }) => (
-                  <option key={sub.id} value={sub.id}>
-                    {`${'　'.repeat(depth)}${sub.name}`}
-                  </option>
-                ))}
-              </select>
+              <Label>領域／サブ領域</Label>
+              <div>
+                {/* 共通の領域ピッカー（ツリー＋検索）。クリアで未分類（UNASSIGNED）に戻す。 */}
+                <SubProjectPicker
+                  subProjects={subProjects}
+                  value={newSubProjectId === UNASSIGNED ? '' : newSubProjectId}
+                  onChange={(v) =>
+                    setNewSubProjectId(v === '' ? UNASSIGNED : v)
+                  }
+                  placeholder="領域を選択"
+                />
+              </div>
               {/* ASIS と同じ領域マスタを共有していることを明示。管理は「領域」ページで。 */}
               <p className="text-xs text-muted-foreground">
                 領域／サブ領域は ASIS と共通のマスタです。追加・編集は{' '}

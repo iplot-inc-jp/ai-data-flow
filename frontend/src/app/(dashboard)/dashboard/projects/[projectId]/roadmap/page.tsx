@@ -56,6 +56,7 @@ import {
   type TobeVision,
 } from '@/lib/asis-tobe';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
+import { SubProjectPicker } from '@/components/ui/sub-project-picker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -1288,23 +1289,17 @@ export default function RoadmapPage() {
 
         {view !== 'GAP' && (
           <>
-            {/* 領域フィルタ（親子をインデント表示。親を選ぶと子孫も含む） */}
-            <label className="inline-flex items-center gap-1.5 text-sm text-gray-500">
+            {/* 領域フィルタ（共通の領域ピッカー。親を選ぶと子孫も含む。クリアで「すべて」） */}
+            <span className="inline-flex items-center gap-1.5 text-sm text-gray-500">
               <FolderTree className="h-4 w-4 text-gray-400" />
-              <select
-                value={areaFilter}
-                onChange={(e) => setAreaFilter(e.target.value)}
-                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-              >
-                <option value={AREA_ALL}>領域: すべて</option>
-                {flatSubProjects.map(({ sub, depth }) => (
-                  <option key={sub.id} value={sub.id}>
-                    {'　'.repeat(depth)}
-                    {sub.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <SubProjectPicker
+                subProjects={subProjects}
+                value={areaFilter === AREA_ALL ? '' : areaFilter}
+                onChange={(v) => setAreaFilter(v === '' ? AREA_ALL : v)}
+                allowAll
+                placeholder="領域: すべて"
+              />
+            </span>
 
             {/* 領域ごとにグループ表示 */}
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-gray-600">

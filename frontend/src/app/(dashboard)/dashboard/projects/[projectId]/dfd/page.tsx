@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Loader2, Network, Table2, Share2 } from 'lucide-react';
+import { Boxes, Loader2, Network, Table2, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { useToast } from '@/components/ui/use-toast';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
 import { InformationTypeRegistry } from '@/components/dfd/InformationTypeRegistry';
@@ -17,6 +18,8 @@ import {
   type DfdNode as DfdNodeModel,
   type DfdFlow as DfdFlowModel,
   type DfdNodeKind,
+  type DfdAnnotation,
+  type DfdAnnotationKind,
   type InformationType,
 } from '@/lib/dfd';
 import { dataObjectApi, type DataObjectDto } from '@/lib/data-objects';
@@ -30,6 +33,7 @@ export default function ProjectDfdPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
+  const { toast } = useToast();
 
   const [diagram, setDiagram] = useState<DfdDiagram | null>(null);
   const [loading, setLoading] = useState(true);
@@ -39,6 +43,10 @@ export default function ProjectDfdPage() {
   const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
   // オブジェクト（共通マスタ）一覧。DATA_STORE ノードの紐づけセレクタ・バッジに使う。
   const [dataObjects, setDataObjects] = useState<DataObjectDto[]>([]);
+  // 注釈（付箋・メモ）。diagram.nodes/flows とは別系統（再生成の影響を受けない）。
+  const [annotations, setAnnotations] = useState<DfdAnnotation[]>([]);
+  // 未統合データストア → オブジェクト統合（import-from-dfd）の実行中フラグ。
+  const [integrating, setIntegrating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +76,97 @@ export default function ProjectDfdPage() {
     void loadDataObjects();
   }, [load, loadDataObjects]);
 
+  // 注釈（付箋・メモ）一覧を取得（GET /dfd-diagrams/:diagramId/annotations）。
+  // 取得失敗はDFD描画の致命ではない（付箋が出ないだけ）。
+  const fetchAnnotations = useCallback(async (diagramId: string) => {
+    try {
+      const list = await dfdApi.listAnnotations(diagramId);
+      setAnnotations(Array.isArray(list) ? list : []);
+    } catch (err) {
+      console.error('Failed to fetch annotations:', err);
+    }
+  }, []);
+
+  const diagramId = diagram?.id ?? null;
+  useEffect(() => {
+    if (diagramId) void fetchAnnotations(diagramId);
+  }, [diagramId, fetchAnnotations]);
+
+  // ===========================================
+  // 注釈（付箋・メモ）の追加・更新・削除
+  // 成功後は annotations 状態を楽観更新（位置/本文の小刻みな更新で再取得を避けちらつきを防ぐ）。
+  // ===========================================
+  const handleAddAnnotation = useCallback(
+    async (kind: DfdAnnotationKind, init: { positionX: number; positionY: number }) => {
+      if (!diagramId) return;
+      try {
+        const created = await dfdApi.addAnnotation(diagramId, {
+          kind,
+          text: '',
+          positionX: init.positionX,
+          positionY: init.positionY,
+        });
+        setAnnotations((prev) => [...prev, created]);
+      } catch (err) {
+        console.error('Failed to create annotation:', err);
+      }
+    },
+    [diagramId],
+  );
+
+  const handleUpdateAnnotation = useCallback(
+    async (id: string, patch: Partial<Omit<DfdAnnotation, 'id'>>) => {
+      if (!diagramId) return;
+      // 楽観更新（ドラッグ移動・本文編集が即座に反映され、再取得のちらつきを避ける）
+      setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+      try {
+        await dfdApi.updateAnnotation(id, patch);
+      } catch (err) {
+        console.error('Failed to update annotation:', err);
+        // 失敗時はサーバ状態へ戻す
+        void fetchAnnotations(diagramId);
+      }
+    },
+    [diagramId, fetchAnnotations],
+  );
+
+  const handleDeleteAnnotation = useCallback(
+    async (id: string) => {
+      if (!diagramId) return;
+      // 楽観更新（削除を即座に反映）
+      setAnnotations((prev) => prev.filter((a) => a.id !== id));
+      try {
+        await dfdApi.deleteAnnotation(id);
+      } catch (err) {
+        console.error('Failed to delete annotation:', err);
+        void fetchAnnotations(diagramId);
+      }
+    },
+    [diagramId, fetchAnnotations],
+  );
+
+  // 未統合データストア → オブジェクト統合（既存の import-from-dfd API。冪等）。
+  // 成功したら件数をトーストで知らせ、DFD（unlinkedDataStoreCount）とオブジェクト一覧を再取得する。
+  const handleIntegrateDataStores = useCallback(async () => {
+    setIntegrating(true);
+    try {
+      const result = await dataObjectApi.importFromDfd(projectId);
+      toast({
+        title: 'データストアをオブジェクトに統合しました',
+        description: `新規作成 ${result.created}件 / DFDノード紐づけ ${result.linked}件`,
+      });
+      await load();
+      await loadDataObjects();
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: err instanceof Error ? err.message : 'オブジェクトへの統合に失敗しました',
+      });
+    } finally {
+      setIntegrating(false);
+    }
+  }, [projectId, toast, load, loadDataObjects]);
+
   const handleRegenerate = useCallback(async () => {
     setBusy(true);
     try {
@@ -85,16 +184,22 @@ export default function ProjectDfdPage() {
       if (!diagram) return;
       await dfdApi.addNode(diagram.id, body);
       await load();
+      // DATA_STORE は backend が同名オブジェクトを get-or-create して自動リンクするため、
+      // オブジェクト一覧も再取得してバッジ・セレクタへ即反映する。
+      if (body.kind === 'DATA_STORE') await loadDataObjects();
     },
-    [diagram, load],
+    [diagram, load, loadDataObjects],
   );
 
   const handleUpdateNode = useCallback(
     async (id: string, patch: Partial<DfdNodeModel>) => {
       await dfdApi.updateNode(id, patch);
       await load();
+      // label 変更はリンク済みオブジェクトの rename（衝突時はリンク付け替え）になるため、
+      // オブジェクト一覧も再取得して名前のズレを防ぐ。
+      if (patch.label !== undefined || patch.dataObjectId !== undefined) await loadDataObjects();
     },
-    [load],
+    [load, loadDataObjects],
   );
 
   const handleDeleteNode = useCallback(
@@ -252,6 +357,30 @@ export default function ProjectDfdPage() {
         </Card>
       ) : (
         <>
+          {/* 未統合データストアのバナー: オブジェクト（共通マスタ）に統合して名前を一元管理する */}
+          {diagram && diagram.unlinkedDataStoreCount > 0 && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <Boxes className="h-5 w-5 shrink-0 text-amber-600" />
+              <p className="min-w-[200px] flex-1 text-sm text-amber-800">
+                未統合のデータストアが {diagram.unlinkedDataStoreCount} 件あります。
+                オブジェクト（共通マスタ）に統合すると、オブジェクトマップ・ER図と名前が同期されます。
+              </p>
+              <Button
+                size="sm"
+                onClick={handleIntegrateDataStores}
+                disabled={integrating}
+                className="bg-amber-600 text-white hover:bg-amber-700"
+              >
+                {integrating ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Boxes className="mr-1.5 h-4 w-4" />
+                )}
+                オブジェクトに統合
+              </Button>
+            </div>
+          )}
+
           {/* 図 / 一覧表 サブ切替 */}
           <div className="flex items-center gap-1.5">
             <button
@@ -295,6 +424,10 @@ export default function ProjectDfdPage() {
                 onSavePositions={handleSavePositions}
                 onRegenerate={handleRegenerate}
                 onFunctionOpen={handleFunctionOpen}
+                annotations={annotations}
+                onAddAnnotation={handleAddAnnotation}
+                onUpdateAnnotation={handleUpdateAnnotation}
+                onDeleteAnnotation={handleDeleteAnnotation}
               />
             </div>
           ) : diagram ? (
