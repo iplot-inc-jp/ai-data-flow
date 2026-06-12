@@ -4,8 +4,8 @@ import { Providers } from '@/components/providers'
 import { Toaster } from '@/components/ui/toaster'
 
 export const metadata: Metadata = {
-  title: 'ai-data-flow — 業務フロー × CRUD × 要件',
-  description: 'IPLoT方法論パイプライン（ASIS→課題→TOBE→GAP→要件→動作確認）の統合プラットフォーム',
+  title: 'Brain Pro',
+  description: 'プロジェクトの“脳”を、人とAIで共有するプロジェクト管理システム',
 }
 
 export default function RootLayout({

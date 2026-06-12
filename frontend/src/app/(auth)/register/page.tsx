@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Database, ArrowRight, Loader2 } from 'lucide-react';
+import { Database, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -47,125 +47,95 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center bg-white px-4 text-gray-900">
-      <div
-        className="absolute inset-0 -z-10"
-        style={{
-          background:
-            'radial-gradient(60% 50% at 50% 0%, rgba(37,99,235,0.10) 0%, rgba(255,255,255,0) 70%)',
-        }}
-      />
-
-      <div className="w-full max-w-sm">
-        <Link href="/" className="flex items-center justify-center gap-2 mb-6">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 text-gray-900">
+      <div className="w-full max-w-sm bg-white border border-gray-200 rounded-2xl shadow-sm p-8">
+        {/* ロゴ・プロダクト名 */}
+        <div className="flex flex-col items-center mb-8 text-center">
           <span
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white"
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-white mb-3"
             style={{ backgroundColor: NAVY }}
           >
             <Database className="h-5 w-5" />
           </span>
-          <span className="text-lg font-bold tracking-tight" style={{ color: NAVY }}>
-            ai-data-flow
-          </span>
-        </Link>
-
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-          <div
-            className="h-1"
-            style={{ backgroundImage: `linear-gradient(120deg, ${NAVY} 0%, #2563eb 60%, #60a5fa 100%)` }}
-          />
-
-          <div className="p-8">
-            <p className="text-[11px] font-bold tracking-[0.25em] text-gray-400 mb-2 uppercase text-center">
-              IPLoT Methodology Platform
-            </p>
-            <h1 className="text-xl font-bold text-center mb-6" style={{ color: NAVY }}>
-              新規登録
-            </h1>
-
-            <form onSubmit={onSubmit} className="space-y-4">
-              {error && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm">
-                  {error}
-                </div>
-              )}
-
-              <div className="space-y-1.5">
-                <Label htmlFor="name" className="text-gray-700 text-sm">
-                  お名前
-                </Label>
-                <Input
-                  id="name"
-                  name="name"
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="山田 太郎"
-                  className="bg-white border-gray-300 text-gray-900"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-gray-700 text-sm">
-                  メールアドレス
-                </Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  required
-                  placeholder="you@example.com"
-                  className="bg-white border-gray-300 text-gray-900"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="password" className="text-gray-700 text-sm">
-                  パスワード
-                </Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  minLength={6}
-                  placeholder="6文字以上"
-                  className="bg-white border-gray-300 text-gray-900"
-                />
-                <p className="text-xs text-gray-400">6文字以上のパスワードを設定してください</p>
-              </div>
-
-              <Button
-                type="submit"
-                disabled={isLoading}
-                className="w-full rounded-full font-bold text-white hover:opacity-90"
-                style={{ backgroundColor: NAVY }}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    登録中...
-                  </>
-                ) : (
-                  <>
-                    アカウントを作成
-                    <ArrowRight className="h-4 w-4 ml-2" />
-                  </>
-                )}
-              </Button>
-            </form>
-
-            <p className="mt-6 text-center text-sm text-gray-500">
-              すでにアカウントをお持ちの方は{' '}
-              <Link href="/login" className="font-medium" style={{ color: '#2563eb' }}>
-                ログイン
-              </Link>
-            </p>
-          </div>
+          <h1 className="text-xl font-bold tracking-tight" style={{ color: NAVY }}>
+            Brain Pro
+          </h1>
+          <p className="mt-2 text-sm text-gray-500">新規登録</p>
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-400">
-          © ai-data-flow — IPLoT Methodology Platform
+        <form onSubmit={onSubmit} className="space-y-4">
+          {error && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="name" className="text-gray-700 text-sm">
+              お名前
+            </Label>
+            <Input
+              id="name"
+              name="name"
+              type="text"
+              required
+              autoFocus
+              placeholder="山田 太郎"
+              className="bg-white border-gray-300 text-gray-900"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="email" className="text-gray-700 text-sm">
+              メールアドレス
+            </Label>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              required
+              placeholder="you@example.com"
+              className="bg-white border-gray-300 text-gray-900"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="password" className="text-gray-700 text-sm">
+              パスワード
+            </Label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              required
+              minLength={6}
+              placeholder="6文字以上"
+              className="bg-white border-gray-300 text-gray-900"
+            />
+          </div>
+
+          <Button
+            type="submit"
+            disabled={isLoading}
+            className="w-full rounded-full font-bold text-white hover:opacity-90"
+            style={{ backgroundColor: NAVY }}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                登録中...
+              </>
+            ) : (
+              'アカウントを作成'
+            )}
+          </Button>
+        </form>
+
+        <p className="mt-6 text-center text-sm text-gray-500">
+          すでにアカウントをお持ちの方は{' '}
+          <Link href="/login" className="font-medium" style={{ color: '#2563eb' }}>
+            ログイン
+          </Link>
         </p>
       </div>
     </div>
