@@ -29,6 +29,7 @@ import {
   type ConstraintMaster,
   type SubProjectMaster,
 } from '@/lib/masters';
+import { SubProjectPicker } from '@/components/ui/sub-project-picker';
 
 // カテゴリ入力のプレースホルダ例（自由文字列なので候補を datalist で補助する）。
 const CATEGORY_EXAMPLES = ['法令', '社内規定', '技術', '予算'];
@@ -508,19 +509,13 @@ function ConstraintRow({
         />
       </td>
       <td className="px-3 py-2">
-        <select
+        {/* 共通の領域ピッカー（ツリー＋検索）。クリアで '' → null 保存。 */}
+        <SubProjectPicker
+          subProjects={subProjects}
           value={constraint.subProjectId ?? ''}
-          onChange={(e) => void saveSubProject(e.target.value)}
-          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-          aria-label="領域"
-        >
-          <option value="">（領域なし）</option>
-          {subProjects.map((sp) => (
-            <option key={sp.id} value={sp.id}>
-              {sp.name}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => void saveSubProject(v)}
+          placeholder="領域を選択"
+        />
       </td>
       <td className="px-2 py-2 text-center">
         <button

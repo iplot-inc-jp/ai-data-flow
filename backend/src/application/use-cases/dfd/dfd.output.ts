@@ -40,6 +40,8 @@ export interface DfdDiagramOutput {
   updatedAt: string;
   nodes: DfdNodeOutput[];
   flows: DfdFlowOutput[];
+  /** kind=DATA_STORE かつ dataObjectId=null のノード数（統合バナー用） */
+  unlinkedDataStoreCount: number;
 }
 
 export function toDfdNodeOutput(n: DfdNode): DfdNodeOutput {
@@ -86,5 +88,8 @@ export function toDfdDiagramOutput(graph: DfdGraph): DfdDiagramOutput {
     updatedAt: d.updatedAt.toISOString(),
     nodes: graph.nodes.map(toDfdNodeOutput),
     flows: graph.flows.map(toDfdFlowOutput),
+    unlinkedDataStoreCount: graph.nodes.filter(
+      (n) => n.kind === 'DATA_STORE' && n.dataObjectId === null,
+    ).length,
   };
 }

@@ -35,8 +35,16 @@ type Project = {
   name: string
   description?: string
   organizationId: string
-  createdAt: string
-  updatedAt: string
+  // 旧 API レスポンスには含まれないことがあるため optional にして欠損を許容する
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** 日付文字列を epoch ms に変換（欠損・不正値は 0 = 最古扱い） */
+const toTime = (dateString: string | undefined): number => {
+  if (!dateString) return 0
+  const t = new Date(dateString).getTime()
+  return Number.isNaN(t) ? 0 : t
 }
 
 export default function DashboardPage() {
@@ -80,7 +88,7 @@ export default function DashboardPage() {
               allProjects.push(...projData)
             }
           }
-          allProjects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+          allProjects.sort((a, b) => toTime(b.updatedAt) - toTime(a.updatedAt))
           setProjects(allProjects)
         }
       } catch (err) {
@@ -93,11 +101,14 @@ export default function DashboardPage() {
     fetchData()
   }, [getHeaders])
 
-  const formatDate = (dateString: string) => {
+  // 欠損・不正な日付は「-」を返す（Invalid Date を表示しない）
+  const formatDate = (dateString: string | undefined) => {
+    if (!dateString) return '-'
     const date = new Date(dateString)
-    return date.toLocaleDateString('ja-JP', { 
-      year: 'numeric', 
-      month: 'short', 
+    if (Number.isNaN(date.getTime())) return '-'
+    return date.toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'

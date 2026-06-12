@@ -18,6 +18,8 @@ export interface ProjectDto {
   name: string;
   slug: string;
   description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 /**
@@ -54,6 +56,8 @@ export class GetProjectsUseCase {
       name: project.name,
       slug: project.slug,
       description: project.description,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
     }));
   }
 }

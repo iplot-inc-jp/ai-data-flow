@@ -10,6 +10,8 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { SubProjectPicker } from '@/components/ui/sub-project-picker';
+import type { SubProjectMaster } from '@/lib/masters';
 import {
   Dialog,
   DialogContent,
@@ -310,6 +312,20 @@ export default function ProjectFlowsPage() {
     return out;
   }, [subProjectTree]);
 
+  // SubProjectPicker（共通の領域ピッカー）用に SubProjectMaster 形へ正規化。
+  const pickerSubProjects = useMemo<SubProjectMaster[]>(
+    () =>
+      subProjects.map((s) => ({
+        id: s.id,
+        projectId: s.projectId,
+        parentId: s.parentId ?? null,
+        name: s.name,
+        description: s.description ?? null,
+        order: s.order,
+      })),
+    [subProjects]
+  );
+
   // 指定領域 + その子孫のID集合（領域選択フィルタ用）
   const descendantIds = useCallback(
     (subProjectId: string): Set<string> => {
@@ -416,9 +432,6 @@ export default function ProjectFlowsPage() {
     });
   };
 
-  const selectClass =
-    'rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400';
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[400px]">
@@ -520,22 +533,20 @@ export default function ProjectFlowsPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label htmlFor="flow-domain" className="text-gray-700">領域</Label>
+                    <Label className="text-gray-700">領域</Label>
                     <HelpTooltip text="フローをまとめる業務単位の領域です。受注管理・出荷管理など、関連するフローを束ねて整理できます。領域→サブ領域の入れ子も使えます（領域なしのままでもOK）。" />
                   </div>
-                  <select
-                    id="flow-domain"
-                    value={newFlow.subProjectId}
-                    onChange={(e) => setNewFlow({ ...newFlow, subProjectId: e.target.value })}
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  >
-                    <option value={UNASSIGNED}>領域なし</option>
-                    {flatSubProjects.map((node) => (
-                      <option key={node.subProject.id} value={node.subProject.id}>
-                        {`${'　'.repeat(node.depth)}${node.subProject.name}`}
-                      </option>
-                    ))}
-                  </select>
+                  {/* 共通の領域ピッカー（ツリー＋検索）。クリアで領域なし（UNASSIGNED）に戻す。 */}
+                  <div>
+                    <SubProjectPicker
+                      subProjects={pickerSubProjects}
+                      value={newFlow.subProjectId === UNASSIGNED ? '' : newFlow.subProjectId}
+                      onChange={(v) =>
+                        setNewFlow({ ...newFlow, subProjectId: v === '' ? UNASSIGNED : v })
+                      }
+                      placeholder="領域を選択"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
@@ -903,20 +914,19 @@ export default function ProjectFlowsPage() {
                                   <span className="text-xs text-gray-400 whitespace-nowrap w-20">
                                     領域
                                   </span>
-                                  <select
-                                    value={flow.subProjectId ?? UNASSIGNED}
-                                    onChange={(e) =>
-                                      handleAssignSubProject(flow.id, e.target.value)
+                                  {/* 共通の領域ピッカー（ツリー＋検索）。クリアで領域なし（UNASSIGNED→null）に戻す。 */}
+                                  <SubProjectPicker
+                                    subProjects={pickerSubProjects}
+                                    value={flow.subProjectId ?? ''}
+                                    onChange={(v) =>
+                                      handleAssignSubProject(
+                                        flow.id,
+                                        v === '' ? UNASSIGNED : v
+                                      )
                                     }
-                                    className={`${selectClass} flex-1`}
-                                  >
-                                    <option value={UNASSIGNED}>領域なし</option>
-                                    {flatSubProjects.map((node) => (
-                                      <option key={node.subProject.id} value={node.subProject.id}>
-                                        {`${'　'.repeat(node.depth)}${node.subProject.name}`}
-                                      </option>
-                                    ))}
-                                  </select>
+                                    placeholder="領域を選択"
+                                    className="flex-1"
+                                  />
                                 </div>
                               </div>
                             </Card>

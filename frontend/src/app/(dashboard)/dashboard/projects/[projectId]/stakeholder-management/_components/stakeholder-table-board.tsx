@@ -55,6 +55,7 @@ import {
   setDomainAssignments,
 } from '@/lib/stakeholders';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
+import { SubProjectPicker } from '@/components/ui/sub-project-picker';
 import { listRisks, type Risk } from '@/lib/risks';
 import { useTableSort } from '@/lib/use-table-sort';
 import { SortableTh } from '@/components/ui/sortable-th';
@@ -263,16 +264,6 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
 
   // 領域の入れ子表示（循環ガード付きツリー順）
   const domainTreeRows = useMemo(() => orderDomainTree(domains), [domains]);
-
-  // ロールの「領域」select 用の選択肢（親→子をインデント。循環は orderDomainTree が防ぐ）
-  const domainOptions = useMemo(
-    () =>
-      domainTreeRows.map(({ row, depth }) => ({
-        id: row.id,
-        label: depth > 0 ? `${'　'.repeat(depth - 1)}　└ ${row.name}` : row.name,
-      })),
-    [domainTreeRows],
-  );
 
   // ヘッダークリックソート（昇順→降順→解除。解除時は従来の手動順＝API の並びに戻る）。
   // 全体を安定ソートしてから外部/内部に分けるため、並び替えは各セクション内に閉じる
@@ -1021,30 +1012,26 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
-                        {/* 領域（SubProject）。変更で即保存（PATCH /api/roles/:id） */}
-                        <label className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                        {/* 領域（SubProject）。変更で即保存（PATCH /api/roles/:id）。クリアで未設定（NONE→null）。 */}
+                        <span className="flex items-center gap-1 text-[11px] font-medium text-gray-500">
                           領域
-                          <select
+                          <SubProjectPicker
+                            subProjects={domains}
                             value={
                               role.subProjectId &&
                               domainById.has(role.subProjectId)
                                 ? role.subProjectId
-                                : NONE
+                                : ''
                             }
-                            onChange={(e) =>
-                              handleRoleDomainChange(role.id, e.target.value)
+                            onChange={(v) =>
+                              handleRoleDomainChange(
+                                role.id,
+                                v === '' ? NONE : v,
+                              )
                             }
-                            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                            aria-label={`${role.name} の領域`}
-                          >
-                            <option value={NONE}>（未設定）</option>
-                            {domainOptions.map((o) => (
-                              <option key={o.id} value={o.id}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                            placeholder="領域を選択"
+                          />
+                        </span>
                         <button
                           type="button"
                           onClick={() => handleSaveRole(role)}

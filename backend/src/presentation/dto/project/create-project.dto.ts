@@ -45,5 +45,11 @@ export class ProjectResponseDto {
 
   @ApiProperty({ example: 'ECサイトの業務フロー管理', nullable: true })
   description: string | null;
+
+  @ApiProperty({ example: '2026-01-01T00:00:00.000Z', description: '作成日時' })
+  createdAt: Date;
+
+  @ApiProperty({ example: '2026-01-01T00:00:00.000Z', description: '最終更新日時' })
+  updatedAt: Date;
 }
 

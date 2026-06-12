@@ -24,6 +24,37 @@ export interface DfdDiagram {
   id: string; projectId: string; flowId: string | null;
   title: string | null; docId: string | null; authorName: string | null; approverName: string | null;
   updatedAt: string; nodes: DfdNode[]; flows: DfdFlow[];
+  /** kind=DATA_STORE かつ dataObjectId=null のノード数（オブジェクト統合バナー用）。 */
+  unlinkedDataStoreCount: number;
+}
+
+/**
+ * DFDに貼る注釈（付箋・コメント）。フロー図の FlowAnnotation と同形。
+ * GET/POST /dfd-diagrams/:diagramId/annotations・PATCH/DELETE /dfd-annotations/:id に対応。
+ */
+export type DfdAnnotationKind = 'STICKY' | 'COMMENT' | 'ICON' | 'SCOPE';
+export interface DfdAnnotation {
+  id: string;
+  /**
+   * STICKY=付箋（黄色）, COMMENT=コメント（白＋吹き出し風）, ICON=アイコン注釈（透明背景）,
+   * SCOPE=スコープ囲み（領域を点線/背景色つき矩形で囲う）。
+   */
+  kind: DfdAnnotationKind;
+  text: string;
+  positionX: number;
+  positionY: number;
+  /** 描画幅（手動リサイズの永続化）。未設定なら既定サイズ。 */
+  width?: number | null;
+  /** 描画高さ（手動リサイズの永続化）。未設定なら既定サイズ。 */
+  height?: number | null;
+  color?: string | null;
+  /** kind==='ICON' のとき表示する lucide アイコン名。 */
+  icon?: string | null;
+  /** kind==='SCOPE' のときの枠線スタイル（'dashed' | 'solid'）。未設定は dashed 扱い。 */
+  borderStyle?: 'dashed' | 'solid' | null;
+  /** kind==='SCOPE' のときの背景塗りの不透明度（0〜1）。未設定は薄め既定。 */
+  fillOpacity?: number | null;
+  order: number;
 }
 
 /** FUNCTIONノードに levelPrefix-連番 を採番（既存numberは保持） */
@@ -144,6 +175,32 @@ export const dfdApi = {
   async savePositions(diagramId: string, positions: { id: string; positionX: number; positionY: number }[]): Promise<void> {
     await fetch(`${API_URL}/api/dfd-diagrams/${diagramId}/positions`, { method: 'PUT', headers: headers(), body: JSON.stringify({ positions }) });
   },
+
+  // ===== 注釈（付箋・コメント） =====
+
+  /** GET /api/dfd-diagrams/:diagramId/annotations — DFDの注釈一覧 */
+  async listAnnotations(diagramId: string): Promise<DfdAnnotation[]> {
+    const res = await fetch(`${API_URL}/api/dfd-diagrams/${diagramId}/annotations`, { headers: headers() });
+    if (!res.ok) throw new Error('注釈の取得に失敗しました');
+    return res.json();
+  },
+  /** POST /api/dfd-diagrams/:diagramId/annotations — 注釈を作成 */
+  async addAnnotation(diagramId: string, body: Partial<Omit<DfdAnnotation, 'id'>>): Promise<DfdAnnotation> {
+    const res = await fetch(`${API_URL}/api/dfd-diagrams/${diagramId}/annotations`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error('注釈の作成に失敗しました');
+    return res.json();
+  },
+  /** PATCH /api/dfd-annotations/:id — 注釈を部分更新 */
+  async updateAnnotation(id: string, patch: Partial<Omit<DfdAnnotation, 'id'>>): Promise<DfdAnnotation> {
+    const res = await fetch(`${API_URL}/api/dfd-annotations/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(patch) });
+    if (!res.ok) throw new Error('注釈の更新に失敗しました');
+    return res.json();
+  },
+  /** DELETE /api/dfd-annotations/:id — 注釈を削除 */
+  async deleteAnnotation(id: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/dfd-annotations/${id}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) throw new Error('注釈の削除に失敗しました');
+  },
 };
 
 // ========== 情報種別（InformationType）+ 具体帳票（Attachment 流用） ==========
@@ -184,6 +241,10 @@ export interface InformationTypeAttachment {
   informationTypeId: string | null;
   kind: 'IMAGE' | 'PDF' | 'FILE';
   filename: string;
+  /** 表示名（編集可能。null = filename を表示） */
+  displayName: string | null;
+  /** フォルダ分け（自由入力のフォルダ名。null = 未分類） */
+  folder: string | null;
   mimeType: string;
   url: string;
   size: number;
@@ -221,6 +282,15 @@ export const informationTypeApi = {
     form.append('file', file);
     const res = await fetch(`${API_URL}/api/information-types/${informationTypeId}/attachments`, { method: 'POST', headers: authHeader(), body: form });
     if (!res.ok) throw new Error('具体帳票のアップロードに失敗しました');
+    return res.json();
+  },
+  /** PUT /api/attachments/:id — 表示名・フォルダ等のメタ情報を更新（空文字はサーバ側で null に正規化） */
+  async updateAttachment(
+    attachmentId: string,
+    patch: { displayName?: string | null; folder?: string | null; caption?: string; pageRange?: string; order?: number },
+  ): Promise<InformationTypeAttachment> {
+    const res = await fetch(`${API_URL}/api/attachments/${attachmentId}`, { method: 'PUT', headers: headers(), body: JSON.stringify(patch) });
+    if (!res.ok) throw new Error('具体帳票の更新に失敗しました');
     return res.json();
   },
   async deleteAttachment(attachmentId: string): Promise<void> {

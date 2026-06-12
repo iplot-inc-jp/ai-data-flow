@@ -32,6 +32,8 @@ interface NodeRow {
   positionY: number;
   createdAt: Date;
   updatedAt: Date;
+  /** 統合: リンク済み DATA_STORE の label 導出用（include で取得） */
+  dataObject?: { name: string } | null;
 }
 
 interface FlowRow {
@@ -70,11 +72,17 @@ export class DfdRepositoryImpl implements IDfdRepository {
   }
 
   private toNode(r: NodeRow): DfdNode {
+    // データストア＝オブジェクト統合: リンク済み DATA_STORE の label は
+    // dataObject.name から導出する（オブジェクト側の改名が DFD に即反映される）
+    const label =
+      r.kind === 'DATA_STORE' && r.dataObjectId != null && r.dataObject
+        ? r.dataObject.name
+        : r.label;
     return DfdNode.reconstruct({
       id: r.id,
       diagramId: r.diagramId,
       kind: r.kind as DfdNodeKindValue,
-      label: r.label,
+      label,
       number: r.number,
       refFlowId: r.refFlowId,
       refNodeId: r.refNodeId,
@@ -125,7 +133,10 @@ export class DfdRepositoryImpl implements IDfdRepository {
     const diagram = await this.prisma.dfdDiagram.findFirst({
       where: { projectId, flowId },
       include: {
-        nodes: { orderBy: { createdAt: 'asc' } },
+        nodes: {
+          orderBy: { createdAt: 'asc' },
+          include: { dataObject: { select: { name: true } } },
+        },
         flows: { orderBy: { order: 'asc' } },
       },
     });
@@ -137,7 +148,10 @@ export class DfdRepositoryImpl implements IDfdRepository {
     const diagram = await this.prisma.dfdDiagram.findUnique({
       where: { id: diagramId },
       include: {
-        nodes: { orderBy: { createdAt: 'asc' } },
+        nodes: {
+          orderBy: { createdAt: 'asc' },
+          include: { dataObject: { select: { name: true } } },
+        },
         flows: { orderBy: { order: 'asc' } },
       },
     });
@@ -224,7 +238,10 @@ export class DfdRepositoryImpl implements IDfdRepository {
   }
 
   async findNodeById(id: string): Promise<DfdNode | null> {
-    const r = await this.prisma.dfdNode.findUnique({ where: { id } });
+    const r = await this.prisma.dfdNode.findUnique({
+      where: { id },
+      include: { dataObject: { select: { name: true } } },
+    });
     return r ? this.toNode(r) : null;
   }
 

@@ -20,22 +20,21 @@ import {
   ChevronDown,
   ChevronRight,
   Paperclip,
-  FileText,
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { FileDropZone } from '@/components/ui/file-drop-zone';
 import {
   informationTypeApi,
   INFORMATION_CATEGORY_LABELS,
   INFORMATION_CATEGORY_OPTIONS,
   type InformationType,
   type InformationCategory,
-  type InformationTypeAttachment,
 } from '@/lib/dfd';
+import { IoAttachmentsPanel } from './_components/IoAttachmentsPanel';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
+import { SubProjectPicker } from '@/components/ui/sub-project-picker';
 import { tablesApi, type Table } from '@/lib/api';
 
 /** 分類バッジ（情報/物体/帳票）。InformationTypeRegistry と同じ配色。 */
@@ -81,6 +80,23 @@ export default function IoTypesPage() {
       return next;
     });
   }, []);
+
+  // プロジェクト内で観測した添付フォルダ名（専用マスタは持たず既存値から候補を構成）。
+  // 各行の添付一覧取得・フォルダ作成のたびにマージされる。
+  const [knownFolders, setKnownFolders] = useState<Set<string>>(new Set());
+  const reportFolders = useCallback((names: string[]) => {
+    setKnownFolders((prev) => {
+      const fresh = names.filter((n) => n && !prev.has(n));
+      if (fresh.length === 0) return prev;
+      const next = new Set(prev);
+      for (const n of fresh) next.add(n);
+      return next;
+    });
+  }, []);
+  const folderCandidates = useMemo(
+    () => Array.from(knownFolders).sort((a, b) => a.localeCompare(b, 'ja')),
+    [knownFolders],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -151,6 +167,7 @@ export default function IoTypesPage() {
               '行末のゴミ箱で削除します（紐づく具体帳票も削除されます）。',
               '「紐づくカタログ表」は読み取り表示です。紐付けは「データカタログ」ページの各表で設定します。',
               '行頭の「>」（📎件数）をクリックすると展開し、具体データ（PDF・画像）をアップロード・閲覧・削除できます。',
+              '具体データはフォルダごとに整理できます。鉛筆アイコンで表示名を編集、select でフォルダ移動（「＋ 新しいフォルダ…」で新規作成）、アップロード時も振り分け先フォルダを指定できます。',
             ]}
           />
         }
@@ -221,6 +238,8 @@ export default function IoTypesPage() {
                   expanded={expandedIds.has(it.id)}
                   onToggle={() => toggleExpanded(it.id)}
                   onChanged={load}
+                  folderCandidates={folderCandidates}
+                  onFoldersSeen={reportFolders}
                 />
               ))}
             </ul>
@@ -231,11 +250,6 @@ export default function IoTypesPage() {
   );
 }
 
-/** 添付が画像かどうか（サムネイル表示するか）。 */
-function isImageAttachment(a: InformationTypeAttachment): boolean {
-  return a.kind === 'IMAGE' || a.mimeType.startsWith('image/');
-}
-
 function IoTypeRow({
   ioType,
   subProjects,
@@ -243,6 +257,8 @@ function IoTypeRow({
   expanded,
   onToggle,
   onChanged,
+  folderCandidates,
+  onFoldersSeen,
 }: {
   ioType: InformationType;
   subProjects: SubProjectMaster[];
@@ -250,6 +266,8 @@ function IoTypeRow({
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => Promise<void> | void;
+  folderCandidates: string[];
+  onFoldersSeen: (folders: string[]) => void;
 }) {
   const [name, setName] = useState(ioType.name);
   const [category, setCategory] = useState<InformationCategory>(ioType.category);
@@ -258,12 +276,7 @@ function IoTypeRow({
   const [busy, setBusy] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  // 具体データ（添付ファイル）。件数バッジは attachmentCount を初期値に、取得後は実件数で更新。
-  const [attachments, setAttachments] = useState<InformationTypeAttachment[]>([]);
-  const [attLoaded, setAttLoaded] = useState(false);
-  const [attLoading, setAttLoading] = useState(false);
-  const [attError, setAttError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  // 具体データ（添付）の件数バッジ。attachmentCount を初期値に、パネル取得後は実件数で更新。
   const [attachmentCount, setAttachmentCount] = useState(ioType.attachmentCount);
 
   // 親から最新値が来たら表示を同期（再読込後など）
@@ -277,64 +290,6 @@ function IoTypeRow({
   useEffect(() => {
     setAttachmentCount(ioType.attachmentCount);
   }, [ioType.attachmentCount]);
-
-  const loadAttachments = useCallback(async () => {
-    setAttLoading(true);
-    setAttError(null);
-    try {
-      const list = await informationTypeApi.listAttachments(ioType.id);
-      setAttachments(list);
-      setAttachmentCount(list.length);
-      setAttLoaded(true);
-    } catch (err) {
-      setAttError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setAttLoading(false);
-    }
-  }, [ioType.id]);
-
-  // 展開時に一覧を取得（初回のみ。アップロード/削除後は handlers 側で再取得）
-  useEffect(() => {
-    if (expanded && !attLoaded) void loadAttachments();
-  }, [expanded, attLoaded, loadAttachments]);
-
-  const handleUpload = useCallback(
-    async (files: File[]) => {
-      if (files.length === 0) return;
-      setUploading(true);
-      setAttError(null);
-      const failed: string[] = [];
-      // 逐次アップロード（multipart）。失敗したものはまとめてインライン表示。
-      for (const file of files) {
-        try {
-          await informationTypeApi.upload(ioType.id, file);
-        } catch {
-          failed.push(file.name);
-        }
-      }
-      // loadAttachments は attError をクリアするので、失敗メッセージは再取得後に設定する
-      await loadAttachments();
-      if (failed.length > 0) {
-        setAttError(`アップロードに失敗しました: ${failed.join('、')}`);
-      }
-      setUploading(false);
-    },
-    [ioType.id, loadAttachments],
-  );
-
-  const handleDeleteAttachment = useCallback(
-    async (att: InformationTypeAttachment) => {
-      if (!confirm(`添付「${att.filename}」を削除しますか？`)) return;
-      setAttError(null);
-      try {
-        await informationTypeApi.deleteAttachment(att.id);
-        await loadAttachments();
-      } catch (err) {
-        setAttError(err instanceof Error ? err.message : 'Unknown error');
-      }
-    },
-    [loadAttachments],
-  );
 
   /** 指定パッチで保存。変更が無ければ何もしない。 */
   const save = useCallback(
@@ -440,19 +395,13 @@ function IoTypeRow({
                 </option>
               ))}
             </select>
-            <select
+            {/* 領域（任意）。共通の領域ピッカー（ツリー＋検索）。クリアで '' → null 保存。 */}
+            <SubProjectPicker
+              subProjects={subProjects}
               value={subProjectId ?? ''}
-              onChange={(e) => handleSubProjectChange(e.target.value || null)}
-              className="max-w-[10rem] rounded border border-gray-300 bg-white px-1.5 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              title="領域（任意）"
-            >
-              <option value="">領域なし</option>
-              {subProjects.map((sp) => (
-                <option key={sp.id} value={sp.id}>
-                  {sp.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => handleSubProjectChange(v || null)}
+              placeholder="領域を選択"
+            />
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />}
             <button
               type="button"
@@ -504,108 +453,15 @@ function IoTypeRow({
         </div>
       </div>
 
-      {/* アコーディオン: 具体データ（PDF・画像などの添付）。行の下に全幅で表示。 */}
-      {expanded && (
-        <div className="mt-2 space-y-2 rounded border border-gray-100 bg-gray-50/60 p-3">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500">
-              <Paperclip className="h-3 w-3" />
-              具体データ（PDF・画像など）
-            </span>
-          </div>
-
-          {/* ドラッグ&ドロップ（クリックでファイル選択も可）。複数可・逐次アップロード */}
-          <FileDropZone
-            onFiles={(files) => void handleUpload(files)}
-            accept="image/*,.pdf"
-            busy={uploading}
-            className="py-2.5"
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <Plus className="h-3.5 w-3.5 text-gray-400" />
-              PDF・画像をドラッグ＆ドロップ、またはクリックして選択
-            </span>
-          </FileDropZone>
-
-          {attError && <p className="text-[11px] text-red-600">{attError}</p>}
-
-          {attLoading ? (
-            <div className="flex items-center justify-center py-3">
-              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-            </div>
-          ) : attachments.length === 0 ? (
-            <p className="py-2 text-xs text-gray-400">
-              まだ具体データがありません。請求書のPDFや帳票のスクリーンショットなどを添付できます
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {/* 画像: サムネイルグリッド（クリックで原寸を新タブ表示） */}
-              {attachments.some(isImageAttachment) && (
-                <div className="flex flex-wrap gap-2">
-                  {attachments.filter(isImageAttachment).map((a) => (
-                    <div key={a.id} className="group relative">
-                      <a
-                        href={informationTypeApi.fileUrl(a.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={`${a.filename}（クリックで原寸表示）`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={informationTypeApi.fileUrl(a.id)}
-                          alt={a.filename}
-                          className="h-20 w-20 rounded border border-gray-200 bg-white object-cover"
-                        />
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => void handleDeleteAttachment(a)}
-                        className="absolute -right-1.5 -top-1.5 hidden rounded-full border border-gray-200 bg-white p-0.5 text-gray-400 shadow-sm hover:text-red-600 group-hover:block"
-                        title="この添付を削除"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* PDF / その他: ファイル名リンク（新タブ） */}
-              {attachments.some((a) => !isImageAttachment(a)) && (
-                <ul className="space-y-1">
-                  {attachments
-                    .filter((a) => !isImageAttachment(a))
-                    .map((a) => (
-                      <li
-                        key={a.id}
-                        className="flex items-center gap-2 rounded border border-gray-100 bg-white px-2 py-1 text-xs"
-                      >
-                        <FileText className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                        <a
-                          href={informationTypeApi.fileUrl(a.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="min-w-0 flex-1 truncate text-blue-600 hover:underline"
-                          title={`${a.filename}（新タブで開く）`}
-                        >
-                          {a.filename}
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteAttachment(a)}
-                          className="shrink-0 text-gray-400 hover:text-red-600"
-                          title="この添付を削除"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </li>
-                    ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {/* アコーディオン: 具体データ（PDF・画像などの添付）。フォルダ分け・名前編集はパネル側。
+          collapsed 中も mount したまま（取得済み一覧を保持し、再展開時の再取得を避ける） */}
+      <IoAttachmentsPanel
+        informationTypeId={ioType.id}
+        expanded={expanded}
+        folderCandidates={folderCandidates}
+        onFoldersSeen={onFoldersSeen}
+        onCountChange={setAttachmentCount}
+      />
     </li>
   );
 }

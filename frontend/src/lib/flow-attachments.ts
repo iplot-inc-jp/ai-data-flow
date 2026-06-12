@@ -7,6 +7,10 @@ export interface FlowAttachment {
   flowId: string | null;
   kind: 'IMAGE' | 'PDF' | 'FILE';
   filename: string;
+  /** 表示名（編集可能。null = filename を表示） */
+  displayName: string | null;
+  /** フォルダ分け（自由入力のフォルダ名。null = 未分類） */
+  folder: string | null;
   mimeType: string;
   url: string;
   size: number;
