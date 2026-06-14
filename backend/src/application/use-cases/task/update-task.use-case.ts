@@ -19,6 +19,7 @@ import {
 import { TaskOutput, toTaskOutput } from './task.output';
 import { rollupAncestorDates, isSameDate } from './rollup-parent-dates';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { TaskWebhookService } from '../../../infrastructure/services/task-webhook.service';
 
 export interface UpdateTaskInput {
   userId: string;
@@ -62,6 +63,7 @@ export class UpdateTaskUseCase {
     @Inject(ISSUE_TREE_REPOSITORY)
     private readonly issueTreeRepository: IIssueTreeRepository,
     private readonly projectAccess: ProjectAccessService,
+    private readonly taskWebhook: TaskWebhookService,
   ) {}
 
   async execute(input: UpdateTaskInput): Promise<TaskOutput> {
@@ -112,6 +114,8 @@ export class UpdateTaskUseCase {
     const oldParentId = task.parentId;
     const oldStartDate = task.startDate;
     const oldDueDate = task.dueDate;
+    // ステータス変更検知用（Webhook の task.status_changed 発火判定）に旧ステータスを保持
+    const oldStatus = task.status;
 
     task.update({
       parentId: input.parentId,
@@ -154,7 +158,26 @@ export class UpdateTaskUseCase {
     // 紐付けノードのラベル/種別を出力に含めるため再読込
     // （join 済み + ロールアップで自身の日付が揃え直された場合も反映）
     const saved = await this.taskRepository.findById(task.id);
-    return toTaskOutput(saved ?? task);
+    const output = toTaskOutput(saved ?? task);
+
+    // Webhook 配信。best-effort で本処理を巻き込まない。
+    // 常に task.updated を発火し、旧≠新でステータスが変わった場合は task.status_changed も追加発火する。
+    await this.taskWebhook.enqueueForEvent(
+      task.projectId,
+      'task.updated',
+      output,
+      input.userId,
+    );
+    if (output.status !== oldStatus) {
+      await this.taskWebhook.enqueueForEvent(
+        task.projectId,
+        'task.status_changed',
+        output,
+        input.userId,
+      );
+    }
+
+    return output;
   }
 
   /** 指定ノードが当該プロジェクトのイシューツリーに属することを検証 */

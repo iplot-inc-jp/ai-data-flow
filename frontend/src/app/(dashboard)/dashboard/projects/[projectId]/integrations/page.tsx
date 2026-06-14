@@ -31,6 +31,7 @@ import { SortableTh } from '@/components/ui/sortable-th';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
 import { BatchJobsAdminPanel } from '@/components/batch-jobs-admin-panel';
+import { WebhooksAdminPanel } from '@/components/webhooks-admin-panel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -889,6 +890,9 @@ export default function IntegrationsPage() {
         </div>
       )}
       </EditGate>
+
+      {/* ===== タスク Webhook（外部送信・管理者限定: CRUD/テスト送信） ===== */}
+      <WebhooksAdminPanel projectId={projectId} />
 
       {/* ===== バックグラウンド処理 / バッチ管理（管理者限定: 試行履歴・再実行） ===== */}
       <BatchJobsAdminPanel projectId={projectId} />

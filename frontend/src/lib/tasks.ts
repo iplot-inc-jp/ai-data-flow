@@ -66,6 +66,19 @@ export interface TasksResponse {
   dependencies: TaskDependency[];
 }
 
+/** Backlog CSV 取込のデータ行エラー（1始まりのデータ行番号＋メッセージ）。 */
+export interface ImportBacklogRowError {
+  row: number;
+  message: string;
+}
+
+/** POST /projects/:id/tasks/import-backlog の結果。 */
+export interface ImportBacklogResult {
+  created: number;
+  skipped: number;
+  errors: ImportBacklogRowError[];
+}
+
 /** 作成/更新時に送る入力（id・projectId はパス側で扱うため除外可能） */
 export type TaskInput = Partial<Omit<Task, 'id' | 'projectId'>> & {
   title: string;
@@ -243,6 +256,18 @@ export const tasksApi = {
       headers: authHeaders(),
       body: JSON.stringify(input),
     }).then((r) => handle<Task>(r)),
+
+  /**
+   * POST /api/projects/:projectId/tasks/import-backlog { csv }
+   * Backlog（nulab）の課題エクスポート CSV を取り込む。
+   * 文字コード（UTF-8/SJIS）は frontend 側で UTF-8 文字列に解決してから送る。
+   */
+  importBacklog: (projectId: string, csv: string) =>
+    fetch(`${API_URL}/api/projects/${projectId}/tasks/import-backlog`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ csv }),
+    }).then((r) => handle<ImportBacklogResult>(r)),
 
   /** GET /api/tasks/:id */
   get: (id: string) =>

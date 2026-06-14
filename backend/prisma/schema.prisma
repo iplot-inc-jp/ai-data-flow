@@ -98,6 +98,29 @@ model BackgroundJob {
   @@map("background_jobs")
 }
 
+// Webhook 設定（プロジェクトごとの送信先。ipro-kun 等の外部連携）。
+// 配信自体は BackgroundJob(type=WEBHOOK_DELIVERY) に乗せ、自動リトライ＋試行記録を再利用する。
+model Webhook {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  // 送信先URL（管理画面で設定）
+  targetUrl  String   @map("target_url")
+  // 署名用シークレット（AES-256-GCM 暗号化保存。HMAC-SHA256 署名に使用。レスポンスでは返さない）
+  secretEnc  String?  @map("secret_enc")
+  // 購読イベント（例: ["task.created","task.updated","task.status_changed","task.deleted"]）
+  events     Json
+  active     Boolean  @default(true)
+  // 任意の表示名・補足
+  label      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("webhooks")
+}
+
 // バックグラウンドジョブの「試行」1回ぶんの記録（リトライ回数とエラーを全て残す）。
 model BackgroundJobAttempt {
   id         String              @id @default(uuid())
@@ -218,6 +241,7 @@ model Project {
   kpis                    Kpi[]
   members                 ProjectMember[]
   backgroundJobs          BackgroundJob[]
+  webhooks                Webhook[]
 
   @@unique([organizationId, slug])
   @@map("projects")

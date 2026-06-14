@@ -112,6 +112,7 @@ import {
   DeleteTaskUseCase,
   AddTaskDependencyUseCase,
   RemoveTaskDependencyUseCase,
+  ImportBacklogTasksUseCase,
   // Task Comment
   CreateTaskCommentUseCase,
   GetTaskCommentsUseCase,
@@ -383,6 +384,8 @@ import { SyncService } from './infrastructure/services/sync.service';
 import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.service';
 import { QStashService } from './infrastructure/services/qstash.service';
 import { JobService } from './infrastructure/services/job.service';
+import { TaskWebhookService } from './infrastructure/services/task-webhook.service';
+import { WebhookController } from './presentation/controllers/webhook.controller';
 import {
   JobWorkerController,
   ProjectJobController,
@@ -490,6 +493,8 @@ import {
     JobWorkerController,
     ProjectJobController,
     JobByIdController,
+    // タスク Webhook（outbound: Brain Pro → 外部/ipro-kun）
+    WebhookController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -716,6 +721,7 @@ import {
     DeleteTaskUseCase,
     AddTaskDependencyUseCase,
     RemoveTaskDependencyUseCase,
+    ImportBacklogTasksUseCase,
     // Task Comment
     CreateTaskCommentUseCase,
     GetTaskCommentsUseCase,
@@ -852,6 +858,7 @@ import {
     SyncSchedulerService,
     QStashService,
     JobService,
+    TaskWebhookService,
 
     // ========== Global Guards ==========
     {

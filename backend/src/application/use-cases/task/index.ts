@@ -7,3 +7,4 @@ export * from './update-task.use-case';
 export * from './delete-task.use-case';
 export * from './add-task-dependency.use-case';
 export * from './remove-task-dependency.use-case';
+export * from './import-backlog-tasks.use-case';

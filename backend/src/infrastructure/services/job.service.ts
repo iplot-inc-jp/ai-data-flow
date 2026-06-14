@@ -1,9 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { createHmac, randomUUID } from 'node:crypto';
+import { assertSafeOutboundUrl } from './url-safety';
 import { BackgroundJob, Prisma } from '@prisma/client';
 import { PrismaService } from '../persistence/prisma/prisma.service';
 import { QStashService } from './qstash.service';
 import { CompanyKeyService } from './company-key.service';
 import { ClaudeService } from './claude.service';
+import { CryptoService } from './crypto.service';
 import { ImportMermaidUseCase } from '../../application/use-cases/data-object/import-mermaid.use-case';
 import { GenerateKpisUseCase } from '../../application/use-cases/kpi/generate-kpis.use-case';
 
@@ -32,6 +35,7 @@ export class JobService {
     private readonly qstash: QStashService,
     private readonly companyKey: CompanyKeyService,
     private readonly claude: ClaudeService,
+    private readonly crypto: CryptoService,
     private readonly importMermaid: ImportMermaidUseCase,
     private readonly generateKpis: GenerateKpisUseCase,
   ) {}
@@ -461,9 +465,117 @@ export class JobService {
         return { kind: 'ISSUE_SUGGESTIONS', suggestions };
       }
 
+      // ===== Webhook 配信ジョブ（タスクイベントを外部=ipro-kun 等へ POST） =====
+      case 'WEBHOOK_DELIVERY': {
+        return this.deliverWebhook(payload);
+      }
+
       default:
         throw new Error(`未知のジョブ種別です: ${job.type}`);
     }
+  }
+
+  /**
+   * Webhook 配信本体。payload.webhookId から Webhook を引き、署名付きで HTTP POST する。
+   *
+   * - 非アクティブ/未存在の Webhook は no-op で成功扱い（起票後に無効化された等）。
+   * - secret があれば本文 JSON を HMAC-SHA256 で署名し
+   *   `X-BrainPro-Signature: sha256=<hex>`（＋ X-BrainPro-Event / X-BrainPro-Delivery）を付ける。
+   * - 非2xx / 通信失敗は throw して runJob の自動リトライ（QStash retries / inline）に委ねる。
+   *
+   * 送信 payload は秘匿情報を含めず、{event, deliveryId, occurredAt, projectId, task:{...}} とする。
+   * 返り値は試行記録/結果に残る status/ms 等の軽い情報のみ（秘匿値は含めない）。
+   */
+  private async deliverWebhook(
+    payload: Record<string, unknown>,
+  ): Promise<unknown> {
+    const webhookId = this.requireString(payload.webhookId, 'payload.webhookId');
+    const event = this.requireString(payload.event, 'payload.event');
+
+    const webhook = await this.prisma.webhook.findUnique({
+      where: { id: webhookId },
+    });
+    if (!webhook || !webhook.active) {
+      // 起票後に削除/無効化された Webhook は配信不要。成功扱いで終端する。
+      return { kind: 'WEBHOOK_DELIVERY', skipped: true, webhookId };
+    }
+
+    // 配信ごとの一意ID（受信側の冪等化/重複検出に使える）。
+    const deliveryId = randomUUID();
+    const occurredAt =
+      typeof payload.occurredAt === 'string'
+        ? payload.occurredAt
+        : new Date().toISOString();
+
+    const body = JSON.stringify({
+      event,
+      deliveryId,
+      occurredAt,
+      projectId: webhook.projectId,
+      task: trimTaskForOutbound(payload.task),
+    });
+
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'user-agent': 'brain-pro-webhook/1',
+      'x-brainpro-event': event,
+      'x-brainpro-delivery': deliveryId,
+    };
+
+    // 署名（secret 設定時のみ）。受信側はこの署名で正規配信を検証できる。
+    if (webhook.secretEnc) {
+      try {
+        const secret = this.crypto.decrypt(webhook.secretEnc);
+        const sig = createHmac('sha256', secret).update(body).digest('hex');
+        headers['x-brainpro-signature'] = `sha256=${sig}`;
+      } catch (e) {
+        // 復号失敗（鍵不一致等）。署名なしでは送らず、リトライ余地を残して失敗させる。
+        throw new Error(
+          `Webhook シークレットの復号に失敗しました（webhookId=${webhookId}）: ${(e as Error)?.message ?? String(e)}`,
+        );
+      }
+    }
+
+    // SSRF 対策: 配信直前に宛先 URL を再検証する（DNS 解決後の宛先 IP が
+    // private/loopback/link-local/メタデータでないこと）。実配信直前に引くことで
+    // 設定保存時点との差（DNS リバインディング/TOCTOU）も緩和する。
+    await assertSafeOutboundUrl(webhook.targetUrl);
+
+    // タイムアウト付きで POST（受信側の遅延でジョブを長時間ブロックしない）。
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const startedAt = Date.now();
+    let status: number;
+    try {
+      const res = await fetch(webhook.targetUrl, {
+        method: 'POST',
+        headers,
+        body,
+        signal: controller.signal,
+        // SSRF 対策: 302 等で内部アドレスへ誘導されるのを防ぐためリダイレクトを追従しない。
+        redirect: 'manual',
+      });
+      status = res.status;
+      if (!res.ok) {
+        // 非2xx は失敗。本文の先頭だけ拾って原因の手掛かりを残す（秘匿値は含めない）。
+        const text = await res.text().catch(() => '');
+        throw new Error(
+          `Webhook 配信が非2xxで失敗しました (status=${status}): ${text.slice(0, 500)}`,
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+
+    return {
+      kind: 'WEBHOOK_DELIVERY',
+      webhookId,
+      event,
+      deliveryId,
+      status,
+      ms: Date.now() - startedAt,
+      url: webhook.targetUrl,
+    };
   }
 
   /** 鍵を解決（無ければ分かりやすい error を throw → runJob で FAILED に記録）。 */
@@ -489,4 +601,38 @@ export class JobService {
     }
     return value;
   }
+}
+
+/**
+ * 外部送信用にタスクスナップショットを安全なフィールドだけに絞る。
+ * 秘匿情報は含めない方針なので、業務上必要な公開可能フィールドのみを通す。
+ */
+function trimTaskForOutbound(task: unknown): Record<string, unknown> | null {
+  if (!task || typeof task !== 'object') return null;
+  const t = task as Record<string, unknown>;
+  const ALLOWED = [
+    'id',
+    'projectId',
+    'parentId',
+    'title',
+    'description',
+    'status',
+    'priority',
+    'assigneeName',
+    'assigneeRoleId',
+    'startDate',
+    'dueDate',
+    'estimatedHours',
+    'actualHours',
+    'category',
+    'milestone',
+    'progress',
+    'createdAt',
+    'updatedAt',
+  ] as const;
+  const out: Record<string, unknown> = {};
+  for (const key of ALLOWED) {
+    if (key in t) out[key] = t[key];
+  }
+  return out;
 }

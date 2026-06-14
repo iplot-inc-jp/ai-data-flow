@@ -27,6 +27,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { BacklogImportDialog } from '@/components/backlog-import-dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import {
   DragDropContext,
@@ -42,6 +43,7 @@ import {
   Pencil,
   Flag,
   GanttChartSquare,
+  FileSpreadsheet,
   Search,
   X,
   ListChecks,
@@ -144,6 +146,8 @@ export default function TasksPage() {
 
   // ダイアログ
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Backlog CSV 取込ダイアログ
+  const [importOpen, setImportOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -607,6 +611,17 @@ export default function TasksPage() {
                 WBS/ガント
               </Button>
             </Link>
+            {canEdit && (
+              <Button
+                variant="outline"
+                onClick={() => setImportOpen(true)}
+                className="gap-1.5"
+                title="Backlog（nulab）の課題エクスポート CSV を取り込みます"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Backlogから取込
+              </Button>
+            )}
             {canEdit && (
               <Button
                 onClick={() => openCreate()}
@@ -1284,6 +1299,14 @@ export default function TasksPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Backlog CSV 取込ダイアログ（文字コード対応・結果表示・一覧リフレッシュ） */}
+      <BacklogImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        projectId={projectId}
+        onImported={fetchAll}
+      />
     </div>
   );
 }

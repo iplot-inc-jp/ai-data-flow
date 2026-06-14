@@ -19,6 +19,7 @@ import {
 import { TaskOutput, toTaskOutput } from './task.output';
 import { rollupAncestorDates } from './rollup-parent-dates';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { TaskWebhookService } from '../../../infrastructure/services/task-webhook.service';
 
 export interface CreateTaskInput {
   userId: string;
@@ -60,6 +61,7 @@ export class CreateTaskUseCase {
     @Inject(ISSUE_TREE_REPOSITORY)
     private readonly issueTreeRepository: IIssueTreeRepository,
     private readonly projectAccess: ProjectAccessService,
+    private readonly taskWebhook: TaskWebhookService,
   ) {}
 
   async execute(input: CreateTaskInput): Promise<TaskOutput> {
@@ -130,7 +132,17 @@ export class CreateTaskUseCase {
 
     // 紐付けノードのラベル/種別を出力に含めるため再読込（join 済み）
     const saved = await this.taskRepository.findById(id);
-    return toTaskOutput(saved ?? task);
+    const output = toTaskOutput(saved ?? task);
+
+    // Webhook 配信（task.created）。best-effort で本処理を巻き込まない。
+    await this.taskWebhook.enqueueForEvent(
+      input.projectId,
+      'task.created',
+      output,
+      input.userId,
+    );
+
+    return output;
   }
 
   /** 指定ノードが当該プロジェクトのイシューツリーに属することを検証 */

@@ -50,6 +50,7 @@ const typeMeta: Record<string, string> = {
   AI_MERMAID_FLOW: 'Mermaid → 業務フロー',
   AI_KPI: 'KPI 生成',
   AI_ISSUE_SUGGEST: '課題ノード提案',
+  WEBHOOK_DELIVERY: 'Webhook 配信',
 };
 
 function typeLabel(type: string): string {

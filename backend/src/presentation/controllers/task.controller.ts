@@ -38,6 +38,8 @@ import {
   DeleteTaskUseCase,
   AddTaskDependencyUseCase,
   RemoveTaskDependencyUseCase,
+  ImportBacklogTasksUseCase,
+  ImportBacklogTasksOutput,
   TaskOutput,
   TaskListOutput,
   TaskDependencyOutput,
@@ -335,6 +337,15 @@ class AddDependencyDto {
   predecessorId: string;
 }
 
+class ImportBacklogDto {
+  @ApiProperty({
+    description:
+      'Backlog（nulab）の課題エクスポート CSV テキスト全体。frontend で文字コード（UTF-8/SJIS）を解決し、UTF-8 文字列で送る。',
+  })
+  @IsString()
+  csv: string;
+}
+
 @ApiTags('タスク')
 @ApiBearerAuth()
 @ProjectScopedAccess()
@@ -344,6 +355,7 @@ export class TaskController {
   constructor(
     private readonly getTasksUseCase: GetTasksUseCase,
     private readonly createTaskUseCase: CreateTaskUseCase,
+    private readonly importBacklogTasksUseCase: ImportBacklogTasksUseCase,
   ) {}
 
   @Get()
@@ -403,6 +415,31 @@ export class TaskController {
       milestone: dto.milestone,
       category: dto.category,
       order: dto.order,
+    });
+  }
+
+  @Post('import-backlog')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Backlog（nulab）課題CSVの取り込み（2パスで親課題キー→parentIdを解決）',
+  })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiResponse({
+    status: 201,
+    description: '取り込み完了（created / skipped / errors を返す）',
+  })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
+  async importBacklog(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Body() dto: ImportBacklogDto,
+  ): Promise<ImportBacklogTasksOutput> {
+    return this.importBacklogTasksUseCase.execute({
+      userId: user.id,
+      projectId,
+      csv: dto.csv,
     });
   }
 }
