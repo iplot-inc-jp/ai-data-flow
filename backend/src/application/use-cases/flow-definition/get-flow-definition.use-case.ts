@@ -7,6 +7,7 @@ import {
   EntityNotFoundError, ForbiddenError,
 } from '../../../domain';
 import { FlowDefinitionOutput, toFlowDefinitionOutput } from './flow-definition.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface GetFlowDefinitionInput { userId: string; flowId: string; }
 
@@ -17,6 +18,7 @@ export class GetFlowDefinitionUseCase {
     @Inject(BUSINESS_FLOW_REPOSITORY) private readonly flowRepo: IBusinessFlowRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetFlowDefinitionInput): Promise<FlowDefinitionOutput> {
@@ -27,6 +29,8 @@ export class GetFlowDefinitionUseCase {
     if (!(await this.orgRepo.isMember(project.organizationId, input.userId))) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+    // プロジェクト単位 RBAC: 読取は VIEW 以上（プロジェクト除外ユーザーを弾く）
+    await this.projectAccess.assertProjectAccess(flow.projectId, input.userId, 'view');
     const def = await this.repo.findByFlowId(input.flowId);
     return toFlowDefinitionOutput(input.flowId, def);
   }

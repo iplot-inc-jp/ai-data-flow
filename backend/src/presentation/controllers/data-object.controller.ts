@@ -1,6 +1,7 @@
 import {
   Controller, Get, Post, Patch, Put, Delete, Body, Param, HttpCode, Inject,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import {
@@ -36,6 +37,9 @@ import {
 } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 const CARDINALITIES = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_MANY'];
 const PATH_STYLES = ['straight', 'bezier'];
@@ -164,6 +168,8 @@ class ImportMermaidDto {
 
 @ApiTags('データオブジェクト（オブジェクト関係性マップ・ER図）')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class DataObjectController {
   constructor(
@@ -184,6 +190,7 @@ export class DataObjectController {
     private readonly prisma: PrismaService,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   // ===== 付箋/メモ（DataObjectAnnotation）共通ヘルパー =====
@@ -214,11 +221,25 @@ export class DataObjectController {
     };
   }
 
-  /** 注釈IDから所属プロジェクトを引いてメンバー認可し、行を返す */
-  private async authorizeAnnotation(id: string, userId: string) {
+  /**
+   * 注釈IDから所属プロジェクトを引いてメンバー認可し、行を返す。
+   * 併せてプロジェクト単位 RBAC（VIEW/EDIT）を強制する（既定 view、書込は edit）。
+   */
+  private async authorizeAnnotation(
+    id: string,
+    userId: string,
+    required: 'view' | 'edit' = 'view',
+  ) {
     const row = await this.prisma.dataObjectAnnotation.findUnique({ where: { id } });
     if (!row) throw new EntityNotFoundError('DataObjectAnnotation', id);
-    await authorizeProject(this.projectRepo, this.orgRepo, row.projectId, userId);
+    await authorizeProject(
+      this.projectRepo,
+      this.orgRepo,
+      row.projectId,
+      userId,
+      this.projectAccess,
+      required,
+    );
     return row;
   }
 
@@ -423,7 +444,7 @@ export class DataObjectController {
     @Param('projectId') projectId: string,
     @Body() dto: CreateAnnotationDto,
   ) {
-    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user.id);
+    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user.id, this.projectAccess, 'edit');
     // SCOPE の subProjectId は同一プロジェクトの SubProject か検証
     if (dto.subProjectId) {
       await this.assertSubProjectInProject(projectId, dto.subProjectId);
@@ -456,7 +477,7 @@ export class DataObjectController {
     @Param('id') id: string,
     @Body() dto: UpdateAnnotationDto,
   ) {
-    const row = await this.authorizeAnnotation(id, user.id);
+    const row = await this.authorizeAnnotation(id, user.id, 'edit');
     if (dto.subProjectId) {
       await this.assertSubProjectInProject(row.projectId, dto.subProjectId);
     }
@@ -485,7 +506,7 @@ export class DataObjectController {
   @HttpCode(204)
   @ApiOperation({ summary: '付箋/メモ削除' })
   async removeAnnotation(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.authorizeAnnotation(id, user.id);
+    await this.authorizeAnnotation(id, user.id, 'edit');
     await this.prisma.dataObjectAnnotation.delete({ where: { id } });
   }
 
@@ -497,7 +518,7 @@ export class DataObjectController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    const row = await this.authorizeAnnotation(id, user.id);
+    const row = await this.authorizeAnnotation(id, user.id, 'edit');
     if (row.kind !== 'SCOPE' || !row.subProjectId) {
       throw new BadRequestException(
         'この注釈は領域（SubProject）が設定された SCOPE ではありません',

@@ -96,6 +96,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AiSuggestDialog } from '@/components/issue-trees/ai-suggest-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useReadOnly } from '@/components/read-only-context';
 import { IdeationAssistDialog } from '@/components/issue-trees/ideation-assist-dialog';
 import {
   tasksApi,
@@ -922,6 +923,7 @@ function IssueTreeMindMap() {
   const params = useParams();
   const projectId = params.projectId as string;
   const treeId = params.treeId as string;
+  const { canEdit } = useReadOnly();
 
   const [tree, setTree] = useState<IssueTree | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1130,6 +1132,7 @@ function IssueTreeMindMap() {
   // 選択ノードに対する調査/実行タスクを作成（issueNodeId で紐付け、タイトルをラベルから補完）。
   const createTaskForNode = useCallback(
     async (node: BackendNode) => {
+      if (!canEdit) return;
       const flavor = KIND_TASK_FLAVOR[node.kind];
       if (!flavor) return;
       setCreatingTaskNodeId(node.id);
@@ -1147,7 +1150,7 @@ function IssueTreeMindMap() {
         setCreatingTaskNodeId(null);
       }
     },
-    [projectId, refreshNodeTasks],
+    [projectId, refreshNodeTasks, canEdit],
   );
 
   // ===========================================
@@ -1156,6 +1159,7 @@ function IssueTreeMindMap() {
 
   const addNode = useCallback(
     async (parentId: string | null, kind: IssueNodeKind, label: string) => {
+      if (!canEdit) return;
       if (!tree) return;
       setBusy(true);
       setActionError(null);
@@ -1173,7 +1177,7 @@ function IssueTreeMindMap() {
         setBusy(false);
       }
     },
-    [tree, treeId, getHeaders, fetchTree],
+    [tree, treeId, getHeaders, fetchTree, canEdit],
   );
 
   // 種別連動の追加（カードの＋ボタン / ルート）。kind と既定ラベルは KIND_CONFIG 駆動。
@@ -1230,6 +1234,7 @@ function IssueTreeMindMap() {
       parentId: string | null,
       items: { label: string; kind: IssueNodeKind }[],
     ): Promise<boolean> => {
+      if (!canEdit) return false;
       if (!tree || items.length === 0) return false;
       setBusy(true);
       setActionError(null);
@@ -1252,7 +1257,7 @@ function IssueTreeMindMap() {
         setBusy(false);
       }
     },
-    [tree, treeId, getHeaders, fetchTree],
+    [tree, treeId, getHeaders, fetchTree, canEdit],
   );
 
   const openIdeate = useCallback((parentId: string | null) => {
@@ -1407,6 +1412,7 @@ function IssueTreeMindMap() {
 
   const patchNode = useCallback(
     async (nodeId: string, body: Record<string, unknown>) => {
+      if (!canEdit) return;
       setBusy(true);
       setActionError(null);
       try {
@@ -1423,11 +1429,12 @@ function IssueTreeMindMap() {
         setBusy(false);
       }
     },
-    [treeId, getHeaders, fetchTree],
+    [treeId, getHeaders, fetchTree, canEdit],
   );
 
   const setVerification = useCallback(
     async (nodeId: string, verification: Verification) => {
+      if (!canEdit) return;
       setBusy(true);
       setActionError(null);
       try {
@@ -1447,11 +1454,12 @@ function IssueTreeMindMap() {
         setBusy(false);
       }
     },
-    [treeId, getHeaders, fetchTree],
+    [treeId, getHeaders, fetchTree, canEdit],
   );
 
   const deleteNode = useCallback(
     async (nodeId: string) => {
+      if (!canEdit) return;
       if (!window.confirm('このノードと配下の子ノードを削除します。よろしいですか？')) return;
       setBusy(true);
       setActionError(null);
@@ -1469,7 +1477,7 @@ function IssueTreeMindMap() {
         setBusy(false);
       }
     },
-    [treeId, getHeaders, fetchTree],
+    [treeId, getHeaders, fetchTree, canEdit],
   );
 
   // 親リンクを外す（＝子ノードをルート直下へ移す / デタッチ）。
@@ -1477,6 +1485,7 @@ function IssueTreeMindMap() {
   // ノードや配下のサブツリーは消さない（“削除”ではなく“切り離し”）。
   const detachNode = useCallback(
     async (nodeId: string) => {
+      if (!canEdit) return;
       setBusy(true);
       setActionError(null);
       try {
@@ -1494,10 +1503,11 @@ function IssueTreeMindMap() {
         setBusy(false);
       }
     },
-    [treeId, getHeaders, fetchTree],
+    [treeId, getHeaders, fetchTree, canEdit],
   );
 
   const saveName = useCallback(async () => {
+    if (!canEdit) return;
     if (!tree) return;
     setEditingName(false);
     const next = name.trim();
@@ -1520,7 +1530,7 @@ function IssueTreeMindMap() {
     } finally {
       setBusy(false);
     }
-  }, [tree, name, treeId, getHeaders, fetchTree]);
+  }, [tree, name, treeId, getHeaders, fetchTree, canEdit]);
 
   // ===========================================
   // markdown 取り込み（作成時のみ・親→子順に POST）
@@ -1784,6 +1794,7 @@ function IssueTreeMindMap() {
   // 手動配置が無い場合でも computeLayout は spacing を見て再計算されるので、
   // 「広げる/狭める」(spacing 変更)単体でも再レイアウトされる。
   const resetSavedPositions = useCallback(async () => {
+    if (!canEdit) return;
     const nodes = tree?.nodes ?? [];
     const targets = nodes.filter(
       (n) => typeof n.metadata?.x === 'number' || typeof n.metadata?.y === 'number',
@@ -1810,7 +1821,7 @@ function IssueTreeMindMap() {
     } finally {
       setBusy(false);
     }
-  }, [tree, treeId, getHeaders, fetchTree]);
+  }, [tree, treeId, getHeaders, fetchTree, canEdit]);
 
   // 「整形」: 手動配置を破棄して spacing は据え置きのまま自動レイアウトへ戻す。
   const tidyLayout = useCallback(() => {
@@ -2126,7 +2137,7 @@ function IssueTreeMindMap() {
               minZoom={0.2}
               maxZoom={1.5}
               proOptions={{ hideAttribution: true }}
-              nodesDraggable
+              nodesDraggable={canEdit}
               nodesConnectable={false}
               elementsSelectable
               // 矩形範囲選択: 空白(ペーン)を左ドラッグすると矩形で複数ノードを選択。

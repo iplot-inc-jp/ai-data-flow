@@ -11,6 +11,7 @@ import {
   Inject,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import {
@@ -54,6 +55,9 @@ import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.se
 import { ClaudeService } from '../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { v4 as uuid } from 'uuid';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 // DTOs
 class CreateBusinessFlowDto {
@@ -724,6 +728,8 @@ class UpdateFlowAnnotationDto {
 
 @ApiTags('Business Flows')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('business-flows')
 export class BusinessFlowController {
   constructor(
@@ -745,6 +751,7 @@ export class BusinessFlowController {
     private readonly deleteNodeLinkUseCase: DeleteNodeLinkUseCase,
     private readonly createNodeChildFlowUseCase: CreateNodeChildFlowUseCase,
     private readonly getFlowTreeUseCase: GetFlowTreeUseCase,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   @Get('project/:projectId')
@@ -917,7 +924,11 @@ export class BusinessFlowController {
 
   @Post()
   @ApiOperation({ summary: 'フローを作成' })
-  async create(@Body() dto: CreateBusinessFlowDto) {
+  async create(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: CreateBusinessFlowDto,
+  ) {
+    await this.projectAccess.assertProjectAccess(dto.projectId, user.id, 'edit');
     let depth = 0;
 
     if (dto.parentId) {
@@ -947,11 +958,16 @@ export class BusinessFlowController {
 
   @Put(':id')
   @ApiOperation({ summary: 'フローを更新' })
-  async update(@Param('id') id: string, @Body() dto: UpdateBusinessFlowDto) {
+  async update(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateBusinessFlowDto,
+  ) {
     const flow = await this.flowRepository.findById(id);
     if (!flow) {
       return { error: 'Business flow not found' };
     }
+    await this.assertFlowMembership(id, user.id, 'edit');
 
     if (dto.name) flow.updateName(dto.name);
     if (dto.description !== undefined) flow.updateDescription(dto.description);
@@ -968,7 +984,11 @@ export class BusinessFlowController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'フローを削除' })
-  async delete(@Param('id') id: string) {
+  async delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.assertFlowMembership(id, user.id, 'edit');
     await this.flowRepository.delete(id);
     return { success: true };
   }
@@ -978,9 +998,11 @@ export class BusinessFlowController {
   @Post(':flowId/nodes')
   @ApiOperation({ summary: 'ノードを作成' })
   async createNode(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('flowId') flowId: string,
     @Body() dto: CreateFlowNodeDto,
   ) {
+    await this.assertFlowMembership(flowId, user.id, 'edit');
     const node = FlowNode.create({
       id: uuid(),
       flowId,
@@ -1026,6 +1048,9 @@ export class BusinessFlowController {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 位置一括更新は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(flow.projectId, user.id, 'edit');
 
     const positions = dto.positions ?? [];
 
@@ -1098,6 +1123,7 @@ export class BusinessFlowController {
   @Put(':flowId/nodes/:nodeId')
   @ApiOperation({ summary: 'ノードを更新' })
   async updateNode(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('nodeId') nodeId: string,
     @Body() dto: UpdateFlowNodeDto,
   ) {
@@ -1105,6 +1131,7 @@ export class BusinessFlowController {
     if (!node) {
       return { error: 'Node not found' };
     }
+    await this.assertFlowMembership(node.flowId, user.id, 'edit');
 
     if (dto.label) node.updateLabel(dto.label);
     if (dto.description !== undefined) node.updateDescription(dto.description);
@@ -1145,7 +1172,11 @@ export class BusinessFlowController {
 
   @Delete(':flowId/nodes/:nodeId')
   @ApiOperation({ summary: 'ノードを削除' })
-  async deleteNode(@Param('nodeId') nodeId: string) {
+  async deleteNode(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('nodeId') nodeId: string,
+  ) {
+    await this.assertNodeEditAccess(nodeId, user.id);
     await this.nodeRepository.delete(nodeId);
     return { success: true };
   }
@@ -1155,9 +1186,11 @@ export class BusinessFlowController {
   @Post(':flowId/edges')
   @ApiOperation({ summary: 'エッジを作成' })
   async createEdge(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('flowId') flowId: string,
     @Body() dto: CreateFlowEdgeDto,
   ) {
+    await this.assertFlowMembership(flowId, user.id, 'edit');
     const edge = await this.prisma.flowEdge.create({
       data: {
         id: uuid(),
@@ -1199,8 +1232,8 @@ export class BusinessFlowController {
     @Param('edgeId') edgeId: string,
     @Body() dto: UpdateFlowEdgeDto,
   ) {
-    // 認可: flow -> project -> organization メンバーシップ
-    await this.assertFlowMembership(flowId, user.id);
+    // 認可: flow -> project -> organization メンバーシップ + edit 強制
+    await this.assertFlowMembership(flowId, user.id, 'edit');
 
     const data: {
       sourceNodeId?: string;
@@ -1248,9 +1281,11 @@ export class BusinessFlowController {
   @Put(':flowId/edges/:edgeId')
   @ApiOperation({ summary: 'エッジを更新' })
   async updateEdge(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('edgeId') edgeId: string,
     @Body() dto: UpdateFlowEdgeDto,
   ) {
+    await this.assertEdgeEditAccess(edgeId, user.id);
     const data: {
       sourceNodeId?: string;
       targetNodeId?: string;
@@ -1296,7 +1331,11 @@ export class BusinessFlowController {
 
   @Delete(':flowId/edges/:edgeId')
   @ApiOperation({ summary: 'エッジを削除' })
-  async deleteEdge(@Param('edgeId') edgeId: string) {
+  async deleteEdge(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('edgeId') edgeId: string,
+  ) {
+    await this.assertEdgeEditAccess(edgeId, user.id);
     await this.prisma.flowEdge.delete({ where: { id: edgeId } });
     return { success: true };
   }
@@ -1306,10 +1345,12 @@ export class BusinessFlowController {
   @Post(':flowId/nodes/:nodeId/child-flow')
   @ApiOperation({ summary: 'ノードに子フローを作成・紐付け' })
   async createChildFlow(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('flowId') flowId: string,
     @Param('nodeId') nodeId: string,
     @Body() dto: CreateChildFlowDto,
   ) {
+    await this.assertFlowMembership(flowId, user.id, 'edit');
     const parentFlow = await this.flowRepository.findById(flowId);
     const node = await this.nodeRepository.findById(nodeId);
 
@@ -1341,11 +1382,15 @@ export class BusinessFlowController {
 
   @Delete(':flowId/nodes/:nodeId/child-flow')
   @ApiOperation({ summary: 'ノードから子フローの紐付けを解除' })
-  async unlinkChildFlow(@Param('nodeId') nodeId: string) {
+  async unlinkChildFlow(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('nodeId') nodeId: string,
+  ) {
     const node = await this.nodeRepository.findById(nodeId);
     if (!node) {
       return { error: 'Node not found' };
     }
+    await this.assertFlowMembership(node.flowId, user.id, 'edit');
 
     node.unlinkChildFlow();
     await this.nodeRepository.save(node);
@@ -1433,9 +1478,11 @@ export class BusinessFlowController {
   @Put(':flowId/nodes/:nodeId/information-links')
   @ApiOperation({ summary: 'ノードの入出力（情報種別マスタ紐づけ）を一括置換' })
   async replaceNodeInformationLinks(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('nodeId') nodeId: string,
     @Body() dto: ReplaceNodeInformationLinksDto,
   ) {
+    await this.assertNodeEditAccess(nodeId, user.id);
     await this.prisma.$transaction([
       this.prisma.nodeInformationLink.deleteMany({ where: { nodeId } }),
       ...dto.links.map((link, index) =>
@@ -1472,8 +1519,8 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Body() dto: RestoreFlowDto,
   ) {
-    // 認可: flow -> project -> organization メンバーシップ
-    await this.assertFlowMembership(flowId, user.id);
+    // 認可: flow -> project -> organization メンバーシップ + edit 強制
+    await this.assertFlowMembership(flowId, user.id, 'edit');
 
     const nodes = dto.nodes ?? [];
     const edges = dto.edges ?? [];
@@ -1600,7 +1647,7 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Body() dto: CreateFlowSnapshotDto,
   ) {
-    await this.assertFlowMembership(flowId, user.id);
+    await this.assertFlowMembership(flowId, user.id, 'edit');
 
     const MAX_SNAPSHOTS = 50;
 
@@ -1672,8 +1719,8 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Body() dto: CreateFlowAnnotationDto,
   ) {
-    // 認可: flow -> project -> organization メンバーシップ
-    await this.assertFlowMembership(flowId, user.id);
+    // 認可: flow -> project -> organization メンバーシップ + edit 強制
+    await this.assertFlowMembership(flowId, user.id, 'edit');
 
     const created = await this.prisma.flowAnnotation.create({
       data: {
@@ -1702,8 +1749,8 @@ export class BusinessFlowController {
     @Param('id') id: string,
     @Body() dto: UpdateFlowAnnotationDto,
   ) {
-    // 認可: flow -> project -> organization メンバーシップ
-    await this.assertFlowMembership(flowId, user.id);
+    // 認可: flow -> project -> organization メンバーシップ + edit 強制
+    await this.assertFlowMembership(flowId, user.id, 'edit');
 
     const data: {
       kind?: 'STICKY' | 'COMMENT' | 'ICON' | 'SCOPE';
@@ -1743,8 +1790,8 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Param('id') id: string,
   ) {
-    // 認可: flow -> project -> organization メンバーシップ
-    await this.assertFlowMembership(flowId, user.id);
+    // 認可: flow -> project -> organization メンバーシップ + edit 強制
+    await this.assertFlowMembership(flowId, user.id, 'edit');
 
     await this.prisma.flowAnnotation.delete({ where: { id } });
     return { success: true };
@@ -1976,6 +2023,9 @@ export class BusinessFlowController {
       throw new HttpException('Business flow not found', HttpStatus.NOT_FOUND);
     }
 
+    // プロジェクト単位 RBAC: Mermaid 取り込みは書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(flow.projectId, user.id, 'edit');
+
     // APIキーを取得（会社(Organization)キー > ユーザー設定 > 環境変数）
     const apiKey = await this.companyKeyService.resolveForProject(
       flow.projectId,
@@ -2075,9 +2125,11 @@ export class BusinessFlowController {
   }
 
   // 認可ヘルパー: flow -> project -> organization メンバーシップを検証
+  // 併せてプロジェクト単位 RBAC（VIEW/EDIT）を強制する（既定 view、書込は edit）。
   private async assertFlowMembership(
     flowId: string,
     userId: string,
+    required: 'view' | 'edit' = 'view',
   ): Promise<BusinessFlow> {
     const flow = await this.flowRepository.findById(flowId);
     if (!flow) {
@@ -2097,7 +2149,30 @@ export class BusinessFlowController {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
+    await this.projectAccess.assertProjectAccess(flow.projectId, userId, required);
+
     return flow;
+  }
+
+  // 認可ヘルパー: nodeId -> flow -> project の edit 強制（書込ルート用）
+  private async assertNodeEditAccess(nodeId: string, userId: string): Promise<void> {
+    const node = await this.nodeRepository.findById(nodeId);
+    if (!node) {
+      throw new EntityNotFoundError('FlowNode', nodeId);
+    }
+    await this.assertFlowMembership(node.flowId, userId, 'edit');
+  }
+
+  // 認可ヘルパー: edgeId -> flow -> project の edit 強制（書込ルート用）
+  private async assertEdgeEditAccess(edgeId: string, userId: string): Promise<void> {
+    const edge = await this.prisma.flowEdge.findUnique({
+      where: { id: edgeId },
+      select: { flowId: true },
+    });
+    if (!edge) {
+      throw new EntityNotFoundError('FlowEdge', edgeId);
+    }
+    await this.assertFlowMembership(edge.flowId, userId, 'edit');
   }
 
   private async getBreadcrumbs(flow: BusinessFlow): Promise<{ id: string; name: string }[]> {

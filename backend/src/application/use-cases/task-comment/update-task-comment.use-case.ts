@@ -12,6 +12,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { TaskCommentOutput, toTaskCommentOutput } from './task-comment.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateTaskCommentInput {
   userId: string;
@@ -34,6 +35,7 @@ export class UpdateTaskCommentUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateTaskCommentInput): Promise<TaskCommentOutput> {
@@ -51,6 +53,14 @@ export class UpdateTaskCommentUseCase {
     if (!project) {
       throw new EntityNotFoundError('Project', task.projectId);
     }
+
+    // プロジェクト単位 RBAC: コメント編集は書込のため edit 強制（VIEW のみのユーザーは
+    // 自分のコメントでも編集不可）。
+    await this.projectAccess.assertProjectAccess(
+      task.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 作者本人なら無条件で許可、そうでなければ組織メンバーであることを要求
     if (!comment.isAuthor(input.userId)) {

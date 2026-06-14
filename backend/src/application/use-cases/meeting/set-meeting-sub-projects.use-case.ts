@@ -11,6 +11,7 @@ import {
   ValidationError,
 } from '../../../domain';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { MeetingOutput, toMeetingOutput } from './create-meeting.use-case';
 
 export interface SetMeetingSubProjectsInput {
@@ -34,6 +35,7 @@ export class SetMeetingSubProjectsUseCase {
     private readonly organizationRepository: OrganizationRepository,
     /** SubProject はドメインリポジトリ未整備のため Prisma を直接参照する。 */
     private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: SetMeetingSubProjectsInput): Promise<MeetingOutput> {
@@ -57,6 +59,13 @@ export class SetMeetingSubProjectsUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // 3.5 プロジェクト単位 RBAC: 対象サブ領域の置換は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      meeting.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. 指定されたサブ領域が同じプロジェクトに属することを検証
     const uniqueIds = Array.from(new Set(input.subProjectIds));

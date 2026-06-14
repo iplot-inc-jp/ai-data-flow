@@ -6,6 +6,7 @@ import {
   DataObject,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface ImportFromDfdInput { userId: string; projectId: string; }
 
@@ -26,10 +27,11 @@ export class ImportFromDfdUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: ImportFromDfdInput): Promise<ImportFromDfdOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
 
     const nodes = await this.repo.findL1DataStoreNodes(input.projectId);
     const unlinked = nodes.filter((n) => n.dataObjectId === null);

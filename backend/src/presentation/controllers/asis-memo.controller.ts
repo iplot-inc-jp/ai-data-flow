@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -29,6 +30,8 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== DTOs ==========
 
@@ -98,6 +101,8 @@ class UpdateAsisMemoDto {
 
 @ApiTags('ASISメモ')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/asis-memos')
 export class AsisMemoController {
   constructor(
@@ -147,6 +152,8 @@ export class AsisMemoController {
 
 @ApiTags('ASISメモ')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('asis-memos')
 export class AsisMemoByIdController {
   constructor(

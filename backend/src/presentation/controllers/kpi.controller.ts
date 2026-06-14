@@ -1,5 +1,6 @@
 import {
   Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, HttpCode,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import {
@@ -25,6 +26,8 @@ import {
   KPI_STATUSES,
 } from '../../domain';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 class CreateKpiDto {
   @IsString() name!: string;
@@ -93,6 +96,8 @@ class GenerateKpisDto {
 
 @ApiTags('KPI（業務KPI・AI精度KPI）')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class KpiController {
   constructor(

@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,6 +31,8 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 const INFORMATION_CATEGORIES = ['INFORMATION', 'OBJECT', 'DOCUMENT'];
 
@@ -106,6 +109,8 @@ class UpdateInformationTypeDto {
 
 @ApiTags('情報種別')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/information-types')
 export class InformationTypeController {
   constructor(
@@ -154,6 +159,8 @@ export class InformationTypeController {
 
 @ApiTags('情報種別')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('information-types')
 export class InformationTypeByIdController {
   constructor(

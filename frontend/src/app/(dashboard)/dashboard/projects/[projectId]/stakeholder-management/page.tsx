@@ -16,6 +16,7 @@ import { StakeholderTableBoard } from './_components/stakeholder-table-board';
 import { MeetingReportBoard } from './_components/meeting-report-board';
 import { InterestMatrixBoard } from './_components/interest-matrix-board';
 import { AdoptionBoard } from './_components/adoption-board';
+import { EditGate } from '@/components/edit-gate';
 
 /**
  * ステークホルダーマネジメント ワークスペース。
@@ -86,25 +87,27 @@ export default function StakeholderManagementPage() {
         })}
       </div>
 
-      {/* ステークホルダー（テーブル + マトリクス + 役割と責任） */}
-      <div className={active === 'stakeholders' ? '' : 'hidden'}>
-        <StakeholderTableBoard projectId={projectId} />
-      </div>
+      <EditGate dim={false}>
+        {/* ステークホルダー（テーブル + マトリクス + 役割と責任） */}
+        <div className={active === 'stakeholders' ? '' : 'hidden'}>
+          <StakeholderTableBoard projectId={projectId} />
+        </div>
 
-      {/* 関心ごと（InterestMatrixRow テーブル：フェーズ×視点） */}
-      <div className={active === 'interests' ? '' : 'hidden'}>
-        <InterestMatrixBoard projectId={projectId} />
-      </div>
+        {/* 関心ごと（InterestMatrixRow テーブル：フェーズ×視点） */}
+        <div className={active === 'interests' ? '' : 'hidden'}>
+          <InterestMatrixBoard projectId={projectId} />
+        </div>
 
-      {/* 会議・報告（Meeting テーブル + 報告連絡カレンダー テーブル） */}
-      <div className={active === 'meetings' ? '' : 'hidden'}>
-        <MeetingReportBoard projectId={projectId} />
-      </div>
+        {/* 会議・報告（Meeting テーブル + 報告連絡カレンダー テーブル） */}
+        <div className={active === 'meetings' ? '' : 'hidden'}>
+          <MeetingReportBoard projectId={projectId} />
+        </div>
 
-      {/* 導入状況（AdoptionStatus テーブル：人 × システム の定着度） */}
-      <div className={active === 'adoption' ? '' : 'hidden'}>
-        <AdoptionBoard projectId={projectId} />
-      </div>
+        {/* 導入状況（AdoptionStatus テーブル：人 × システム の定着度） */}
+        <div className={active === 'adoption' ? '' : 'hidden'}>
+          <AdoptionBoard projectId={projectId} />
+        </div>
+      </EditGate>
     </div>
   );
 }

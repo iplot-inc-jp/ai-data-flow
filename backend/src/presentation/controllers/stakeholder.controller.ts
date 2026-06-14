@@ -11,6 +11,7 @@ import {
   HttpStatus,
   NotFoundException,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -44,6 +45,9 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 /**
  * 組織メンバーシップ認可（use-case 層の isMember と同じ判定）。
@@ -273,6 +277,8 @@ class SetDomainAssignmentsDto {
 
 @ApiTags('ステークホルダー')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/stakeholders')
 export class StakeholderController {
   constructor(
@@ -333,12 +339,15 @@ export class StakeholderController {
 
 @ApiTags('ステークホルダー')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('stakeholders')
 export class StakeholderByIdController {
   constructor(
     private readonly updateStakeholderUseCase: UpdateStakeholderUseCase,
     private readonly deleteStakeholderUseCase: DeleteStakeholderUseCase,
     private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   @Patch(':id')
@@ -407,6 +416,12 @@ export class StakeholderByIdController {
       throw new NotFoundException(`Project not found: ${stakeholder.projectId}`);
     }
     await assertOrganizationMember(this.prisma, project.organizationId, user.id);
+    // プロジェクト単位 RBAC: 担当領域の置換は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      stakeholder.projectId,
+      user.id,
+      'edit',
+    );
 
     // subProjectId の重複は後勝ちで畳む
     const deduped = new Map<string, string>();
@@ -488,6 +503,8 @@ export class StakeholderByIdController {
 
 @ApiTags('ステークホルダー')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/stakeholder-assignments')
 export class StakeholderAssignmentController {
   constructor(private readonly prisma: PrismaService) {}

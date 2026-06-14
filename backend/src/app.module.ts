@@ -278,6 +278,7 @@ import {
   KpiRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
+  ProjectAccessService,
 } from './infrastructure';
 
 // Presentation
@@ -286,6 +287,8 @@ import {
   OrganizationController,
   ProjectController,
   ProjectByIdController,
+  ProjectMemberController,
+  ProjectMyAccessController,
   RoleController,
   TableController,
   BusinessFlowController,
@@ -342,6 +345,7 @@ import { RequirementController } from './presentation/controllers/requirement.co
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
 import { ApiKeyController } from './presentation/controllers/api-key.controller';
 import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
+import { CronController } from './presentation/controllers/cron.controller';
 import { CodeCatalogController } from './presentation/controllers/code-catalog.controller';
 import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
 import { AttachmentController } from './presentation/controllers/attachment.controller';
@@ -394,10 +398,13 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
   ],
   controllers: [
     HealthController,
+    CronController,
     AuthController,
     OrganizationController,
     ProjectController,
     ProjectByIdController,
+    ProjectMemberController,
+    ProjectMyAccessController,
     RoleController,
     TableController,
     BusinessFlowController,
@@ -814,6 +821,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GenerateKpisUseCase,
 
     // ========== Services ==========
+    ProjectAccessService,
     ClaudeService,
     ApiKeyService,
     CryptoService,

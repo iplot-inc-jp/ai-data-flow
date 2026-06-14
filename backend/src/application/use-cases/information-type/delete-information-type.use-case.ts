@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteInformationTypeInput {
   userId: string;
@@ -28,6 +29,7 @@ export class DeleteInformationTypeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteInformationTypeInput): Promise<void> {
@@ -52,6 +54,13 @@ export class DeleteInformationTypeUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 情報種別削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      informationType.projectId,
+      input.userId,
+      'edit',
+    );
 
     await this.informationTypeRepository.delete(input.informationTypeId);
   }

@@ -259,6 +259,8 @@ export interface ObjectMapCanvasProps {
   // ===== Mermaidから生成 =====
   /** Mermaid 記法から objects/relations を一括生成（生成後に親がグラフ再取得） */
   onImportMermaid: (mermaid: string) => Promise<void>;
+  /** 閲覧専用。true のとき編集ツールバーを隠し、ドラッグ・接続・編集系操作を無効化する。 */
+  readOnly?: boolean;
 }
 
 export function ObjectMapCanvas({
@@ -268,23 +270,39 @@ export function ObjectMapCanvas({
   subProjects,
   selectedObjectId,
   onSelectObject,
-  onObjectMoved,
-  onCreateRelation,
-  onUpdateRelation,
-  onDeleteRelation,
+  onObjectMoved: onObjectMovedRaw,
+  onCreateRelation: onCreateRelationRaw,
+  onUpdateRelation: onUpdateRelationRaw,
+  onDeleteRelation: onDeleteRelationRaw,
   onAddObject,
   onImportFromDfd,
   importing,
-  onAddAnnotation,
-  onAnnotationMoved,
-  onUpdateAnnotationText,
-  onDeleteAnnotation,
-  onAddScope,
-  onScopeGeometryChanged,
-  onUpdateScope,
-  onDeleteScope,
+  onAddAnnotation: onAddAnnotationRaw,
+  onAnnotationMoved: onAnnotationMovedRaw,
+  onUpdateAnnotationText: onUpdateAnnotationTextRaw,
+  onDeleteAnnotation: onDeleteAnnotationRaw,
+  onAddScope: onAddScopeRaw,
+  onScopeGeometryChanged: onScopeGeometryChangedRaw,
+  onUpdateScope: onUpdateScopeRaw,
+  onDeleteScope: onDeleteScopeRaw,
   onImportMermaid,
+  readOnly = false,
 }: ObjectMapCanvasProps) {
+  // 閲覧専用時は編集系コールバックを no-op に差し替える（ドラッグ確定・接続・編集・削除を無効化）。
+  const noop = useCallback(() => {}, []);
+  const onObjectMoved = readOnly ? noop : onObjectMovedRaw;
+  const onCreateRelation = readOnly ? (async () => {}) : onCreateRelationRaw;
+  const onUpdateRelation = readOnly ? (async () => {}) : onUpdateRelationRaw;
+  const onDeleteRelation = readOnly ? (async () => {}) : onDeleteRelationRaw;
+  const onAddAnnotation = readOnly ? (async () => {}) : onAddAnnotationRaw;
+  const onAnnotationMoved = readOnly ? noop : onAnnotationMovedRaw;
+  const onUpdateAnnotationText = readOnly ? (async () => {}) : onUpdateAnnotationTextRaw;
+  const onDeleteAnnotation = readOnly ? (async () => {}) : onDeleteAnnotationRaw;
+  const onAddScope = readOnly ? (async () => {}) : onAddScopeRaw;
+  const onScopeGeometryChanged = readOnly ? noop : onScopeGeometryChangedRaw;
+  const onUpdateScope = readOnly ? (async () => {}) : onUpdateScopeRaw;
+  const onDeleteScope = readOnly ? (async () => {}) : onDeleteScopeRaw;
+
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -1420,68 +1438,72 @@ export function ObjectMapCanvas({
 
       {/* ===== ツールバー（左上） ===== */}
       <div className="absolute left-3 top-3 flex items-center gap-1 rounded-lg border border-gray-200 bg-white/95 p-1 shadow-sm">
-        <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={onAddObject}>
-          <Plus className="h-4 w-4" />
-          オブジェクト追加
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 gap-1.5 px-2 text-xs"
-          onClick={onImportFromDfd}
-          disabled={importing}
-        >
-          {importing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Import className="h-4 w-4" />
-          )}
-          DFDのデータストアから取り込み
-        </Button>
-        <div className="mx-0.5 h-5 w-px bg-gray-200" />
-        <Button
-          size="sm"
-          variant={connectMode ? 'default' : 'ghost'}
-          className="h-8 gap-1.5 px-2 text-xs"
-          onClick={() => {
-            setConnectMode((m) => !m);
-            setConnectSourceId(null);
-            setConnectSourceHandle(null);
-          }}
-        >
-          <Spline className="h-4 w-4" />
-          関係線を追加
-        </Button>
-        <div className="mx-0.5 h-5 w-px bg-gray-200" />
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 gap-1.5 px-2 text-xs"
-          onClick={() => addAnnotationAtCenter('STICKY')}
-        >
-          <StickyNote className="h-4 w-4 text-amber-500" />
-          付箋
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 gap-1.5 px-2 text-xs"
-          onClick={() => addAnnotationAtCenter('COMMENT')}
-        >
-          <MessageSquare className="h-4 w-4 text-gray-500" />
-          メモ
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 gap-1.5 px-2 text-xs"
-          onClick={addScopeAtCenter}
-          title="領域（業務範囲）を囲む矩形を追加します"
-        >
-          <Frame className="h-4 w-4 text-indigo-500" />
-          スコープ
-        </Button>
-        <div className="mx-0.5 h-5 w-px bg-gray-200" />
+        {!readOnly && (
+          <>
+            <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-xs" onClick={onAddObject}>
+              <Plus className="h-4 w-4" />
+              オブジェクト追加
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={onImportFromDfd}
+              disabled={importing}
+            >
+              {importing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Import className="h-4 w-4" />
+              )}
+              DFDのデータストアから取り込み
+            </Button>
+            <div className="mx-0.5 h-5 w-px bg-gray-200" />
+            <Button
+              size="sm"
+              variant={connectMode ? 'default' : 'ghost'}
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={() => {
+                setConnectMode((m) => !m);
+                setConnectSourceId(null);
+                setConnectSourceHandle(null);
+              }}
+            >
+              <Spline className="h-4 w-4" />
+              関係線を追加
+            </Button>
+            <div className="mx-0.5 h-5 w-px bg-gray-200" />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={() => addAnnotationAtCenter('STICKY')}
+            >
+              <StickyNote className="h-4 w-4 text-amber-500" />
+              付箋
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={() => addAnnotationAtCenter('COMMENT')}
+            >
+              <MessageSquare className="h-4 w-4 text-gray-500" />
+              メモ
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={addScopeAtCenter}
+              title="領域（業務範囲）を囲む矩形を追加します"
+            >
+              <Frame className="h-4 w-4 text-indigo-500" />
+              スコープ
+            </Button>
+            <div className="mx-0.5 h-5 w-px bg-gray-200" />
+          </>
+        )}
         <Button
           size="sm"
           variant={scopesShown ? 'ghost' : 'default'}
@@ -1492,20 +1514,24 @@ export function ObjectMapCanvas({
           {scopesShown ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
           囲み{scopesShown ? '表示' : '非表示'}
         </Button>
-        <div className="mx-0.5 h-5 w-px bg-gray-200" />
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 gap-1.5 px-2 text-xs"
-          onClick={() => {
-            setMermaidImportError(null);
-            setShowMermaidImport(true);
-          }}
-          title="Mermaid記法からオブジェクトと関係を一括生成します"
-        >
-          <Wand2 className="h-4 w-4 text-violet-500" />
-          mermaidから生成
-        </Button>
+        {!readOnly && (
+          <>
+            <div className="mx-0.5 h-5 w-px bg-gray-200" />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 px-2 text-xs"
+              onClick={() => {
+                setMermaidImportError(null);
+                setShowMermaidImport(true);
+              }}
+              title="Mermaid記法からオブジェクトと関係を一括生成します"
+            >
+              <Wand2 className="h-4 w-4 text-violet-500" />
+              mermaidから生成
+            </Button>
+          </>
+        )}
       </div>
 
       {/* ===== ズーム操作（右下） ===== */}

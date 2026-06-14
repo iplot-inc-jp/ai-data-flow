@@ -27,6 +27,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { useReadOnly } from '@/components/read-only-context';
 import {
   DragDropContext,
   Droppable,
@@ -119,6 +120,7 @@ const NONE = '__none__'; // Select は空文字を value にできないため�
 export default function TasksPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
@@ -338,6 +340,7 @@ export default function TasksPage() {
   // ダイアログ操作
   // ---------------------------------------------------------------------
   const openCreate = (parentId?: string) => {
+    if (!canEdit) return;
     setEditingId(null);
     setForm({ ...emptyForm, parentId: parentId ?? '' });
     setError(null);
@@ -435,6 +438,7 @@ export default function TasksPage() {
   };
 
   const handleSave = async () => {
+    if (!canEdit) return;
     if (!form.title.trim()) {
       setError('タイトルは必須です');
       return;
@@ -465,6 +469,7 @@ export default function TasksPage() {
   };
 
   const handleDelete = async (task: Task) => {
+    if (!canEdit) return;
     if (
       !confirm(
         `「${task.title}」を削除しますか？\nサブタスクがある場合は併せて削除される可能性があります。`
@@ -480,6 +485,7 @@ export default function TasksPage() {
   };
 
   const handleInlineStatus = async (task: Task, status: TaskStatus) => {
+    if (!canEdit) return;
     // 楽観的更新
     setTasks((prev) =>
       prev.map((t) => (t.id === task.id ? { ...t, status } : t))
@@ -494,6 +500,7 @@ export default function TasksPage() {
 
   // ボードでカードを別の状態カラムへドロップしたとき：状態を楽観的更新→失敗時はロールバック
   const handleBoardDragEnd = async (result: DropResult) => {
+    if (!canEdit) return;
     const { destination, source, draggableId } = result;
     if (!destination) return;
     if (
@@ -600,13 +607,15 @@ export default function TasksPage() {
                 WBS/ガント
               </Button>
             </Link>
-            <Button
-              onClick={() => openCreate()}
-              className="bg-blue-600 hover:bg-blue-700 gap-1.5"
-            >
-              <Plus className="h-4 w-4" />
-              タスクを追加
-            </Button>
+            {canEdit && (
+              <Button
+                onClick={() => openCreate()}
+                className="bg-blue-600 hover:bg-blue-700 gap-1.5"
+              >
+                <Plus className="h-4 w-4" />
+                タスクを追加
+              </Button>
+            )}
           </>
         }
       />
@@ -1470,6 +1479,7 @@ function KanbanCard({
   wbsNo?: string;
   roleNameById: Map<string, string>;
 }) {
+  const { canEdit } = useReadOnly();
   const priority = taskPriorityLabels[node.priority];
   const assignee =
     node.assigneeName ||
@@ -1478,7 +1488,7 @@ function KanbanCard({
   const progress = clampProgress(node.progress);
 
   return (
-    <Draggable draggableId={node.id} index={index}>
+    <Draggable draggableId={node.id} index={index} isDragDisabled={!canEdit}>
       {(provided, snapshot) => (
         <div
           ref={provided.innerRef}

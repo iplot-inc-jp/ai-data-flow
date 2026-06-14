@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import {
   InterestMatrixRowOutput,
   toInterestMatrixRowOutput,
@@ -38,6 +39,7 @@ export class UpdateInterestMatrixRowUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(
@@ -63,6 +65,13 @@ export class UpdateInterestMatrixRowUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      row.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. ドメインロジック適用
     row.update({

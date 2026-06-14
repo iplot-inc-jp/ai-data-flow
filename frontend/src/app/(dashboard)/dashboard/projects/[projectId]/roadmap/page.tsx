@@ -15,6 +15,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import {
@@ -196,6 +198,7 @@ function flattenSubProjects(
 export default function RoadmapPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [gapItems, setGapItems] = useState<GapItem[]>([]);
   // gapId -> RoadmapRow
@@ -497,6 +500,7 @@ export default function RoadmapPage() {
   // 'tobe:'/'gap:' プレフィックスで振り分けて保存（オートセーブ）。
   const handleDragEnd = useCallback(
     (result: DropResult) => {
+      if (!canEdit) return;
       const { destination, source, draggableId } = result;
       if (!destination) return; // 列外へのドロップは無視
       const col = phaseColumns.find((c) => c.id === destination.droppableId);
@@ -513,13 +517,14 @@ export default function RoadmapPage() {
         void moveTobe(id, col);
       }
     },
-    [phaseColumns, updateAssignment, moveTobe],
+    [phaseColumns, updateAssignment, moveTobe, canEdit],
   );
 
   // 全件まとめて保存（保存ボタン）
   const handleSaveAll = useCallback(() => {
+    if (!canEdit) return;
     void persist(assignments);
-  }, [persist, assignments]);
+  }, [persist, assignments, canEdit]);
 
   // フェーズごとにカードを束ねる。
   // - TOBE打ち手カード（TOBE/両方表示）: TobeRoadmap 1行 = 1カード。
@@ -830,7 +835,7 @@ export default function RoadmapPage() {
     const { gap, row } = card;
     const pm = priorityMeta[gap.priority] ?? priorityMeta.MEDIUM;
     return (
-      <Draggable key={`gap:${gap.id}`} draggableId={`gap:${gap.id}`} index={index}>
+      <Draggable key={`gap:${gap.id}`} draggableId={`gap:${gap.id}`} index={index} isDragDisabled={!canEdit}>
         {(dragProvided, dragSnapshot) => (
           <Card
             ref={dragProvided.innerRef}
@@ -927,7 +932,7 @@ export default function RoadmapPage() {
     const path = areaPath(card.areaId);
     const gapsOpen = openGapLists.has(tobe.id);
     return (
-      <Draggable key={`tobe:${tobe.id}`} draggableId={`tobe:${tobe.id}`} index={index}>
+      <Draggable key={`tobe:${tobe.id}`} draggableId={`tobe:${tobe.id}`} index={index} isDragDisabled={!canEdit}>
         {(dragProvided, dragSnapshot) => (
           <Card
             ref={dragProvided.innerRef}
@@ -1244,23 +1249,26 @@ export default function RoadmapPage() {
               ]}
             />
             <ManualButton feature="roadmap" />
-            <Button
-              onClick={handleSaveAll}
-              // GAP 0件での無効化は GAP 表示のみ（TOBE表示で常時無効に見えるのを避ける）
-              disabled={saving || loading || (view === 'GAP' && gapItems.length === 0)}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {saving ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              保存
-            </Button>
+            {canEdit && (
+              <Button
+                onClick={handleSaveAll}
+                // GAP 0件での無効化は GAP 表示のみ（TOBE表示で常時無効に見えるのを避ける）
+                disabled={saving || loading || (view === 'GAP' && gapItems.length === 0)}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                保存
+              </Button>
+            )}
           </>
         }
       />
 
+      <EditGate dim={false}>
       {/* ツールバー: 表示切替 + 領域フィルタ + 領域グループ + 打ち手追加 */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="inline-flex items-center gap-1.5">
@@ -1497,6 +1505,7 @@ export default function RoadmapPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </EditGate>
     </div>
   );
 }

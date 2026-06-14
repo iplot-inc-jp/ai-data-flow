@@ -28,8 +28,34 @@ model User {
   organizationMembers OrganizationMember[]
   settings            UserSetting?
   apiKeys             ApiKey[]
+  projectMemberships  ProjectMember[]
 
   @@map("users")
+}
+
+// プロジェクト単位のユーザー権限（閲覧 / 編集）。
+// 実効権限: 全体管理者・会社 OWNER/ADMIN は常に EDIT。
+// プロジェクトに ProjectMember 行が1件も無ければ、後方互換で全 org メンバー = EDIT。
+// 行が存在する場合は、掲載ユーザーはその accessLevel、未掲載の org メンバーは権限なし。
+enum ProjectAccessLevel {
+  VIEW
+  EDIT
+}
+
+model ProjectMember {
+  id          String             @id @default(uuid())
+  projectId   String             @map("project_id")
+  userId      String             @map("user_id")
+  accessLevel ProjectAccessLevel @default(EDIT) @map("access_level")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@map("project_members")
 }
 
 // ===========================================
@@ -131,6 +157,7 @@ model Project {
   dataObjectRelations     DataObjectRelation[]
   dataObjectAnnotations   DataObjectAnnotation[]
   kpis                    Kpi[]
+  members                 ProjectMember[]
 
   @@unique([organizationId, slug])
   @@map("projects")

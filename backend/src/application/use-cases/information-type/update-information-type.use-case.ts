@@ -14,6 +14,7 @@ import {
   InformationTypeOutput,
   toInformationTypeOutput,
 } from './information-type.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateInformationTypeInput {
   userId: string;
@@ -38,6 +39,7 @@ export class UpdateInformationTypeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateInformationTypeInput): Promise<InformationTypeOutput> {
@@ -62,6 +64,13 @@ export class UpdateInformationTypeUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 情報種別更新は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      informationType.projectId,
+      input.userId,
+      'edit',
+    );
 
     informationType.update({
       name: input.name,

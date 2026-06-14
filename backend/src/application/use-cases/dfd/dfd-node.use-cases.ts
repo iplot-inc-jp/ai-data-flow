@@ -9,6 +9,7 @@ import {
 } from '../../../domain';
 import { DfdNodeKindValue } from '../../../domain/entities/dfd-node.entity';
 import { authorizeDiagram } from './dfd-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { DfdNodeOutput, toDfdNodeOutput } from './dfd.output';
 
 /** dataObjectId の参照先が存在し、図と同一プロジェクトに属することを検証する */
@@ -45,10 +46,11 @@ export class AddDfdNodeUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly dataObjectRepo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: AddDfdNodeInput): Promise<DfdNodeOutput> {
-    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.userId);
+    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.userId, this.projectAccess, 'edit');
     let dataObjectId = input.dataObjectId ?? null;
     if (dataObjectId != null) {
       await assertDataObjectInProject(this.dataObjectRepo, diagram.projectId, dataObjectId);
@@ -101,12 +103,13 @@ export class UpdateDfdNodeUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly dataObjectRepo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateDfdNodeInput): Promise<DfdNodeOutput> {
     const node = await this.repo.findNodeById(input.id);
     if (!node) throw new EntityNotFoundError('DfdNode', input.id);
-    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.userId);
+    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.userId, this.projectAccess, 'edit');
     // undefined=変更なし / null=紐づけ解除。文字列のときのみ参照先を検証する
     if (input.dataObjectId != null) {
       await assertDataObjectInProject(this.dataObjectRepo, diagram.projectId, input.dataObjectId);
@@ -180,6 +183,7 @@ export class DeleteDfdNodeUseCase {
     @Inject(DFD_REPOSITORY) private readonly repo: IDfdRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteDfdNodeInput): Promise<void> {
@@ -187,7 +191,7 @@ export class DeleteDfdNodeUseCase {
     if (!node) {
       throw new EntityNotFoundError('DfdNode', input.id);
     }
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.userId);
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.userId, this.projectAccess, 'edit');
     await this.repo.deleteNode(input.id);
   }
 }

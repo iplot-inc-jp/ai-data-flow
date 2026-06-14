@@ -26,6 +26,8 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 import { Card, CardContent } from '@/components/ui/card';
 import { FileDropZone } from '@/components/ui/file-drop-zone';
 import {
@@ -59,6 +61,7 @@ function formatBytes(size: number): string {
 export default function BackgroundPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [charter, setCharter] = useState<ProjectCharter | null>(null);
   const [loading, setLoading] = useState(true);
@@ -204,7 +207,7 @@ export default function BackgroundPage() {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : (
-        <>
+        <EditGate dim={false}>
           {/* 文章セクション（textarea + onBlur 保存） */}
           <div className="grid gap-4 lg:grid-cols-3">
             {TEXT_SECTIONS.map((section) => (
@@ -327,7 +330,7 @@ export default function BackgroundPage() {
             </Link>
             の「スコープ外」トグルで管理します。
           </p>
-        </>
+        </EditGate>
       )}
     </div>
   );

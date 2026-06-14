@@ -8,6 +8,7 @@ import {
   DfdDiagram, DfdNode, DfdFlow,
 } from '../../../domain';
 import { DfdDiagramOutput, toDfdDiagramOutput } from './dfd.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface GenerateFlowDfdInput { userId: string; flowId: string; }
 
@@ -23,6 +24,7 @@ export class GenerateFlowDfdUseCase {
     @Inject(BUSINESS_FLOW_REPOSITORY) private readonly flowRepo: IBusinessFlowRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GenerateFlowDfdInput): Promise<DfdDiagramOutput> {
@@ -33,6 +35,8 @@ export class GenerateFlowDfdUseCase {
     if (!(await this.orgRepo.isMember(project.organizationId, input.userId))) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+    // プロジェクト単位 RBAC: 生成は書込（DfdNode/DfdFlow を作成・削除）なので EDIT 必須
+    await this.projectAccess.assertProjectAccess(flow.projectId, input.userId, 'edit');
 
     // 図 get-or-create
     let graph: DfdGraph | null = await this.repo.findGraphByProjectFlow(

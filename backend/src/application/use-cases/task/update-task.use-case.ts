@@ -18,6 +18,7 @@ import {
 } from '../../../domain';
 import { TaskOutput, toTaskOutput } from './task.output';
 import { rollupAncestorDates, isSameDate } from './rollup-parent-dates';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateTaskInput {
   userId: string;
@@ -60,6 +61,7 @@ export class UpdateTaskUseCase {
     private readonly issueNodeRepository: IIssueNodeRepository,
     @Inject(ISSUE_TREE_REPOSITORY)
     private readonly issueTreeRepository: IIssueTreeRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateTaskInput): Promise<TaskOutput> {
@@ -80,6 +82,13 @@ export class UpdateTaskUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: タスク更新は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      task.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 親付け替え（reparent）の検証
     if (input.parentId !== undefined && input.parentId !== null) {

@@ -15,6 +15,7 @@ import {
   ForbiddenError,
   ValidationError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface SetNodeVerificationInput {
   userId: string;
@@ -53,6 +54,7 @@ export class SetNodeVerificationUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(
@@ -87,6 +89,13 @@ export class SetNodeVerificationUseCase {
     if (!isMember) {
       throw new ForbiddenError('You do not have access to this project');
     }
+
+    // 4.5 プロジェクト単位 RBAC: 検証状態の設定は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      tree.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 5. ドメインロジックで更新
     node.setVerification(input.verification);

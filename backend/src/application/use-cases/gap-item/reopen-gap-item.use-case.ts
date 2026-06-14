@@ -10,6 +10,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { GapItemOutput, toGapItemOutput } from './create-gap-item.use-case';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface ReopenGapItemInput {
   userId: string;
@@ -28,6 +29,7 @@ export class ReopenGapItemUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: ReopenGapItemInput): Promise<GapItemOutput> {
@@ -48,6 +50,13 @@ export class ReopenGapItemUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: GAP再オープンは書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      gapItem.projectId,
+      input.userId,
+      'edit',
+    );
 
     gapItem.reopen();
     await this.gapItemRepository.save(gapItem);

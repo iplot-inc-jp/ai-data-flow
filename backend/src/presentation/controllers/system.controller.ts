@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,6 +31,8 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 const SYSTEM_KINDS = ['PERIPHERAL', 'TARGET'];
 
@@ -98,6 +101,8 @@ class UpdateSystemDto {
 
 @ApiTags('システム')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/systems')
 export class SystemController {
   constructor(
@@ -146,6 +151,8 @@ export class SystemController {
 
 @ApiTags('システム')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('systems')
 export class SystemByIdController {
   constructor(

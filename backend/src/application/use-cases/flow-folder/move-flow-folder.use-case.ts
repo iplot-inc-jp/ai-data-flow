@@ -11,6 +11,7 @@ import {
   ValidationError,
 } from '../../../domain';
 import { FlowFolderOutput, toFlowFolderOutput } from './flow-folder.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface MoveFlowFolderInput {
   userId: string;
@@ -31,6 +32,7 @@ export class MoveFlowFolderUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: MoveFlowFolderInput): Promise<FlowFolderOutput> {
@@ -51,6 +53,13 @@ export class MoveFlowFolderUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: フォルダ移動は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      folder.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 新しい親フォルダの検証
     let newParentId: string | null = folder.parentId;

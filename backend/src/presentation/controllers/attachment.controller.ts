@@ -10,6 +10,7 @@ import {
   NotFoundException,
   UseInterceptors,
   UploadedFile,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
@@ -25,6 +26,8 @@ import {
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
 import { EntityNotFoundError, ForbiddenError } from '../../domain';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
@@ -148,6 +151,8 @@ function normalizeNullableText(
 
 @ApiTags('添付')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class AttachmentController {
   constructor(private readonly prisma: PrismaService) {}

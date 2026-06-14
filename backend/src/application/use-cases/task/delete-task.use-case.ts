@@ -10,6 +10,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { rollupAncestorDates } from './rollup-parent-dates';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteTaskInput {
   userId: string;
@@ -30,6 +31,7 @@ export class DeleteTaskUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteTaskInput): Promise<void> {
@@ -50,6 +52,13 @@ export class DeleteTaskUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: タスク削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      task.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 削除前に旧親を保持し、削除後にその期間を再計算する
     const oldParentId = task.parentId;

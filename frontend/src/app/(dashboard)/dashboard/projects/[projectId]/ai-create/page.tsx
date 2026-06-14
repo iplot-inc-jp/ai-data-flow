@@ -25,6 +25,7 @@ import type { BusinessFlowItem, RoleItem } from './_components/types';
 import { BusinessKpiTab } from './_components/business-kpi-tab';
 import { AiQualityKpiTab } from './_components/ai-quality-kpi-tab';
 import { KpiList } from './_components/kpi-list';
+import { EditGate } from '@/components/edit-gate';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -138,32 +139,38 @@ export default function AiCreatePage() {
               </TabsTrigger>
             </TabsList>
             <TabsContent value="business" className="mt-4">
-              <BusinessKpiTab projectId={projectId} flows={flows} onGenerated={handleCreated} />
+              <EditGate dim={false}>
+                <BusinessKpiTab projectId={projectId} flows={flows} onGenerated={handleCreated} />
+              </EditGate>
             </TabsContent>
             <TabsContent value="ai-quality" className="mt-4">
-              <AiQualityKpiTab
-                projectId={projectId}
-                flows={flows}
-                systems={systems}
-                onCreated={handleCreated}
-              />
+              <EditGate dim={false}>
+                <AiQualityKpiTab
+                  projectId={projectId}
+                  flows={flows}
+                  systems={systems}
+                  onCreated={handleCreated}
+                />
+              </EditGate>
             </TabsContent>
           </Tabs>
         </div>
       </Card>
 
       {/* KPI一覧（タブ共通） */}
-      <KpiList
-        kpis={kpis}
-        loading={kpisLoading}
-        error={kpisError}
-        highlightIds={highlightIds}
-        flows={flows}
-        systems={systems}
-        roles={roles}
-        informationTypes={informationTypes}
-        onChanged={loadKpis}
-      />
+      <EditGate dim={false}>
+        <KpiList
+          kpis={kpis}
+          loading={kpisLoading}
+          error={kpisError}
+          highlightIds={highlightIds}
+          flows={flows}
+          systems={systems}
+          roles={roles}
+          informationTypes={informationTypes}
+          onChanged={loadKpis}
+        />
+      </EditGate>
     </div>
   );
 }

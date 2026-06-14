@@ -19,6 +19,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { EditGate } from '@/components/edit-gate';
 import {
   systemApi,
   subProjectApi,
@@ -158,7 +159,8 @@ export default function SystemsPage() {
         }
       />
 
-      {/* 追加フォーム */}
+      {/* 追加フォーム（閲覧専用時は無効化） */}
+      <EditGate>
       <Card className="p-4">
         <div className="flex items-center gap-2">
           <select
@@ -190,6 +192,7 @@ export default function SystemsPage() {
 
         {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
       </Card>
+      </EditGate>
 
       {/* 一覧 */}
       <Card className="p-0">
@@ -202,6 +205,7 @@ export default function SystemsPage() {
             システムがありません。上のフォームから追加してください。
           </p>
         ) : (
+          <EditGate dim={false}>
           <ul className="divide-y divide-gray-100">
             {systems.map((s) => (
               <SystemRow
@@ -220,6 +224,7 @@ export default function SystemsPage() {
               />
             ))}
           </ul>
+          </EditGate>
         )}
       </Card>
     </div>

@@ -16,6 +16,7 @@ import {
   ForbiddenError,
   ValidationError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface AddIssueNodeInput {
   userId: string;
@@ -60,6 +61,7 @@ export class AddIssueNodeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: AddIssueNodeInput): Promise<AddIssueNodeOutput> {
@@ -83,6 +85,13 @@ export class AddIssueNodeUseCase {
     if (!isMember) {
       throw new ForbiddenError('You do not have access to this project');
     }
+
+    // 3.5 プロジェクト単位 RBAC: ノード追加は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      tree.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. 親ノードの解決（depth算出 / 同一ツリー検証）
     let depth = 0;

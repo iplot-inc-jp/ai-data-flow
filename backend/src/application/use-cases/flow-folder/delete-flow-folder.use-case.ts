@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteFlowFolderInput {
   userId: string;
@@ -29,6 +30,7 @@ export class DeleteFlowFolderUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteFlowFolderInput): Promise<void> {
@@ -49,6 +51,13 @@ export class DeleteFlowFolderUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: フォルダ削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      folder.projectId,
+      input.userId,
+      'edit',
+    );
 
     await this.flowFolderRepository.delete(input.folderId);
   }

@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -29,6 +30,8 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== DTOs ==========
 
@@ -57,6 +60,8 @@ class UpdateRiskCategoryDto {
 
 @ApiTags('リスクカテゴリ（RBS）')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/risk-categories')
 export class RiskCategoryController {
   constructor(
@@ -105,6 +110,8 @@ export class RiskCategoryController {
 
 @ApiTags('リスクカテゴリ（RBS）')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('risk-categories')
 export class RiskCategoryByIdController {
   constructor(

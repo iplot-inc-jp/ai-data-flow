@@ -6,6 +6,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { ShieldAlert } from 'lucide-react';
 import { RiskTableBoard } from './_components/risk-table-board';
+import { EditGate } from '@/components/edit-gate';
 
 /**
  * リスクマネジメント ワークスペース。
@@ -50,7 +51,9 @@ export default function RiskManagementPage() {
         }
       />
 
-      <RiskTableBoard projectId={projectId} />
+      <EditGate dim={false}>
+        <RiskTableBoard projectId={projectId} />
+      </EditGate>
     </div>
   );
 }

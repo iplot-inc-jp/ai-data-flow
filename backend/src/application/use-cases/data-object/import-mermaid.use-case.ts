@@ -14,6 +14,7 @@ import {
 } from '../../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../../infrastructure/services/company-key.service';
 import { authorizeProject } from './data-object-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { ObjectGraphOutput, toObjectGraphOutput } from './data-object.output';
 
 export interface ImportMermaidInput {
@@ -45,10 +46,11 @@ export class ImportMermaidUseCase {
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
     private readonly claude: ClaudeService,
     private readonly companyKey: CompanyKeyService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: ImportMermaidInput): Promise<ObjectGraphOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
 
     const mermaid = input.mermaid?.trim();
     if (!mermaid) {

@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { SupplierOutput, toSupplierOutput } from './create-supplier.use-case';
 
 export interface UpdateSupplierInput {
@@ -36,6 +37,7 @@ export class UpdateSupplierUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateSupplierInput): Promise<SupplierOutput> {
@@ -59,6 +61,13 @@ export class UpdateSupplierUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      supplier.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. ドメインロジック適用
     supplier.update({

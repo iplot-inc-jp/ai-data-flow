@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Inject,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsOptional, IsBoolean, IsNumber, IsArray, IsIn } from 'class-validator';
@@ -19,8 +20,14 @@ import {
   ICrudMappingRepository,
   Table,
   Column,
+  EntityNotFoundError,
 } from '../../domain';
 import { v4 as uuid } from 'uuid';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 // DTOs
 class CreateTableDto {
@@ -172,6 +179,8 @@ interface CsvImportResult {
 
 @ApiTags('Tables')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('tables')
 export class TableController {
   constructor(
@@ -181,7 +190,44 @@ export class TableController {
     private readonly columnRepository: IColumnRepository,
     @Inject(CRUD_MAPPING_REPOSITORY)
     private readonly crudMappingRepository: ICrudMappingRepository,
+    private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
+
+  /** projectId の edit 権限を強制 */
+  private async assertProjectEdit(projectId: string, userId: string): Promise<void> {
+    await this.projectAccess.assertProjectAccess(projectId, userId, 'edit');
+  }
+
+  /** tableId -> projectId を解決して edit 強制 */
+  private async assertTableEdit(tableId: string, userId: string): Promise<void> {
+    const row = await this.prisma.table.findUnique({
+      where: { id: tableId },
+      select: { projectId: true },
+    });
+    if (!row) throw new EntityNotFoundError('Table', tableId);
+    await this.assertProjectEdit(row.projectId, userId);
+  }
+
+  /** columnId -> table.projectId を解決して edit 強制 */
+  private async assertColumnEdit(columnId: string, userId: string): Promise<void> {
+    const row = await this.prisma.column.findUnique({
+      where: { id: columnId },
+      select: { table: { select: { projectId: true } } },
+    });
+    if (!row) throw new EntityNotFoundError('Column', columnId);
+    await this.assertProjectEdit(row.table.projectId, userId);
+  }
+
+  /** crudMappingId -> column.table.projectId を解決して edit 強制 */
+  private async assertCrudMappingEdit(mappingId: string, userId: string): Promise<void> {
+    const row = await this.prisma.crudMapping.findUnique({
+      where: { id: mappingId },
+      select: { column: { select: { table: { select: { projectId: true } } } } },
+    });
+    if (!row) throw new EntityNotFoundError('CrudMapping', mappingId);
+    await this.assertProjectEdit(row.column.table.projectId, userId);
+  }
 
   @Get('project/:projectId')
   @ApiOperation({ summary: 'プロジェクトのテーブル一覧を取得' })
@@ -206,7 +252,11 @@ export class TableController {
 
   @Post()
   @ApiOperation({ summary: 'テーブルを作成' })
-  async create(@Body() dto: CreateTableDto) {
+  async create(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: CreateTableDto,
+  ) {
+    await this.assertProjectEdit(dto.projectId, user.id);
     const table = Table.create({
       id: uuid(),
       projectId: dto.projectId,
@@ -222,11 +272,16 @@ export class TableController {
 
   @Put(':id')
   @ApiOperation({ summary: 'テーブルを更新' })
-  async update(@Param('id') id: string, @Body() dto: UpdateTableDto) {
+  async update(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateTableDto,
+  ) {
     const table = await this.tableRepository.findById(id);
     if (!table) {
       return { error: 'Table not found' };
     }
+    await this.assertProjectEdit(table.projectId, user.id);
     if (dto.name) table.updateName(dto.name);
     if (dto.displayName !== undefined) table.updateDisplayName(dto.displayName);
     if (dto.description !== undefined) table.updateDescription(dto.description);
@@ -244,7 +299,11 @@ export class TableController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'テーブルを削除' })
-  async delete(@Param('id') id: string) {
+  async delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.assertTableEdit(id, user.id);
     await this.tableRepository.delete(id);
     return { success: true };
   }
@@ -261,9 +320,11 @@ export class TableController {
   @Post(':tableId/columns')
   @ApiOperation({ summary: 'カラムを作成' })
   async createColumn(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('tableId') tableId: string,
     @Body() dto: CreateColumnDto,
   ) {
+    await this.assertTableEdit(tableId, user.id);
     const column = Column.create({
       id: uuid(),
       tableId,
@@ -286,7 +347,11 @@ export class TableController {
 
   @Delete(':tableId/columns/:columnId')
   @ApiOperation({ summary: 'カラムを削除' })
-  async deleteColumn(@Param('columnId') columnId: string) {
+  async deleteColumn(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('columnId') columnId: string,
+  ) {
+    await this.assertColumnEdit(columnId, user.id);
     await this.columnRepository.delete(columnId);
     return { success: true };
   }
@@ -312,7 +377,11 @@ export class TableController {
 
   @Post('crud-mappings')
   @ApiOperation({ summary: 'CRUDマッピングを作成' })
-  async createCrudMapping(@Body() dto: CreateCrudMappingDto) {
+  async createCrudMapping(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: CreateCrudMappingDto,
+  ) {
+    await this.assertColumnEdit(dto.columnId, user.id);
     const { CrudMapping } = await import('../../domain/entities/crud-mapping.entity');
     const mapping = CrudMapping.create({
       id: uuid(),
@@ -341,7 +410,11 @@ export class TableController {
 
   @Delete('crud-mappings/:id')
   @ApiOperation({ summary: 'CRUDマッピングを削除' })
-  async deleteCrudMapping(@Param('id') id: string) {
+  async deleteCrudMapping(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.assertCrudMappingEdit(id, user.id);
     await this.crudMappingRepository.delete(id);
     return { success: true };
   }
@@ -350,7 +423,11 @@ export class TableController {
 
   @Post('import/csv')
   @ApiOperation({ summary: 'CSVからテーブルとカラムをインポート' })
-  async importCsv(@Body() dto: ImportCsvDto): Promise<CsvImportResult> {
+  async importCsv(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: ImportCsvDto,
+  ): Promise<CsvImportResult> {
+    await this.assertProjectEdit(dto.projectId, user.id);
     const errors: string[] = [];
     let tablesCreated = 0;
     let columnsCreated = 0;

@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { EditGate } from '@/components/edit-gate';
 import { EditableMemoBoard } from '@/components/records/editable-memo-board';
 import {
   tobeVisionApi,
@@ -400,7 +401,7 @@ export default function TobeManagementPage() {
           <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
         </div>
       ) : (
-        <>
+        <EditGate dim={false}>
           {/* ── Section: TOBE業務フロー ───────────────────────── */}
           <section className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -604,7 +605,7 @@ export default function TobeManagementPage() {
               ]}
             />
           </section>
-        </>
+        </EditGate>
       )}
 
       {/* ── あるべき姿（TOBEフロー）作成ダイアログ ───────────── */}

@@ -37,6 +37,8 @@ import { ObjectListTable } from './_components/ObjectListTable';
 import { RelationListTable } from './_components/RelationListTable';
 import { ObjectScopeLinkPanel } from './_components/ObjectScopeLinkPanel';
 import { DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from './_components/object-map-shared';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 
 /** スコープ囲みの既定色（インディゴ。キャンバスの DEFAULT_SCOPE_COLOR と揃える） */
 const DEFAULT_SCOPE_COLOR = '#6366f1';
@@ -45,6 +47,7 @@ export default function ObjectMapPage() {
   const params = useParams();
   const projectId = params.projectId as string;
   const { toast } = useToast();
+  const { canEdit } = useReadOnly();
 
   const [graph, setGraph] = useState<ObjectGraphDto | null>(null);
   const [tables, setTables] = useState<Table[]>([]);
@@ -604,6 +607,7 @@ export default function ObjectMapPage() {
               <br />
               まずは第1レベルDFDのデータストアから取り込むのがおすすめです。
             </p>
+            {canEdit && (
             <div className="flex items-center justify-center gap-2">
               <Button onClick={() => void handleImportFromDfd()} disabled={importing}>
                 {importing ? (
@@ -618,6 +622,7 @@ export default function ObjectMapPage() {
                 オブジェクトを手で追加
               </Button>
             </div>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -650,6 +655,7 @@ export default function ObjectMapPage() {
                 onUpdateScope={handleUpdateScope}
                 onDeleteScope={handleDeleteScope}
                 onImportMermaid={handleImportMermaid}
+                readOnly={!canEdit}
               />
             </div>
             {selectedObject && (
@@ -666,7 +672,8 @@ export default function ObjectMapPage() {
             )}
           </div>
 
-          {/* ===== 一覧ビュー ===== */}
+          {/* ===== 一覧ビュー（閲覧専用時は編集系を無効化。行選択は維持） ===== */}
+          <EditGate dim={false}>
           <div className="space-y-4">
             <div className="space-y-2">
               <h2 className="flex items-center gap-1.5 text-sm font-semibold text-gray-700">
@@ -709,6 +716,7 @@ export default function ObjectMapPage() {
               onLinkChange={handleLinkObjectToSubProject}
             />
           </div>
+          </EditGate>
         </>
       )}
     </div>

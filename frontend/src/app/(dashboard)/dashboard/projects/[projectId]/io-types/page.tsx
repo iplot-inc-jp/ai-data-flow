@@ -25,6 +25,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { EditGate } from '@/components/edit-gate';
 import {
   informationTypeApi,
   INFORMATION_CATEGORY_LABELS,
@@ -184,7 +185,8 @@ export default function IoTypesPage() {
         </div>
 
         <div className="space-y-3 p-4">
-          {/* 追加フォーム（name + category） */}
+          {/* 追加フォーム（name + category）（閲覧専用時は無効化） */}
+          <EditGate>
           <div className="flex items-center gap-2">
             <select
               value={newCategory}
@@ -216,6 +218,7 @@ export default function IoTypesPage() {
               追加
             </Button>
           </div>
+          </EditGate>
 
           {error && <p className="text-xs text-red-600">{error}</p>}
 

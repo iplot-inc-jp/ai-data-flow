@@ -9,6 +9,7 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -33,9 +34,13 @@ import {
   GapItemResponseDto,
 } from '../dto';
 import { CurrentUser, CurrentUserPayload } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 @ApiTags('GAP')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/gap-items')
 export class GapItemController {
   constructor(
@@ -113,6 +118,8 @@ export class GapItemController {
 
 @ApiTags('GAP')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('gap-items')
 export class GapItemByIdController {
   constructor(

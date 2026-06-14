@@ -8,6 +8,7 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useReadOnly } from '@/components/read-only-context';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -91,6 +92,7 @@ function patternOf(tree: IssueTree): IssueTreePattern {
 export default function IssueTreesPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [trees, setTrees] = useState<IssueTree[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,10 +121,11 @@ export default function IssueTreesPage() {
   const howToRef = useRef<HTMLDivElement>(null);
 
   const openCreate = useCallback((pattern: IssueTreePattern = 'ISSUE_POINT') => {
+    if (!canEdit) return;
     setNewTree({ pattern, name: '', rootQuestion: '', gapItemId: NO_GAP });
     setCreateError(null);
     setIsCreateOpen(true);
-  }, []);
+  }, [canEdit]);
 
   // n・⌘Enter … ツリー作成 / Shift+/（?） … 操作方法
   useKeyboardShortcuts([
@@ -303,13 +306,15 @@ export default function IssueTreesPage() {
             />
           </div>
           <ManualButton feature="issue-trees" />
-          <Button
-            onClick={() => openCreate('ISSUE_POINT')}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            ツリー作成
-          </Button>
+          {canEdit && (
+            <Button
+              onClick={() => openCreate('ISSUE_POINT')}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              ツリー作成
+            </Button>
+          )}
         </div>
       </div>
 
@@ -414,13 +419,15 @@ export default function IssueTreesPage() {
                   </Link>
 
                   {/* 削除 */}
-                  <button
-                    onClick={() => handleDelete(tree)}
-                    title="削除"
-                    className="absolute bottom-3 right-3 p-1.5 rounded text-gray-300 opacity-0 group-hover:opacity-100 hover:text-red-600 hover:bg-red-50 transition-all"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => handleDelete(tree)}
+                      title="削除"
+                      className="absolute bottom-3 right-3 p-1.5 rounded text-gray-300 opacity-0 group-hover:opacity-100 hover:text-red-600 hover:bg-red-50 transition-all"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                 </CardContent>
               </Card>
             );

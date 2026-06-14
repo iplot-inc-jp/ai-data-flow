@@ -32,6 +32,8 @@ import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Uploa
 import { informationTypeApi, type InformationType } from '@/lib/dfd';
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import { dataObjectApi, type DataObjectDto } from '@/lib/data-objects';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -68,6 +70,7 @@ type IntrospectResult = {
 export default function ProjectCatalogPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [tables, setTables] = useState<TableData[]>([]);
   // INPUT/OUTPUT（情報種別）一覧。テーブルごとの紐付け select で使う。
@@ -543,6 +546,7 @@ export default function ProjectCatalogPage() {
             />
           </span>
           <ManualButton feature="catalog" />
+          {canEdit && (<>
           {/* スキーマから取り込み(AI) */}
           <Dialog open={isSchemaDialogOpen} onOpenChange={(open) => {
             if (!open) closeSchemaDialog();
@@ -825,6 +829,7 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
             </DialogFooter>
           </DialogContent>
         </Dialog>
+          </>)}
         </div>
       </div>
 
@@ -838,7 +843,8 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
         </p>
       </div>
 
-      {/* DB直結（複数） */}
+      {/* DB直結（複数）（閲覧専用時は編集系を無効化） */}
+      <EditGate dim={false}>
       <Card className="bg-white border-gray-200">
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1017,6 +1023,7 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
           )}
         </CardContent>
       </Card>
+      </EditGate>
 
       {/* Search */}
       <div className="relative">
@@ -1069,7 +1076,8 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
                     )}
                   </div>
 
-                  {/* INPUT/OUTPUT 紐付け（クリックは Link への遷移を抑止） */}
+                  {/* INPUT/OUTPUT 紐付け（クリックは Link への遷移を抑止。閲覧専用時は無効化） */}
+                  <EditGate dim={false}>
                   <div
                     className="mt-4 pt-3 border-t border-gray-100"
                     onClick={(e) => {
@@ -1113,6 +1121,7 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
                       </SelectContent>
                     </Select>
                   </div>
+                  </EditGate>
                 </CardContent>
               </Card>
             </Link>
@@ -1128,7 +1137,7 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
             <p className="text-sm text-gray-400 mb-4">
               {searchQuery ? '検索条件を変更してください' : '最初のテーブルを追加しましょう'}
             </p>
-            {!searchQuery && (
+            {!searchQuery && canEdit && (
               <Button
                 className="bg-blue-600 hover:bg-blue-700"
                 onClick={() => setIsCreateDialogOpen(true)}

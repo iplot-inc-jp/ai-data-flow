@@ -1,4 +1,6 @@
-import { Controller, Get, Put, Body, Param } from '@nestjs/common';
+import { Controller, Get, Put, Body, Param,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -16,6 +18,8 @@ import {
 import { Type } from 'class-transformer';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 class GapLedgerRowDto {
   @ApiProperty()
@@ -68,6 +72,8 @@ class UpsertGapLedgerDto {
 
 @ApiTags('GAP台帳')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/gap-ledgers')
 export class GapLedgerController {
   constructor(private readonly prisma: PrismaService) {}

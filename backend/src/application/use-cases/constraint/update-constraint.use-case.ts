@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { ConstraintOutput, toConstraintOutput } from './constraint.output';
 
 export interface UpdateConstraintInput {
@@ -34,6 +35,7 @@ export class UpdateConstraintUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateConstraintInput): Promise<ConstraintOutput> {
@@ -56,6 +58,13 @@ export class UpdateConstraintUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      constraint.projectId,
+      input.userId,
+      'edit',
+    );
 
     constraint.update({
       title: input.title,

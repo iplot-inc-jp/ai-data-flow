@@ -6,6 +6,7 @@ import {
   EntityNotFoundError, ValidationError,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface LinkTableToObjectInput {
   userId: string;
@@ -21,12 +22,13 @@ export class LinkTableToObjectUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: LinkTableToObjectInput): Promise<void> {
     const table = await this.repo.findTableProjectRef(input.tableId);
     if (!table) throw new EntityNotFoundError('Table', input.tableId);
-    await authorizeProject(this.projectRepo, this.orgRepo, table.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, table.projectId, input.userId, this.projectAccess, 'edit');
 
     if (input.dataObjectId !== null) {
       const object = await this.repo.findById(input.dataObjectId);

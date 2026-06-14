@@ -75,6 +75,7 @@ import {
   type FlowDefinition,
 } from '@/lib/flow-definition';
 import mermaid from 'mermaid';
+import { useReadOnly } from '@/components/read-only-context';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -109,11 +110,15 @@ function DfdPanel({
   flowId,
   projectId,
   flowName,
+  canEdit = true,
 }: {
   flowId: string;
   projectId: string;
   flowName: string;
+  canEdit?: boolean;
 }) {
+  // 閲覧専用時に編集系コールバックを無効化（DfdCanvas は全て ?. 呼び）。
+  const ro = <T,>(fn: T): T | undefined => (canEdit ? fn : undefined);
   const [diagram, setDiagram] = useState<DfdDiagram | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -308,12 +313,14 @@ function DfdPanel({
         <Card className="bg-white border-gray-200">
           <CardContent className="py-12 text-center space-y-3">
             <p className="text-gray-500">
-              このフローのDFDはまだ生成されていません。「DFDを生成」で業務フローのノードから自動生成します。
+              このフローのDFDはまだ生成されていません。{canEdit ? '「DFDを生成」で業務フローのノードから自動生成します。' : '編集権限がないため生成できません。'}
             </p>
-            <Button onClick={handleRegenerate} disabled={busy}>
-              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Network className="mr-2 h-4 w-4" />}
-              DFDを生成
-            </Button>
+            {canEdit && (
+              <Button onClick={handleRegenerate} disabled={busy}>
+                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Network className="mr-2 h-4 w-4" />}
+                DFDを生成
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -349,15 +356,15 @@ function DfdPanel({
               <DfdCanvas
                 diagram={diagram}
                 informationTypes={informationTypes}
-                onAddNode={handleAddNode}
-                onUpdateNode={handleUpdateNode}
-                onDeleteNode={handleDeleteNode}
-                onAddFlow={handleAddFlow}
-                onUpdateFlow={handleUpdateFlow}
-                onReconnectFlow={handleReconnectFlow}
-                onDeleteFlow={handleDeleteFlow}
-                onSavePositions={handleSavePositions}
-                onRegenerate={handleRegenerate}
+                onAddNode={ro(handleAddNode)}
+                onUpdateNode={ro(handleUpdateNode)}
+                onDeleteNode={ro(handleDeleteNode)}
+                onAddFlow={ro(handleAddFlow)}
+                onUpdateFlow={ro(handleUpdateFlow)}
+                onReconnectFlow={ro(handleReconnectFlow)}
+                onDeleteFlow={ro(handleDeleteFlow)}
+                onSavePositions={ro(handleSavePositions)}
+                onRegenerate={ro(handleRegenerate)}
               />
             </div>
           ) : (
@@ -814,6 +821,10 @@ export default function ProjectFlowDetailPage() {
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const flowId = params.flowId as string;
+  const { canEdit } = useReadOnly();
+  // 閲覧専用時に編集系コールバックを無効化するためのヘルパー。
+  // SwimlaneCanvas/DfdCanvas は全コールバックを ?. で呼ぶため、undefined を渡せば編集不可になる。
+  const ro = <T,>(fn: T): T | undefined => (canEdit ? fn : undefined);
 
   // フロー図 / 業務定義 / 情報の地図(CRUOA) / DFD のタブ。
   // ?tab=dfd（第1レベルDFDからのドリルダウン）で初期タブをDFDに。
@@ -2484,44 +2495,44 @@ export default function ProjectFlowDetailPage() {
           projectId={projectId}
           otherFlows={otherFlows}
           informationTypes={informationTypes}
-          onSaveNodeInformationLinks={handleSaveNodeInformationLinks}
-          onCreateInformationType={handleCreateInformationType}
+          onSaveNodeInformationLinks={ro(handleSaveNodeInformationLinks)}
+          onCreateInformationType={ro(handleCreateInformationType)}
           onBack={flowHistory.length > 1 ? handleBack : undefined}
-          onUpdateFlow={handleFlowUpdate}
-          onCreateNode={handleNodeCreate}
-          onConnectNodes={handleEdgeCreate}
-          onCreateConnectedNode={handleCreateConnectedNode}
-          onDeleteNode={handleNodeDelete}
-          onDeleteEdge={handleEdgeDelete}
-          onReconnectEdge={handleReconnectEdge}
-          onUpdateEdgeLabel={handleEdgeLabelUpdate}
-          onUpdateEdge={handleEdgeUpdate}
-          onInsertNodeOnEdge={handleInsertNodeOnEdge}
-          onChangeNodeRole={handleNodeRoleUpdate}
-          onUpdateNode={handleNodeUpdate}
-          onUpdateLaneHeight={handleUpdateLaneHeight}
-          onTidyNodes={handleTidyNodes}
-          onUndo={undo}
-          onRedo={redo}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onCreateChildFlow={handleChildFlowCreate}
+          onUpdateFlow={ro(handleFlowUpdate)}
+          onCreateNode={ro(handleNodeCreate)}
+          onConnectNodes={ro(handleEdgeCreate)}
+          onCreateConnectedNode={ro(handleCreateConnectedNode)}
+          onDeleteNode={ro(handleNodeDelete)}
+          onDeleteEdge={ro(handleEdgeDelete)}
+          onReconnectEdge={ro(handleReconnectEdge)}
+          onUpdateEdgeLabel={ro(handleEdgeLabelUpdate)}
+          onUpdateEdge={ro(handleEdgeUpdate)}
+          onInsertNodeOnEdge={ro(handleInsertNodeOnEdge)}
+          onChangeNodeRole={ro(handleNodeRoleUpdate)}
+          onUpdateNode={ro(handleNodeUpdate)}
+          onUpdateLaneHeight={ro(handleUpdateLaneHeight)}
+          onTidyNodes={ro(handleTidyNodes)}
+          onUndo={ro(undo)}
+          onRedo={ro(redo)}
+          canUndo={canEdit && canUndo}
+          canRedo={canEdit && canRedo}
+          onCreateChildFlow={ro(handleChildFlowCreate)}
           onOpenChildFlow={handleNodeDoubleClick}
           onNodeDoubleClick={handleNodeDrillDown}
           onFetchNodeLinks={handleFetchNodeLinks}
-          onCreateNodeLink={handleCreateNodeLink}
-          onDeleteNodeLink={handleDeleteNodeLink}
+          onCreateNodeLink={ro(handleCreateNodeLink)}
+          onDeleteNodeLink={ro(handleDeleteNodeLink)}
           onFetchFlowNodes={handleFetchFlowNodes}
-          onAddRole={handleAddRole}
-          onUpdateRole={handleUpdateRole}
-          onDeleteRole={handleDeleteRole}
+          onAddRole={ro(handleAddRole)}
+          onUpdateRole={ro(handleUpdateRole)}
+          onDeleteRole={ro(handleDeleteRole)}
           systems={systems}
           annotations={annotations}
-          onAddAnnotation={handleAddAnnotation}
-          onUpdateAnnotation={handleUpdateAnnotation}
-          onDeleteAnnotation={handleDeleteAnnotation}
+          onAddAnnotation={ro(handleAddAnnotation)}
+          onUpdateAnnotation={ro(handleUpdateAnnotation)}
+          onDeleteAnnotation={ro(handleDeleteAnnotation)}
           apiEndpoints={apiEndpoints}
-          onSaveEdgeApiLinks={handleSaveEdgeApiLinks}
+          onSaveEdgeApiLinks={ro(handleSaveEdgeApiLinks)}
         />
       </div>
 
@@ -2566,7 +2577,7 @@ export default function ProjectFlowDetailPage() {
 
       {/* DFD（データフロー図）タブ */}
       {activeTab === 'dfd' && (
-        <DfdPanel flowId={flowId} projectId={projectId} flowName={flowData.name} />
+        <DfdPanel flowId={flowId} projectId={projectId} flowName={flowData.name} canEdit={canEdit} />
       )}
 
       {/* Mermaidモーダル（プレビュー機能付き） */}

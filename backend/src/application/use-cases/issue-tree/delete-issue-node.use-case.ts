@@ -12,6 +12,7 @@ import {
   ForbiddenError,
   ValidationError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteIssueNodeInput {
   userId: string;
@@ -33,6 +34,7 @@ export class DeleteIssueNodeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteIssueNodeInput): Promise<void> {
@@ -65,6 +67,13 @@ export class DeleteIssueNodeUseCase {
     if (!isMember) {
       throw new ForbiddenError('You do not have access to this project');
     }
+
+    // 4.5 プロジェクト単位 RBAC: ノード削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      tree.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 5. 削除
     await this.issueNodeRepository.delete(node.id);

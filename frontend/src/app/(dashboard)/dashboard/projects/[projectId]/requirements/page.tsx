@@ -39,6 +39,8 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -84,6 +86,7 @@ const statusLabels: Record<string, { label: string; color: string }> = {
 export default function RequirementsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -235,14 +238,15 @@ export default function RequirementsPage() {
   }, []);
 
   const openManualAdd = useCallback(() => {
+    if (!canEdit) return;
     setNewRequirement((prev) => ({ ...prev, parentId: '' }));
     setIsAddDialogOpen(true);
-  }, []);
+  }, [canEdit]);
 
   useKeyboardShortcuts([
     { combo: 'n', handler: openManualAdd },
     { combo: 'mod+enter', handler: openManualAdd },
-    { combo: 'g', handler: () => setIsAiDialogOpen(true) },
+    { combo: 'g', handler: () => { if (canEdit) setIsAiDialogOpen(true); } },
     { combo: 'shift+/', handler: openHowTo },
   ]);
 
@@ -390,28 +394,33 @@ export default function RequirementsPage() {
             />
           </span>
           <ManualButton feature="requirements" />
-          <Button
-            variant="outline"
-            onClick={() => setIsAiDialogOpen(true)}
-            className="border-purple-300 text-purple-700 hover:bg-purple-50"
-          >
-            <Sparkles className="h-4 w-4 mr-2" />
-            AIで生成
-          </Button>
-          <Button
-            onClick={() => {
-              setNewRequirement({ ...newRequirement, parentId: '' });
-              setIsAddDialogOpen(true);
-            }}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            要求を追加
-          </Button>
+          {canEdit && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setIsAiDialogOpen(true)}
+                className="border-purple-300 text-purple-700 hover:bg-purple-50"
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                AIで生成
+              </Button>
+              <Button
+                onClick={() => {
+                  setNewRequirement({ ...newRequirement, parentId: '' });
+                  setIsAddDialogOpen(true);
+                }}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                要求を追加
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
       {/* 要求一覧 */}
+      <EditGate dim={false}>
       {requirements.length > 0 ? (
         <Card className="bg-white border-gray-200">
           <CardContent className="p-4">{renderRequirementTree(requirements)}</CardContent>
@@ -446,6 +455,7 @@ export default function RequirementsPage() {
           </CardContent>
         </Card>
       )}
+      </EditGate>
 
       {/* AI生成ダイアログ */}
       <Dialog open={isAiDialogOpen} onOpenChange={setIsAiDialogOpen}>
