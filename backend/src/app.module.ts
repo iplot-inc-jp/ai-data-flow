@@ -385,7 +385,9 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
 import { QStashService } from './infrastructure/services/qstash.service';
 import { JobService } from './infrastructure/services/job.service';
 import { TaskWebhookService } from './infrastructure/services/task-webhook.service';
+import { TrackerImportService } from './infrastructure/services/trackers/tracker-import.service';
 import { WebhookController } from './presentation/controllers/webhook.controller';
+import { TrackerConnectionController } from './presentation/controllers/tracker-connection.controller';
 import {
   JobWorkerController,
   ProjectJobController,
@@ -495,6 +497,8 @@ import {
     JobByIdController,
     // タスク Webhook（outbound: Brain Pro → 外部/ipro-kun）
     WebhookController,
+    // 外部トラッカー（Backlog/Jira）移行・同期
+    TrackerConnectionController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -859,6 +863,7 @@ import {
     QStashService,
     JobService,
     TaskWebhookService,
+    TrackerImportService,
 
     // ========== Global Guards ==========
     {

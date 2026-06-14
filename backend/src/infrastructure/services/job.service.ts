@@ -9,6 +9,7 @@ import { ClaudeService } from './claude.service';
 import { CryptoService } from './crypto.service';
 import { ImportMermaidUseCase } from '../../application/use-cases/data-object/import-mermaid.use-case';
 import { GenerateKpisUseCase } from '../../application/use-cases/kpi/generate-kpis.use-case';
+import { TrackerImportService } from './trackers/tracker-import.service';
 
 /**
  * 非同期バックグラウンドジョブの起票・実行サービス。
@@ -38,6 +39,7 @@ export class JobService {
     private readonly crypto: CryptoService,
     private readonly importMermaid: ImportMermaidUseCase,
     private readonly generateKpis: GenerateKpisUseCase,
+    private readonly trackerImport: TrackerImportService,
   ) {}
 
   /**
@@ -465,6 +467,22 @@ export class JobService {
         return { kind: 'ISSUE_SUGGESTIONS', suggestions };
       }
 
+      // ===== 外部トラッカー移行/同期ジョブ（Backlog/Jira → Task） =====
+      case 'TRACKER_IMPORT': {
+        const connectionId = this.requireString(
+          payload.connectionId,
+          'payload.connectionId',
+        );
+        const mode: 'full' | 'incremental' =
+          payload.mode === 'incremental' ? 'incremental' : 'full';
+        const result = await this.trackerImport.run(
+          connectionId,
+          mode,
+          (progress) => this.updateProgress(job.id, progress),
+        );
+        return { kind: 'TRACKER_IMPORT', ...result };
+      }
+
       // ===== Webhook 配信ジョブ（タスクイベントを外部=ipro-kun 等へ POST） =====
       case 'WEBHOOK_DELIVERY': {
         return this.deliverWebhook(payload);
@@ -600,6 +618,24 @@ export class JobService {
       throw new Error(`${name} が必要です`);
     }
     return value;
+  }
+
+  /**
+   * 実行中ジョブの進捗(0–100)を更新する（長時間ジョブの可視化用）。
+   * 失敗は握りつぶす（進捗更新の失敗で本体を止めない）。
+   */
+  private async updateProgress(id: string, progress: number): Promise<void> {
+    const clamped = Math.max(0, Math.min(100, Math.round(progress)));
+    try {
+      await this.prisma.backgroundJob.update({
+        where: { id },
+        data: { progress: clamped },
+      });
+    } catch (e) {
+      this.logger.warn(
+        `Failed to update progress for job ${id}: ${(e as Error)?.message ?? String(e)}`,
+      );
+    }
   }
 }
 

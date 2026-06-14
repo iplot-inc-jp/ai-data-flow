@@ -98,6 +98,37 @@ model BackgroundJob {
   @@map("background_jobs")
 }
 
+// 外部課題トラッカー（Backlog / Jira）接続。CSV不要のフル移行＋差分/定期同期に使う。
+enum IssueTrackerProvider {
+  BACKLOG
+  JIRA
+}
+
+model IssueTrackerConnection {
+  id            String               @id @default(uuid())
+  projectId     String               @map("project_id")
+  provider      IssueTrackerProvider
+  // Backlog: スペースホスト（例 iplot.backlog.com）。Jira: サイトURL（例 https://xxx.atlassian.net）
+  host          String
+  // Jira のみ: 認証メールアドレス（Backlog は不要）
+  email         String?
+  // Backlog: APIキー / Jira: APIトークン。AES-256-GCM 暗号化保存。レスポンスでは返さない
+  credentialEnc String               @map("credential_enc")
+  // 取り込み対象のプロジェクトキー（Backlog projectKey / Jira project key）
+  projectKey    String?              @map("project_key")
+  lastSyncedAt  DateTime?            @map("last_synced_at")
+  autoSync      Boolean              @default(false) @map("auto_sync")
+  syncIntervalMinutes Int            @default(60) @map("sync_interval_minutes")
+  status        String               @default("active")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("issue_tracker_connections")
+}
+
 // Webhook 設定（プロジェクトごとの送信先。ipro-kun 等の外部連携）。
 // 配信自体は BackgroundJob(type=WEBHOOK_DELIVERY) に乗せ、自動リトライ＋試行記録を再利用する。
 model Webhook {
@@ -242,6 +273,7 @@ model Project {
   members                 ProjectMember[]
   backgroundJobs          BackgroundJob[]
   webhooks                Webhook[]
+  trackerConnections      IssueTrackerConnection[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1451,6 +1483,10 @@ model Task {
   projectId      String       @map("project_id")
   // 親タスク（subtask / 親タスク）
   parentId       String?      @map("parent_id")
+  // 外部トラッカー(Backlog/Jira)からの移行・同期で冪等 upsert するための由来キー。
+  // 例: "BACKLOG:IPLOT-12" / "JIRA:ABC-34"。手動作成タスクは null。
+  // (projectId, sourceKey) で一意にし、再 import 時に重複作成せず更新する。
+  sourceKey      String?      @map("source_key")
   title          String
   description    String?      @db.Text
   status         TaskStatus   @default(OPEN)
@@ -1485,6 +1521,8 @@ model Task {
   comments     TaskComment[]
   attachments  Attachment[]
 
+  // 外部トラッカー由来キーでの冪等 upsert 用（同一プロジェクト内で一意）。
+  @@unique([projectId, sourceKey], name: "projectId_sourceKey")
   @@map("tasks")
 }
 

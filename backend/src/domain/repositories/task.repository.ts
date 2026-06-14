@@ -21,6 +21,14 @@ export interface ITaskRepository {
   findByProjectId(projectId: string, issueNodeId?: string): Promise<Task[]>;
   /** 直下の子タスク（親付け替えや削除前チェック用） */
   findChildrenByParentId(parentId: string): Promise<Task[]>;
+  /**
+   * 外部トラッカー由来キー（sourceKey）で 1 件取得（プロジェクト内一意）。
+   * 移行/同期の冪等 upsert に使う（既存があれば更新、無ければ新規作成）。
+   */
+  findByProjectIdAndSourceKey(
+    projectId: string,
+    sourceKey: string,
+  ): Promise<Task | null>;
   save(task: Task): Promise<void>;
   /** 子タスクはスキーマの onDelete: Cascade で連鎖削除される */
   delete(id: string): Promise<void>;

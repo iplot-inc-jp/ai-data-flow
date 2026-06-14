@@ -51,6 +51,7 @@ const typeMeta: Record<string, string> = {
   AI_KPI: 'KPI 生成',
   AI_ISSUE_SUGGEST: '課題ノード提案',
   WEBHOOK_DELIVERY: 'Webhook 配信',
+  TRACKER_IMPORT: '外部トラッカー移行/同期',
 };
 
 function typeLabel(type: string): string {
@@ -416,7 +417,7 @@ export function BatchJobsAdminPanel({ projectId, limit = 50 }: BatchJobsAdminPan
   );
 
   return (
-    <Card className="bg-white border-gray-200">
+    <Card id="batch-jobs" className="bg-white border-gray-200 scroll-mt-24">
       <CardContent className="p-5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-base font-semibold text-gray-900">

@@ -32,6 +32,7 @@ import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
 import { BatchJobsAdminPanel } from '@/components/batch-jobs-admin-panel';
 import { WebhooksAdminPanel } from '@/components/webhooks-admin-panel';
+import { TrackerConnectionsAdminPanel } from '@/components/tracker-connections-admin-panel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -890,6 +891,9 @@ export default function IntegrationsPage() {
         </div>
       )}
       </EditGate>
+
+      {/* ===== 課題トラッカー連携（Backlog/Jira・管理者限定: CRUD/接続テスト/フル移行・差分同期） ===== */}
+      <TrackerConnectionsAdminPanel projectId={projectId} />
 
       {/* ===== タスク Webhook（外部送信・管理者限定: CRUD/テスト送信） ===== */}
       <WebhooksAdminPanel projectId={projectId} />
