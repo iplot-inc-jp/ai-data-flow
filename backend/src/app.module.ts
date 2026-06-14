@@ -281,6 +281,7 @@ import {
   JwtTokenService,
   ProjectAccessService,
   ProjectBundleService,
+  EntityJsonService,
 } from './infrastructure';
 
 // Presentation
@@ -341,6 +342,8 @@ import {
   ProjectBundleController,
   OrganizationProjectImportController,
   ExportSchemaController,
+  EntityJsonController,
+  EntityJsonSchemaController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -491,6 +494,9 @@ import {
     ProjectBundleController,
     OrganizationProjectImportController,
     ExportSchemaController,
+    // 単一エンティティ（業務フロー/DFD/イシューツリー）丸ごと JSON I/O
+    EntityJsonController,
+    EntityJsonSchemaController,
     // Background Jobs (Upstash QStash)
     JobWorkerController,
     ProjectJobController,
@@ -852,6 +858,7 @@ import {
     // ========== Services ==========
     ProjectAccessService,
     ProjectBundleService,
+    EntityJsonService,
     ClaudeService,
     ApiKeyService,
     CryptoService,
