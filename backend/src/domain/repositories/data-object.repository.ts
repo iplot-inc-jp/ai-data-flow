@@ -121,6 +121,9 @@ export interface IDataObjectRepository {
 
   /** テーブルの所属プロジェクト解決（認可用） */
   findTableProjectRef(tableId: string): Promise<TableProjectRef | null>;
+
+  /** 領域（SubProject）の所属プロジェクトID（存在しなければ null） */
+  findSubProjectProjectId(subProjectId: string): Promise<string | null>;
   /** テーブルをオブジェクトに紐づけ/解除 */
   linkTableToObject(tableId: string, dataObjectId: string | null): Promise<void>;
 

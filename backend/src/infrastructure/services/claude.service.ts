@@ -22,6 +22,22 @@ export interface MermaidFlowParseResult {
   edges: Array<{ sourceKey: string; targetKey: string; label?: string }>;
 }
 
+export type ObjectMapCardinality = 'ONE_TO_ONE' | 'ONE_TO_MANY' | 'MANY_TO_MANY';
+
+/**
+ * Mermaid（erDiagram / classDiagram / flowchart）から抽出したオブジェクト関係性マップ。
+ * object はエンティティ/クラス/ノード、relation は関係/エッジ。source/target は object 名で表す。
+ */
+export interface MermaidObjectMapParseResult {
+  objects: Array<{ name: string; description?: string }>;
+  relations: Array<{
+    source: string;
+    target: string;
+    cardinality?: ObjectMapCardinality;
+    label?: string;
+  }>;
+}
+
 /**
  * イシューツリー用「生成AI候補」の入力コンテキスト
  */
@@ -300,6 +316,78 @@ ${mermaid}`,
         nodes: Array.isArray(result.nodes) ? result.nodes : [],
         edges: Array.isArray(result.edges) ? result.edges : [],
       } as MermaidFlowParseResult;
+    } catch (err) {
+      console.error('JSON parse error:', textContent.text);
+      throw new Error('Mermaid図の解析に失敗しました');
+    }
+  }
+
+  /**
+   * Mermaid（erDiagram / classDiagram / flowchart）をオブジェクト関係性マップに変換。
+   * エンティティ/クラス/ノードを object、関係/エッジを relation として抽出する。
+   */
+  async parseMermaidToObjectMap(
+    mermaid: string,
+    apiKey: string,
+  ): Promise<MermaidObjectMapParseResult> {
+    const client = this.getClient(apiKey);
+
+    const systemPrompt = `あなたはデータモデル図の解析の専門家です。
+与えられた Mermaid 図を、オブジェクト関係性マップ用の「オブジェクト（object）」と「関係（relation）」に変換してください。
+erDiagram / classDiagram / flowchart のいずれの Mermaid でも対応すること。
+
+抽出ルール：
+1. エンティティ（erDiagram）/ クラス（classDiagram）/ ノード（flowchart）を **object** として抽出する。
+2. 関係（erDiagram の関係線）/ 関連（classDiagram の association）/ エッジ（flowchart の矢印）を **relation** として抽出する。
+3. relation の source / target は **object 名**（表示名）で表す。Mermaid のノードIDではなく、人が読む名前を使う。
+4. 多重度記法がある場合は cardinality に反映する：
+   - "||--||"（1対1）→ "ONE_TO_ONE"
+   - "||--o{" / "||--|{"（1対多）→ "ONE_TO_MANY"
+   - "}o--o{" / "}|--|{"（多対多）→ "MANY_TO_MANY"
+   - 判断できなければ cardinality は省略してよい。
+5. 関係/エッジにラベル（例: erの関係ラベル、flowchart の -->|label|）があれば label に入れる。
+6. object に説明（classDiagram のコメント等）があれば description に入れる。無ければ省略する。
+
+出力は必ず以下のJSON形式のみで返してください（説明文・コードフェンス以外の文章は不要）：
+{
+  "objects": [
+    { "name": "オブジェクト名", "description": "説明（任意）" }
+  ],
+  "relations": [
+    { "source": "始点オブジェクト名", "target": "終点オブジェクト名", "cardinality": "ONE_TO_ONE | ONE_TO_MANY | MANY_TO_MANY", "label": "関係ラベル（任意）" }
+  ]
+}`;
+
+    const response = await client.messages.create({
+      model: this.defaultModel(),
+      max_tokens: 8192,
+      messages: [
+        {
+          role: 'user',
+          content: `以下の Mermaid 図をオブジェクト関係性マップに変換してください：
+
+${mermaid}`,
+        },
+      ],
+      system: systemPrompt,
+    });
+
+    const textContent = response.content.find((c) => c.type === 'text');
+    if (!textContent || textContent.type !== 'text') {
+      throw new Error('Claude APIからの応答が不正です');
+    }
+
+    try {
+      let jsonText = textContent.text;
+      const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) {
+        jsonText = jsonMatch[1];
+      }
+      const result = JSON.parse(jsonText.trim());
+      return {
+        objects: Array.isArray(result.objects) ? result.objects : [],
+        relations: Array.isArray(result.relations) ? result.relations : [],
+      } as MermaidObjectMapParseResult;
     } catch (err) {
       console.error('JSON parse error:', textContent.text);
       throw new Error('Mermaid図の解析に失敗しました');

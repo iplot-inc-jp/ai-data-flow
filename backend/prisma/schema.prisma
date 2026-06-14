@@ -1189,6 +1189,8 @@ model SubProject {
   stakeholderAssignments StakeholderSubProject[]
   lessons          LessonLearned[]
   meetingLinks     MeetingSubProject[]
+  dataObjects            DataObject[]
+  dataObjectAnnotations  DataObjectAnnotation[]
 
   @@map("sub_projects")
 }
@@ -1522,6 +1524,8 @@ enum RelationCardinality {
 model DataObject {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 所属領域（SubProject）。スコープ囲みでの自動紐付け・紐付け画面で設定。null=未分類
+  subProjectId String? @map("sub_project_id")
   name        String
   description String?  @db.Text
   color       String?
@@ -1533,6 +1537,7 @@ model DataObject {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject   SubProject?          @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   dfdNodes     DfdNode[]
   tables       Table[]
   outRelations DataObjectRelation[] @relation("DataObjectRelSource")
@@ -1576,11 +1581,19 @@ model DataObjectAnnotation {
   width     Float?             @map("width")
   height    Float?             @map("height")
   color     String?
+  // kind=SCOPE の枠線スタイル 'dashed' | 'solid' と背景塗りの不透明度(0-1)（FlowAnnotation と同規約）
+  borderStyle String?          @map("border_style")
+  fillOpacity Float?           @map("fill_opacity")
+  // kind=SCOPE が表す領域（SubProject）。この囲みに入ったオブジェクトを自動でこの領域に紐付ける
+  subProjectId String?         @map("sub_project_id")
+  // 囲み（ウィンドウ）の表示/非表示トグル
+  visible    Boolean           @default(true)
   order     Int                @default(0)
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@map("data_object_annotations")

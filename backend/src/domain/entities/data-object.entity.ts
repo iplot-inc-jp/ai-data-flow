@@ -6,6 +6,8 @@ export interface CreateDataObjectProps {
   name: string;
   description?: string | null;
   color?: string | null;
+  /** 所属領域（SubProject）。null/省略=未分類 */
+  subProjectId?: string | null;
   positionX?: number;
   positionY?: number;
   order?: number;
@@ -17,6 +19,7 @@ export interface ReconstructDataObjectProps {
   name: string;
   description: string | null;
   color: string | null;
+  subProjectId: string | null;
   positionX: number;
   positionY: number;
   order: number;
@@ -34,6 +37,7 @@ export class DataObject extends BaseEntity {
   private _name: string;
   private _description: string | null;
   private _color: string | null;
+  private _subProjectId: string | null;
   private _positionX: number;
   private _positionY: number;
   private _order: number;
@@ -44,6 +48,7 @@ export class DataObject extends BaseEntity {
     name: string,
     description: string | null,
     color: string | null,
+    subProjectId: string | null,
     positionX: number,
     positionY: number,
     order: number,
@@ -55,6 +60,7 @@ export class DataObject extends BaseEntity {
     this._name = name;
     this._description = description;
     this._color = color;
+    this._subProjectId = subProjectId;
     this._positionX = positionX;
     this._positionY = positionY;
     this._order = order;
@@ -71,6 +77,7 @@ export class DataObject extends BaseEntity {
       name,
       props.description ?? null,
       props.color ?? null,
+      props.subProjectId ?? null,
       props.positionX ?? 0,
       props.positionY ?? 0,
       props.order ?? 0,
@@ -86,6 +93,7 @@ export class DataObject extends BaseEntity {
       props.name,
       props.description,
       props.color,
+      props.subProjectId,
       props.positionX,
       props.positionY,
       props.order,
@@ -111,6 +119,12 @@ export class DataObject extends BaseEntity {
     this.touch();
   }
 
+  /** 所属領域（SubProject）を変更。null=未分類へ */
+  updateSubProject(subProjectId: string | null): void {
+    this._subProjectId = subProjectId ?? null;
+    this.touch();
+  }
+
   updateOrder(order: number): void {
     this._order = order;
     this.touch();
@@ -126,6 +140,7 @@ export class DataObject extends BaseEntity {
   get name(): string { return this._name; }
   get description(): string | null { return this._description; }
   get color(): string | null { return this._color; }
+  get subProjectId(): string | null { return this._subProjectId; }
   get positionX(): number { return this._positionX; }
   get positionY(): number { return this._positionY; }
   get order(): number { return this._order; }

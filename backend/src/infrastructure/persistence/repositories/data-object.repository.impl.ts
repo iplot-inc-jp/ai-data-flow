@@ -25,6 +25,7 @@ interface ObjectRow {
   name: string;
   description: string | null;
   color: string | null;
+  subProjectId: string | null;
   positionX: number;
   positionY: number;
   order: number;
@@ -58,6 +59,7 @@ export class DataObjectRepositoryImpl implements IDataObjectRepository {
       name: r.name,
       description: r.description,
       color: r.color,
+      subProjectId: r.subProjectId,
       positionX: r.positionX,
       positionY: r.positionY,
       order: r.order,
@@ -158,6 +160,7 @@ export class DataObjectRepositoryImpl implements IDataObjectRepository {
       name: o.name,
       description: o.description,
       color: o.color,
+      subProjectId: o.subProjectId,
       positionX: o.positionX,
       positionY: o.positionY,
       order: o.order,
@@ -330,6 +333,14 @@ export class DataObjectRepositoryImpl implements IDataObjectRepository {
       where: { id: tableId },
       data: { dataObjectId },
     });
+  }
+
+  async findSubProjectProjectId(subProjectId: string): Promise<string | null> {
+    const sp = await this.prisma.subProject.findUnique({
+      where: { id: subProjectId },
+      select: { projectId: true },
+    });
+    return sp?.projectId ?? null;
   }
 
   generateId(): string {
