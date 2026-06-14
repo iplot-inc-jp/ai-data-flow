@@ -2295,6 +2295,8 @@ model ChangeLog {
   entity     String? // path から導出した対象種別（business-flows/tasks/risks 等）
   action     String? // CREATE / UPDATE / DELETE
   summary    String?
+  // リクエストボディ（秘匿情報は [REDACTED] にマスク・サイズ上限ありの JSON 文字列）
+  body       String?  @db.Text
   statusCode Int?     @map("status_code")
   createdAt  DateTime @default(now()) @map("created_at")
 

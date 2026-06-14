@@ -30,8 +30,10 @@ const MAX_LIMIT = 300;
 export class ChangeLogController {
   constructor(private readonly prisma: PrismaService) {}
 
-  // project → org メンバー確認（スーパー管理者は常に許可）
-  private async assertProjectMember(
+  // 操作履歴（監査ログ）の閲覧は管理者限定:
+  // 全体管理者(super-admin) または 会社管理者(OrganizationMember.role OWNER/ADMIN) のみ。
+  // 一般メンバー(MEMBER/VIEWER)は閲覧不可。
+  private async assertHistoryAdmin(
     projectId: string,
     userId: string,
   ): Promise<void> {
@@ -56,10 +58,12 @@ export class ChangeLogController {
           userId,
         },
       },
-      select: { id: true },
+      select: { role: true },
     });
-    if (!member) {
-      throw new ForbiddenError('You are not a member of this organization');
+    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
+      throw new ForbiddenError(
+        '操作履歴の閲覧は会社管理者・全体管理者のみ可能です',
+      );
     }
   }
 
@@ -78,7 +82,7 @@ export class ChangeLogController {
     @Param('projectId') projectId: string,
     @Query('limit') limit?: string,
   ) {
-    await this.assertProjectMember(projectId, user.id);
+    await this.assertHistoryAdmin(projectId, user.id);
 
     const parsed = Number.parseInt(limit ?? '', 10);
     const take = Number.isNaN(parsed)

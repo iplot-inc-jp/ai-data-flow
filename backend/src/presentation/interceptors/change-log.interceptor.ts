@@ -13,6 +13,47 @@ import { domainErrorToStatusAndCode } from '../filters/domain-exception.filter';
 /** 記録対象の HTTP メソッド */
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/** body 記録の上限（JSON 文字列の最大長。これを超えたら切り詰める） */
+const MAX_BODY_LEN = 4000;
+/**
+ * 秘匿情報とみなすキー（部分一致・大文字小文字無視）。値を [REDACTED] に置換する。
+ * password / token / secret / apiKey / anthropic / pat / credential / authorization 等。
+ */
+const SENSITIVE_KEY_RE =
+  /pass|password|token|secret|apikey|api_key|anthropic|\bpat\b|credential|authorization|privatekey|private_key|accesskey|access_key|clientsecret|refresh/i;
+
+/** オブジェクトを再帰的に走査し、秘匿キーの値を [REDACTED] にして返す（配列・ネスト対応） */
+function redactValue(value: unknown, depth = 0): unknown {
+  if (depth > 6) return '[TRUNCATED_DEPTH]';
+  if (Array.isArray(value)) {
+    return value.slice(0, 100).map((v) => redactValue(v, depth + 1));
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = SENSITIVE_KEY_RE.test(k) ? '[REDACTED]' : redactValue(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** リクエストボディを redact 済み JSON 文字列にする（空 or 失敗時は null、上限超は切り詰め） */
+function serializeBody(body: Record<string, unknown>): string | null {
+  if (!body || typeof body !== 'object' || Object.keys(body).length === 0) {
+    return null;
+  }
+  try {
+    let json = JSON.stringify(redactValue(body));
+    if (json.length > MAX_BODY_LEN) {
+      json = json.slice(0, MAX_BODY_LEN) + '…[TRUNCATED]';
+    }
+    return json;
+  } catch {
+    return null;
+  }
+}
+
 /** メソッド → action の対応 */
 const METHOD_ACTION: Record<string, string> = {
   POST: 'CREATE',
@@ -273,6 +314,10 @@ export class ChangeLogInterceptor implements NestInterceptor {
       }
     }
 
+    // リクエストボディ全体（秘匿情報を redact ＋上限切り詰め）を記録する。
+    // DELETE はボディが無いことが多いので null になる。
+    const serializedBody = serializeBody(body);
+
     const writeLog = (statusCode: number | null): void => {
       // fire-and-forget: await せず、失敗してもリクエストには影響させない
       void (async () => {
@@ -290,6 +335,7 @@ export class ChangeLogInterceptor implements NestInterceptor {
               entity,
               action: METHOD_ACTION[method] ?? null,
               summary,
+              body: serializedBody,
               statusCode,
             },
           });

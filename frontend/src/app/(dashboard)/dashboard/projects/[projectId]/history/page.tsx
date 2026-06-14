@@ -41,16 +41,36 @@ interface ChangeLogRow {
   entity: string | null;
   action: string | null; // CREATE / UPDATE / DELETE
   summary: string | null;
+  /** リクエストボディ（秘匿情報は [REDACTED]・JSON文字列。null のことも） */
+  body: string | null;
   statusCode: number | null;
   createdAt: string;
 }
+
+/** 閲覧権限なし（管理者限定）を表すフラグ付きエラー。 */
+class ForbiddenHistoryError extends Error {}
 
 async function listChangeLogs(projectId: string): Promise<ChangeLogRow[]> {
   const res = await fetch(`${API_URL}/api/projects/${projectId}/change-logs?limit=300`, {
     headers: headers(),
   });
+  if (res.status === 403) {
+    throw new ForbiddenHistoryError(
+      '操作履歴の閲覧は会社管理者・全体管理者のみ可能です。',
+    );
+  }
   if (!res.ok) throw new Error('変更履歴の取得に失敗しました');
   return res.json();
+}
+
+/** JSON 文字列を読みやすく整形（失敗時はそのまま返す）。 */
+function prettyJson(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -180,14 +200,32 @@ export default function HistoryPage() {
   // フィルタ（対象種別 / アクション）。空文字 = すべて。
   const [entityFilter, setEntityFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  // 閲覧権限なし（管理者限定）の判定。
+  const [forbidden, setForbidden] = useState(false);
+  // body を展開表示している行 id。
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const load = useCallback(async () => {
     setError(null);
+    setForbidden(false);
     try {
       const rows = await listChangeLogs(projectId);
       setLogs(rows);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+      if (e instanceof ForbiddenHistoryError) {
+        setForbidden(true);
+        setLogs([]);
+      } else {
+        setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+      }
     }
   }, [projectId]);
 
@@ -242,8 +280,8 @@ export default function HistoryPage() {
             変更履歴
           </span>
         }
-        description="このプロジェクトに対する作成・更新・削除の操作が自動で記録されます。「いつ・誰が・何を」変更したかを確認できます。"
-        help="各画面での書き込み操作（作成・更新・削除）はサーバー側で自動記録されます。手動での登録は不要です。失敗した操作（4xx/5xx）はグレーの打消し表示になります。"
+        description="このプロジェクトに対する作成・更新・削除の操作が自動で記録されます。「いつ・誰が・何を・どんな内容で」変更したかを確認できます（会社管理者・全体管理者のみ閲覧可）。"
+        help="各画面での書き込み操作（作成・更新・削除）はサーバー側で自動記録されます（操作者・リクエスト内容を含む。パスワード等の機微情報は[REDACTED]でマスク）。「内容を表示」で送信内容を展開できます。失敗した操作（4xx/5xx）はグレーの打消し表示になります。閲覧は会社管理者・全体管理者に限定されています。"
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
@@ -321,7 +359,19 @@ export default function HistoryPage() {
       )}
 
       {/* 一覧 */}
-      {loading ? (
+      {forbidden ? (
+        <Card className="bg-white border-amber-200">
+          <CardContent className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+            <History className="h-8 w-8 text-amber-400" />
+            <p className="text-sm font-medium text-gray-700">
+              操作履歴は会社管理者・全体管理者のみ閲覧できます
+            </p>
+            <p className="text-xs text-gray-400">
+              閲覧が必要な場合は、会社の管理者にお問い合わせください。
+            </p>
+          </CardContent>
+        </Card>
+      ) : loading ? (
         <div className="flex h-[200px] items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
@@ -432,7 +482,24 @@ export default function HistoryPage() {
                             failed ? 'text-gray-400 line-through' : 'text-gray-600'
                           }`}
                         >
-                          <span className="line-clamp-2">{log.summary || '—'}</span>
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="line-clamp-2">{log.summary || '—'}</span>
+                            {log.body && (
+                              <button
+                                type="button"
+                                onClick={() => toggleExpand(log.id)}
+                                className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 hover:bg-gray-50"
+                                title="リクエスト内容（body）を表示"
+                              >
+                                {expanded.has(log.id) ? '内容を隠す' : '内容を表示'}
+                              </button>
+                            )}
+                          </div>
+                          {expanded.has(log.id) && log.body && (
+                            <pre className="mt-1.5 max-h-64 overflow-auto rounded bg-gray-50 p-2 text-[11px] leading-snug text-gray-700">
+                              {prettyJson(log.body)}
+                            </pre>
+                          )}
                         </td>
                       </tr>
                     );
