@@ -45,6 +45,45 @@ export interface ImportResult {
   warnings: string[];
 }
 
+// ---- 機能(section)単位 export/import の型 ----------------------------------
+
+/** listSections() の 1 要素（利用可能な機能の説明）。 */
+export interface SectionDescriptor {
+  /** section キー（= バンドルの entities キー）。 */
+  key: string;
+  /** この section に含まれる Prisma モデル（投入順）。 */
+  models: string[];
+  /**
+   * この section が参照する（= import 前に存在している必要がある）他 section のキー。
+   * 単一 section import 時、これら依存先の FK は **既存DB の id** で解決する。
+   */
+  dependsOnKeys: string[];
+}
+
+/** exportSection() の戻り値（1 section の全モデル行）。 */
+export interface SectionExport {
+  formatVersion: number;
+  section: string;
+  /** model 名 -> その model の全 Row（id 等の実DB値を保持）。 */
+  rows: Record<string, Array<Record<string, unknown>>>;
+}
+
+/** importSection() の入力ペイロード。 */
+export interface SectionImportPayload {
+  formatVersion?: number;
+  /** model 名 -> Row[]。export の rows と同形。 */
+  rows: Record<string, Array<Record<string, unknown>>>;
+}
+
+/** importSection() の戻り値。 */
+export interface SectionImportResult {
+  projectId: string;
+  section: string;
+  mode: ImportMode;
+  counts: Record<string, number>;
+  warnings: string[];
+}
+
 // ---- FK 再マップの宣言的メタ -------------------------------------------------
 
 /**
@@ -670,6 +709,109 @@ const SECTIONS: SectionSpec[] = [
  */
 const ATTACHMENT_EXPORT_OMIT = new Set(['data']);
 
+/**
+ * FK 列 → 参照先 Prisma モデル（デリゲート名）。
+ * schema.prisma の @relation(fields:[...]) から導出。section 間依存の算出
+ * （listSections の dependsOnKeys）と、単一 section import 時の「依存先 section の
+ * 既存DB行を id で解決」に用いる。
+ *
+ * 全体 import は従来どおり idMap 横断で旧→新解決するため、このマップは使わない。
+ */
+const FK_TARGET_MODEL: Record<string, string> = {
+  // 親子・領域・システム・情報種別など
+  parentId: '__self__', // 自己参照（モデルごとに自身を指す）。dependsOnKeys には数えない。
+  subProjectId: 'subProject',
+  systemId: 'system',
+  informationTypeId: 'informationType',
+  dataObjectId: 'dataObject',
+  folderId: 'flowFolder',
+  // フロー系
+  flowId: 'businessFlow',
+  asisFlowId: 'businessFlow',
+  tobeFlowId: 'businessFlow',
+  targetFlowId: 'businessFlow',
+  refFlowId: 'businessFlow',
+  childFlowId: 'businessFlow',
+  nodeId: 'flowNode',
+  flowNodeId: 'flowNode',
+  sourceNodeId: 'flowNode', // ※ DFD では dfdNode を指す（下の override で補正）
+  targetNodeId: 'flowNode', // ※ 同上
+  asisNodeId: 'flowNode',
+  tobeNodeId: 'flowNode',
+  refNodeId: 'flowNode',
+  edgeId: 'flowEdge',
+  flowEdgeId: 'flowEdge',
+  roleId: 'role',
+  ownerRoleId: 'role',
+  assigneeRoleId: 'role',
+  // データカタログ / API
+  tableId: 'table',
+  tableStatusId: 'tableStatus',
+  columnId: 'column',
+  apiEndpointId: 'apiEndpoint',
+  interfaceId: 'interfaceDefinition',
+  crudMappingId: 'crudMapping',
+  // ステークホルダ / 会議 / リスク
+  stakeholderId: 'stakeholder',
+  ownerStakeholderId: 'stakeholder',
+  approverStakeholderId: 'stakeholder',
+  sponsorStakeholderId: 'stakeholder',
+  meetingId: 'meeting',
+  reviewMeetingId: 'meeting',
+  categoryId: 'riskCategory',
+  riskId: 'risk',
+  // フェーズ / 要件 / イシュー / ギャップ / TOBE / KPI
+  phaseId: 'projectPhase',
+  requirementId: 'requirement',
+  treeId: 'issueTree',
+  issueTreeId: 'issueTree',
+  issueNodeId: 'issueNode',
+  rootCauseNodeId: 'issueNode',
+  gapId: 'gapItem',
+  tobeVisionId: 'tobeVision',
+  kpiId: 'kpi',
+  supplierId: 'supplier',
+  // DFD
+  diagramId: 'dfdDiagram',
+  // CRUOA
+  rowId: 'cruoaRow',
+  colId: 'cruoaCol',
+  // 同種参照（タスク依存・データオブジェクト関連）
+  predecessorId: 'task',
+  successorId: 'task',
+  sourceObjectId: 'dataObject',
+  targetObjectId: 'dataObject',
+  taskId: 'task',
+};
+
+/**
+ * モデル別の FK ターゲット override（field 名だけでは曖昧なケース）。
+ * 例: DFD の sourceNodeId/targetNodeId は dfdNode を指す（flowNode ではない）。
+ */
+const FK_TARGET_OVERRIDE: Record<string, Record<string, string>> = {
+  dfdFlow: { sourceNodeId: 'dfdNode', targetNodeId: 'dfdNode' },
+};
+
+/**
+ * graph 系（業務フロー / DFD / イシューツリー）は #15 の EntityJsonService
+ * （self-contained localId bundle）が担当する。section 単位露出では **構造を扱わず**、
+ * これらの section は listSections のメタには出すが note で住み分けを明示する。
+ * flatter な機能（gap/tasks/risks/stakeholders/kpi/masters/data-objects(object-map)/
+ * requirements/tobe/cruoa/analysis/adoption/charter 等）が section 露出の対象。
+ */
+const GRAPH_ENTITY_SECTIONS: Record<string, string> = {
+  flows:
+    'グラフ構造（ノード/エッジ）は EntityJsonService の self-contained FlowBundle を使う（GET/PUT /business-flows/:id/json, POST /projects/:projectId/flows/json）。',
+  flowLinks:
+    '業務フローのノード/エッジに紐づく構造。FlowBundle（EntityJsonService）に含まれる。',
+  dfd:
+    'DFD のノード/エッジは EntityJsonService の DfdBundle を使う（GET/PUT /business-flows/:flowId/dfd/json, /projects/:projectId/dfd/json）。',
+  cruoa:
+    'フローに紐づく CRUOA マトリクス。フロー構造は FlowBundle（EntityJsonService）側で扱う。',
+  issues:
+    'イシューツリーのノードは EntityJsonService の IssueTreeBundle を使う（GET/PUT /issue-trees/:id/json, POST /projects/:projectId/issue-trees/json）。',
+};
+
 @Injectable()
 export class ProjectBundleService {
   constructor(private readonly prisma: PrismaService) {}
@@ -693,12 +835,13 @@ export class ProjectBundleService {
     const entities: Record<string, Array<Record<string, unknown>>> = {};
 
     for (const section of SECTIONS) {
+      // section 内の model ごとの Row（exportSection と同一機械を共有）。
+      const byModel = await this.readSectionRowsByModel(section, projectId);
       const sectionRows: Array<Record<string, unknown>> = [];
+      // 全体バンドルは従来どおり「__model タグ付きフラット配列」で出力（後方互換）。
+      // import 側で section の models 定義順に正しく振り分けるため、各 row に種別を残す。
       for (const m of section.models) {
-        const rows = await this.readModelRows(m.model, projectId);
-        // 同一セクション内は配列を連結せず、モデルごとに __model タグを付けて保持。
-        // import 側で section の models 定義順に正しく振り分けるため、各 row に種別を残す。
-        for (const r of rows) {
+        for (const r of byModel[m.model] ?? []) {
           (r as Record<string, unknown>).__model = m.model;
           sectionRows.push(r);
         }
@@ -711,6 +854,21 @@ export class ProjectBundleService {
       project,
       entities,
     };
+  }
+
+  /**
+   * 1 section の各モデル行を { <model>: Row[] } で読む（export 機械の中核）。
+   * 全体 export と exportSection の双方が共有する。__model タグは付けない。
+   */
+  private async readSectionRowsByModel(
+    section: SectionSpec,
+    projectId: string,
+  ): Promise<Record<string, Array<Record<string, unknown>>>> {
+    const byModel: Record<string, Array<Record<string, unknown>>> = {};
+    for (const m of section.models) {
+      byModel[m.model] = await this.readModelRows(m.model, projectId);
+    }
+    return byModel;
   }
 
   /**
@@ -1235,6 +1393,533 @@ export class ProjectBundleService {
   /** import 投入順（= section キーの依存順）。ドキュメント/デバッグ用。 */
   getSectionOrder(): string[] {
     return SECTIONS.map((s) => s.key);
+  }
+
+  // ===========================================================================
+  // PER-SECTION（機能単位）API — 既存 SECTIONS 定義と export/import 機械を共有
+  // ===========================================================================
+
+  /**
+   * 利用可能な機能(section)一覧。各 section の models と、import 前に存在している
+   * 必要がある依存先 section（dependsOnKeys）を返す。
+   * graph 系（flows/dfd/issues 等）は note 付きで EntityJsonService への住み分けを示す。
+   */
+  listSections(): Array<SectionDescriptor & { graphEntityNote?: string }> {
+    const modelToSection = this.buildModelToSectionIndex();
+    return SECTIONS.map((section) => {
+      const models = section.models.map((m) => m.model);
+      const dependsOnKeys = this.computeDependsOnKeys(section, modelToSection);
+      const note = GRAPH_ENTITY_SECTIONS[section.key];
+      return {
+        key: section.key,
+        models,
+        dependsOnKeys,
+        ...(note ? { graphEntityNote: note } : {}),
+      };
+    });
+  }
+
+  /**
+   * 1 section の全モデル行を { formatVersion, section, rows:{<model>:Row[]} } で返す。
+   * 全体 export と同一の readSectionRowsByModel を共有（行の形・内容は同一）。
+   */
+  async exportSection(
+    projectId: string,
+    key: string,
+  ): Promise<SectionExport> {
+    const section = this.requireSection(key);
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+    const rows = await this.readSectionRowsByModel(section, projectId);
+    return { formatVersion: BUNDLE_FORMAT_VERSION, section: key, rows };
+  }
+
+  /**
+   * 1 section だけを取り込む。
+   *  - idMap はこの呼び出し内ローカル（section 内のモデル間 FK・自己参照は idMap で解決）。
+   *  - 依存先 section（dependsOnKeys）への FK は **既存DB の id** で解決する
+   *    （バンドルの旧 id が target DB に存在すれば採用＝同一DB round-trip で一致。
+   *     存在しなければ optional は null、required は skip）。
+   *  - mode=replace はこの section の対象モデルのみ逆順 deleteMany してから再構築。
+   *  - mode=merge は既存を残して追加（@@unique 衝突は get-or-create / skip）。
+   */
+  async importSection(
+    projectId: string,
+    key: string,
+    payload: SectionImportPayload,
+    mode: ImportMode,
+    _userId: string,
+  ): Promise<SectionImportResult> {
+    const section = this.requireSection(key);
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Invalid payload: not an object');
+    }
+    if (
+      payload.formatVersion != null &&
+      payload.formatVersion !== BUNDLE_FORMAT_VERSION
+    ) {
+      throw new Error(
+        `Unsupported formatVersion: ${String(
+          payload.formatVersion,
+        )} (expected ${BUNDLE_FORMAT_VERSION})`,
+      );
+    }
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!project) {
+      throw new Error(`Target project not found: ${projectId}`);
+    }
+
+    const rowsByModel = payload.rows ?? {};
+    const idMap = new Map<string, string>();
+    const counts: Record<string, number> = {};
+    const warnings: string[] = [];
+    // この section が自前で生成するモデル（section 内 FK は idMap で解決可能）。
+    const ownModels = new Set(section.models.map((m) => m.model));
+    const deferredWork: Array<{
+      model: string;
+      newId: string;
+      oldRow: Record<string, unknown>;
+      deferredFks: string[];
+    }> = [];
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        if (mode === 'replace') {
+          // replace は本 section の対象モデルだけを deleteMany するが、DB の
+          // onDelete: Cascade / SetNull により、他 section から本 section への
+          // 参照行（取り込み対象外）が巻き込まれて削除・null 化されうる。
+          // 削除前に「実際に参照行が存在する」関係を検出し、暗黙の破壊を警告で可視化する。
+          for (const dep of this.crossSectionDependents(section)) {
+            try {
+              const refWhere = {
+                AND: [
+                  this.exportWhere(dep.model, projectId),
+                  { [dep.field]: { not: null } },
+                ],
+              };
+              const refCount = (await this.delegate(
+                dep.model,
+                tx,
+              ).findMany({ where: refWhere, select: { id: true } })) as Array<{
+                id: string;
+              }>;
+              if (refCount.length > 0) {
+                this.pushWarning(
+                  warnings,
+                  `replace of section "${key}" will sever ${refCount.length} cross-section link(s) from section "${dep.fromSection}" (${dep.model}.${dep.field} -> ${dep.targetModel}); these are NOT re-imported and will be deleted/null'd by DB cascade`,
+                );
+              }
+            } catch {
+              // 参照行カウントは best-effort（破壊検出の警告用）。失敗しても replace は続行。
+            }
+          }
+          // この section の対象モデルのみ逆順削除（他 section には触れない）。
+          for (let j = section.models.length - 1; j >= 0; j--) {
+            const m = section.models[j];
+            const where = this.exportWhere(m.model, projectId);
+            await this.delegate(m.model, tx).deleteMany({ where });
+          }
+        }
+
+        // ---- 第1パス: section の models を定義順に create ----
+        for (const m of section.models) {
+          const rowsForModel = rowsByModel[m.model] ?? [];
+          let created = 0;
+          for (const row of rowsForModel) {
+            const oldId = row.id as string | undefined;
+            if (!oldId) continue;
+
+            if (
+              mode === 'merge' &&
+              m.uniqueBy &&
+              (m.uniqueBy.length > 0 || m.includeProjectId)
+            ) {
+              const existingId = await this.findExistingByUnique(
+                tx,
+                m,
+                projectId,
+                row,
+                idMap,
+              );
+              if (existingId) {
+                idMap.set(oldId, existingId);
+                continue;
+              }
+            }
+
+            const built = await this.buildSectionCreateData(
+              tx,
+              m,
+              row,
+              projectId,
+              idMap,
+              ownModels,
+              warnings,
+            );
+            if (built.skip) continue;
+
+            const newId = randomUUID();
+            idMap.set(oldId, newId);
+            try {
+              await this.delegate(m.model, tx).create({
+                data: { ...built.data, id: newId },
+              });
+              created++;
+              if (m.deferredFks && m.deferredFks.length > 0) {
+                deferredWork.push({
+                  model: m.model,
+                  newId,
+                  oldRow: row,
+                  deferredFks: m.deferredFks,
+                });
+              }
+            } catch (e) {
+              idMap.delete(oldId);
+              this.pushWarning(
+                warnings,
+                `create failed for ${m.model} (old id ${oldId}): ${
+                  (e as Error).message
+                }`,
+              );
+            }
+          }
+          counts[m.model] = (counts[m.model] ?? 0) + created;
+        }
+
+        // ---- 第2パス: deferred FK（自己/相互参照）を UPDATE ----
+        // section 内で解決できる参照のみ。外部参照は既存DB id をそのまま採用。
+        for (const work of deferredWork) {
+          const patch: Record<string, unknown> = {};
+          for (const fk of work.deferredFks) {
+            const oldRef = work.oldRow[fk] as string | null | undefined;
+            if (!oldRef) continue;
+            const inSection = idMap.get(oldRef);
+            if (inSection) {
+              patch[fk] = inSection;
+              continue;
+            }
+            // section 外参照（例: deferred childFlowId が別フローを指す）は
+            // 既存DBに同 id があればそれを採用、無ければスキップ（null のまま）。
+            const fkTarget = this.fkTargetModel(work.model, fk, work.model);
+            if (fkTarget) {
+              // projectId スコープで存在確認（別プロジェクトの行は採用しない）。
+              const exists = await this.existsInDb(
+                tx,
+                fkTarget,
+                oldRef,
+                projectId,
+              );
+              if (exists) patch[fk] = oldRef;
+            }
+          }
+          if (Object.keys(patch).length > 0) {
+            try {
+              await this.delegate(work.model, tx).update({
+                where: { id: work.newId },
+                data: patch,
+              });
+            } catch (e) {
+              this.pushWarning(
+                warnings,
+                `deferred update failed for ${work.model} (${work.newId}): ${
+                  (e as Error).message
+                }`,
+              );
+            }
+          }
+        }
+      },
+      { timeout: 120_000, maxWait: 20_000 },
+    );
+
+    return { projectId, section: key, mode, counts, warnings };
+  }
+
+  /**
+   * 単一 section import 用の create データ構築。
+   * buildCreateData と同じ規則だが、FK が「section 内」なら idMap、
+   * 「section 外（依存先 section）」なら **既存DB の id** で解決する点が異なる。
+   */
+  private async buildSectionCreateData(
+    tx: PrismaTx,
+    m: ModelSpec,
+    row: Record<string, unknown>,
+    targetProjectId: string,
+    idMap: Map<string, string>,
+    ownModels: Set<string>,
+    warnings: string[],
+  ): Promise<{ data: Record<string, unknown>; skip: boolean }> {
+    const data: Record<string, unknown> = {};
+    const deferred = new Set(m.deferredFks ?? []);
+    const fkByField = new Map<string, FkSpec>();
+    for (const fk of m.fks ?? []) fkByField.set(fk.field, fk);
+
+    for (const [key, value] of Object.entries(row)) {
+      if (key === 'id' || key === 'createdAt' || key === 'updatedAt') continue;
+      if (key === '__model') continue;
+
+      if (key === 'projectId') {
+        if (m.includeProjectId) data.projectId = targetProjectId;
+        continue;
+      }
+
+      if (deferred.has(key)) {
+        data[key] = null; // 第2パスで解決
+        continue;
+      }
+
+      const fk = fkByField.get(key);
+      if (fk) {
+        if (value == null) {
+          data[key] = null;
+          continue;
+        }
+        const targetModel = this.fkTargetModel(m.model, key, undefined);
+        // section 内参照（idMap で解決） vs 外部参照（既存DB id で解決）。
+        const inSection = idMap.get(value as string);
+        if (inSection) {
+          data[key] = inSection;
+        } else if (
+          targetModel &&
+          !ownModels.has(targetModel) &&
+          (await this.existsInDb(
+            tx,
+            targetModel,
+            value as string,
+            targetProjectId,
+          ))
+        ) {
+          // 依存先 section の既存DB行を id で解決（round-trip 同一DBで一致）。
+          // existsInDb は targetProjectId スコープ。別プロジェクトの行は弾く。
+          data[key] = value;
+        } else if (fk.required) {
+          this.pushWarning(
+            warnings,
+            `skip ${m.model} row (old id ${String(
+              row.id,
+            )}): unresolved required FK ${key}=${String(value)}`,
+          );
+          return { data, skip: true };
+        } else {
+          data[key] = null;
+        }
+        continue;
+      }
+
+      data[key] = value;
+    }
+
+    return { data, skip: false };
+  }
+
+  /** FK 列の参照先モデル名を返す（モデル別 override を優先、無ければ field 規約）。 */
+  private fkTargetModel(
+    model: string,
+    field: string,
+    selfModel: string | undefined,
+  ): string | null {
+    const override = FK_TARGET_OVERRIDE[model]?.[field];
+    if (override) return override;
+    const target = FK_TARGET_MODEL[field];
+    if (!target) return null;
+    if (target === '__self__') return selfModel ?? model;
+    return target;
+  }
+
+  /**
+   * target DB の **同一プロジェクト** に当該モデルの id が存在するか。
+   * クロスセクション FK 解決はこの真偽だけで旧 id をそのまま採用するため、
+   * exportWhere（projectId スコープ）を必ず併用して別プロジェクトの行を弾く。
+   * これを怠ると、利用者が制御する rows 経由で別プロジェクトの非公開行を
+   * 指す不正な FK が書き込まれ、プロジェクト分離が破れる。
+   */
+  private async existsInDb(
+    tx: PrismaTx,
+    model: string,
+    id: string,
+    projectId: string,
+  ): Promise<boolean> {
+    const found = (await this.delegate(model, tx).findFirst({
+      where: { AND: [{ id }, this.exportWhere(model, projectId)] },
+      select: { id: true },
+    })) as { id: string } | null;
+    return !!found;
+  }
+
+  /** model 名 → その model を含む section キー の索引。 */
+  private buildModelToSectionIndex(): Record<string, string> {
+    const idx: Record<string, string> = {};
+    for (const section of SECTIONS) {
+      for (const m of section.models) idx[m.model] = section.key;
+    }
+    return idx;
+  }
+
+  /**
+   * 当該 section のモデルを **他 section** が cross-section FK で参照している関係を返す。
+   * 単一 section の replace（deleteMany）は DB の onDelete: Cascade / SetNull により、
+   * これら参照元（＝取り込み対象外の別 section）の行を巻き込んで削除・null 化しうる。
+   * round-trip では新 id で本 section を作り直すだけなので、巻き込まれた参照は復元されず
+   * 欠落したままになる。そこで replace 前に「実際に参照行が存在する関係」を検出して
+   * 警告に積み、暗黙のデータ破壊を可視化する（破壊自体は利用者が要求した replace の挙動）。
+   */
+  private crossSectionDependents(section: SectionSpec): Array<{
+    fromSection: string;
+    model: string;
+    field: string;
+    targetModel: string;
+  }> {
+    const ownModels = new Set(section.models.map((m) => m.model));
+    const out: Array<{
+      fromSection: string;
+      model: string;
+      field: string;
+      targetModel: string;
+    }> = [];
+    for (const other of SECTIONS) {
+      if (other.key === section.key) continue;
+      for (const m of other.models) {
+        const fields = [
+          ...(m.fks ?? []).map((fk) => fk.field),
+          ...(m.deferredFks ?? []),
+        ];
+        for (const field of fields) {
+          const target = this.fkTargetModel(m.model, field, m.model);
+          if (!target || !ownModels.has(target)) continue;
+          out.push({
+            fromSection: other.key,
+            model: m.model,
+            field,
+            targetModel: target,
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * この section が参照する他 section のキー（dependsOnKeys）。
+   * section 内モデルの FK（自己参照 __self__ と section 内モデルは除外）から、
+   * 参照先モデルが属する section を集めて返す。
+   */
+  private computeDependsOnKeys(
+    section: SectionSpec,
+    modelToSection: Record<string, string>,
+  ): string[] {
+    const own = new Set(section.models.map((m) => m.model));
+    const deps = new Set<string>();
+    for (const m of section.models) {
+      const fields = [
+        ...(m.fks ?? []).map((fk) => fk.field),
+        ...(m.deferredFks ?? []),
+      ];
+      for (const field of fields) {
+        const target = this.fkTargetModel(m.model, field, m.model);
+        if (!target || own.has(target)) continue; // 自己/同一 section は依存に数えない
+        const depSection = modelToSection[target];
+        if (depSection && depSection !== section.key) deps.add(depSection);
+      }
+    }
+    return [...deps];
+  }
+
+  private requireSection(key: string): SectionSpec {
+    const section = SECTIONS.find((s) => s.key === key);
+    if (!section) {
+      throw new Error(
+        `Unknown feature section: ${key}. Available: ${SECTIONS.map(
+          (s) => s.key,
+        ).join(', ')}`,
+      );
+    }
+    return section;
+  }
+
+  // ===========================================================================
+  // PER-SECTION JSON Schema（draft-07）
+  // ===========================================================================
+
+  /**
+   * 1 section の rows ペイロード形の JSON Schema（draft-07）。
+   * { formatVersion, section, rows:{ <model>: Row[] } }。
+   */
+  sectionJsonSchema(key: string): Record<string, unknown> {
+    const section = this.requireSection(key);
+    return this.buildSectionSchema(section);
+  }
+
+  /** 全 section の JSON Schema。{ formatVersion, sections:{ <key>: Schema } }。 */
+  allSchemas(): Record<string, unknown> {
+    const sections: Record<string, unknown> = {};
+    for (const section of SECTIONS) {
+      sections[section.key] = this.buildSectionSchema(section);
+    }
+    return {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      $id: 'https://iplot.local/schemas/feature-sections.json',
+      title: 'IPLoT Feature Sections',
+      description:
+        'Per-feature (section) export/import payload schemas. Each section payload is { formatVersion?, rows: { <model>: Row[] } }. Graph entities (flows/dfd/issues/cruoa/flowLinks) are handled by EntityJsonService self-contained bundles (see /api/entity-json/schema); see each section description.',
+      formatVersion: BUNDLE_FORMAT_VERSION,
+      type: 'object',
+      properties: { sections },
+    };
+  }
+
+  private buildSectionSchema(section: SectionSpec): Record<string, unknown> {
+    const rowProps: Record<string, unknown> = {};
+    for (const m of section.models) {
+      rowProps[m.model] = {
+        type: 'array',
+        description: `Rows for Prisma model "${m.model}". Each row keeps its original DB "id" (preserved on export, used to resolve FKs on import).`,
+        items: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description:
+                'Original source DB id (uuid). Remapped to a fresh uuid on import; cross-section FKs are resolved against existing DB ids.',
+            },
+          },
+          required: ['id'],
+          additionalProperties: true,
+        },
+      };
+    }
+    const note = GRAPH_ENTITY_SECTIONS[section.key];
+    return {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      title: `IPLoT Feature Section: ${section.key}`,
+      description: `Export/import payload for feature section "${section.key}" (models: ${section.models
+        .map((m) => m.model)
+        .join(', ')}).${note ? ` NOTE: ${note}` : ''}`,
+      type: 'object',
+      required: ['rows'],
+      additionalProperties: false,
+      properties: {
+        formatVersion: {
+          type: 'integer',
+          const: BUNDLE_FORMAT_VERSION,
+          description:
+            'Optional bundle format version. When present, must match exactly.',
+        },
+        section: { type: 'string', const: section.key },
+        rows: {
+          type: 'object',
+          additionalProperties: false,
+          properties: rowProps,
+        },
+      },
+    };
   }
 
   // ===========================================================================

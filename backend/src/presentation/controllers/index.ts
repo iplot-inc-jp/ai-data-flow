@@ -32,3 +32,4 @@ export * from './adoption-status.controller';
 export * from './kpi.controller';
 export * from './project-bundle.controller';
 export * from './entity-json.controller';
+export * from './feature-io.controller';

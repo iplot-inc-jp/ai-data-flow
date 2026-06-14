@@ -344,6 +344,8 @@ import {
   ExportSchemaController,
   EntityJsonController,
   EntityJsonSchemaController,
+  FeatureIoController,
+  FeatureIoSchemaController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -497,6 +499,9 @@ import {
     // 単一エンティティ（業務フロー/DFD/イシューツリー）丸ごと JSON I/O
     EntityJsonController,
     EntityJsonSchemaController,
+    // 機能(section)単位 export/import（全体バンドルと SECTIONS 機械を共有）
+    FeatureIoController,
+    FeatureIoSchemaController,
     // Background Jobs (Upstash QStash)
     JobWorkerController,
     ProjectJobController,
