@@ -39,7 +39,7 @@ export class JobService {
   /**
    * ジョブを QUEUED で起票する。
    *   - QStash が使えるなら publish して QUEUED の job を即返す（実際の実行は別プロセス）。
-   *   - 使えない（ローカル）なら await runJob で完了させ、完了 job を返す（inline fallback）。
+   *   - 使えない（ローカル）なら await runInline で終端まで実行して完了 job を返す（inline fallback）。
    */
   async enqueue(
     type: string,
@@ -53,6 +53,10 @@ export class JobService {
         payload: (payload ?? Prisma.JsonNull) as Prisma.InputJsonValue,
         projectId: opts.projectId ?? null,
         createdById: opts.createdById ?? null,
+        // 自動リトライ予算を MAX_ATTEMPTS(=4) に揃える。
+        // schema 既定(3) のままだと runJob の `attemptsAfter < job.maxAttempts` が
+        // 「初回+リトライ2回=3」で確定し、QStash(retries:3=最大4配信) と不整合になる。
+        maxAttempts: JobService.MAX_ATTEMPTS,
       },
     });
 
@@ -62,14 +66,92 @@ export class JobService {
       return job;
     }
 
-    // ローカル/QStash無: その場で実行して完了 job を返す。
-    return this.runJob(job.id);
+    // ローカル/QStash無: その場で終端（SUCCEEDED/FAILED）まで実行して完了 job を返す。
+    return this.runInline(job.id);
   }
 
   /**
-   * 1ジョブあたりの最大試行回数。
+   * inline（QStash 無）経路でジョブを終端状態まで実行する。
+   *
+   * runJob は一過性失敗時に job を QUEUED へ戻す（attempts を増やす）だけで自身では再実行しない
+   * 設計のため、本番ではその後 QStash の自動リトライ(retries:3)が QUEUED を再配信して runJob を
+   * 再度叩く。QStash が無いローカルでは再配信する主体がいないので、ここでループして
+   * 「QUEUED に戻った＝再試行余地あり」の間は runJob を呼び直し、自動リトライを inline で再現する。
+   *
+   * 終了条件: status が QUEUED 以外（SUCCEEDED/FAILED/RUNNING）になったら返す。
+   * 安全弁: maxAttempts を超える反復はしない（万一 QUEUED から進まない場合の無限ループ防止）。
+   */
+  private async runInline(id: string): Promise<BackgroundJob> {
+    // 反復回数の上限。job.maxAttempts を権威に、+1 の余裕を持たせる（取りこぼし防止）。
+    const initial = await this.prisma.backgroundJob.findUnique({
+      where: { id },
+      select: { maxAttempts: true },
+    });
+    const maxIterations = (initial?.maxAttempts ?? JobService.MAX_ATTEMPTS) + 1;
+
+    let job = await this.runJob(id);
+    let iterations = 1;
+    while (job.status === 'QUEUED' && iterations < maxIterations) {
+      // runJob が一過性失敗で QUEUED に戻した。自動リトライを inline で続行する。
+      job = await this.runJob(id);
+      iterations += 1;
+    }
+    return job;
+  }
+
+  /**
+   * 手動リトライ。FAILED の job を QUEUED に戻して再起票する。
+   *   - attempts はリセットしない（試行履歴を保持する）。
+   *     ただし自動リトライ上限が消費済みのまま再実行できるよう、maxAttempts を
+   *     「現 attempts + 残り猶予(MAX_ATTEMPTS)」まで引き上げ、再びリトライ余地を確保する。
+   *   - error/result/finishedAt/startedAt はクリアし、QUEUED の状態へ戻す。
+   *   - QStash があれば publish、無ければ inline で即時 runJob。
+   *
+   * SUCCEEDED は再実行対象にしない:
+   *   - 確定済みの成功 result を破棄してしまい、再試行が一過性失敗で FAILED 終端すると
+   *     元の成果物が永久に失われる。
+   *   - AI_KPI のように dispatch が非冪等（毎回 DRAFT KPI を純加算し Claude API を再課金）な
+   *     type では、成功ジョブの再実行が重複データ生成・二重課金を招く。
+   *   再実行の目的は FAILED の再試行であり、成功ジョブの「やり直し」は新規起票で行う。
+   *
+   * 認可はコントローラ側のゲートで行う（ここでは行わない）。
+   */
+  async retry(id: string): Promise<BackgroundJob> {
+    const job = await this.prisma.backgroundJob.findUnique({ where: { id } });
+    if (!job) {
+      throw new Error(`Job ${id} not found`);
+    }
+    if (job.status !== 'FAILED') {
+      throw new Error(`Job ${id} is ${job.status}; only FAILED jobs can be retried`);
+    }
+
+    // QUEUED へ戻す。attempts は保持し、maxAttempts に再試行余地を足す
+    // （自動リトライ上限を使い切った FAILED でも、手動再起票後に自動リトライが効く）。
+    const requeued = await this.prisma.backgroundJob.update({
+      where: { id },
+      data: {
+        status: 'QUEUED',
+        maxAttempts: job.attempts + JobService.MAX_ATTEMPTS,
+        error: null,
+        result: Prisma.JsonNull,
+        progress: 0,
+        startedAt: null,
+        finishedAt: null,
+      },
+    });
+
+    if (this.qstash.publishEnabled) {
+      await this.qstash.publishJob(requeued.id);
+      return requeued;
+    }
+    // ローカル/QStash無: その場で終端まで実行して完了 job を返す。
+    return this.runInline(requeued.id);
+  }
+
+  /**
+   * 既定の最大試行回数（新規 enqueue でモデル既定 maxAttempts を上書きしたい場合の参考値）。
+   * 実際の自動リトライ上限は各 job の BackgroundJob.maxAttempts を権威として使う。
    * QStash の publishJob(retries:3) と整合させ「初回 + リトライ3回 = 4」とする。
-   * これ未満の attempts で失敗した場合のみ、ワーカー経路では再試行のために QUEUED へ戻す。
    */
   static readonly MAX_ATTEMPTS = 4;
 
@@ -79,15 +161,19 @@ export class JobService {
    *
    * 冪等: status!=QUEUED ならスキップ（at-least-once の二重実行防止）。
    *
+   * 試行記録: 実行開始ごとに BackgroundJobAttempt(RUNNING) を作成し、
+   * 成功/失敗で SUCCEEDED/FAILED + finishedAt + durationMs（失敗時は error 全文）を確定する。
+   *
    * @param opts.throwOnFailure
    *   true（QStash ワーカー経路）: dispatch が一過性エラーで失敗し、かつ試行回数が
-   *   MAX_ATTEMPTS 未満なら、job を QUEUED に戻したうえで例外を再 throw する。
+   *   job.maxAttempts 未満なら、job を QUEUED に戻したうえで例外を再 throw する。
    *   これによりワーカーは非2xx を返し、QStash の自動リトライ(retries:3)が発火する。
    *   QUEUED に戻すのは、FAILED のままだと runJob の冪等ガードが再配信をスキップしてしまい、
    *   リトライ経路が成立しないため（= 再試行可能状態に保つ）。
    *   試行回数を使い切った場合は FAILED で確定し、throw せず返す（QStash はリトライを止める）。
    *
-   *   false（inline fallback）: 失敗しても FAILED の job を返すだけで throw しない
+   *   false（inline fallback）: 一過性失敗かつ上限未満なら QUEUED に戻すだけで throw せず、
+   *   QStash/手動リトライに委ねる（即時再帰はしない）。上限到達なら FAILED の job を返す
    *   （enqueue の戻り値契約・フロントのポーリング前提を変えない）。
    */
   async runJob(
@@ -124,8 +210,20 @@ export class JobService {
       return current ?? job;
     }
 
+    // この実行ぶんの試行番号（1始まり）。job は claim 前に読んだ値なので attempts+1。
+    const attemptNo = job.attempts + 1;
+    const attemptStartedAt = new Date();
+    // 試行記録（RUNNING）を作成。@@unique([jobId, attemptNo]) で二重記録を防ぐが、
+    // 万一の重複でも本体実行を止めないよう作成失敗は握りつぶしてログのみ。
+    const attempt = await this.createAttempt(id, attemptNo, attemptStartedAt);
+
     try {
       const result = await this.dispatch(job);
+      // 成功: 試行記録を SUCCEEDED で確定。
+      await this.finishAttempt(attempt?.id, {
+        status: 'SUCCEEDED',
+        startedAt: attemptStartedAt,
+      });
       return this.prisma.backgroundJob.update({
         where: { id },
         data: {
@@ -138,43 +236,130 @@ export class JobService {
       });
     } catch (err) {
       const message = (err as Error)?.message ?? String(err);
-      // この実行ぶんの試行回数（job は claim 前に読んだ値なので +1 する）。
-      const attemptsAfter = job.attempts + 1;
-      const canRetry = opts.throwOnFailure === true && attemptsAfter < JobService.MAX_ATTEMPTS;
+      // エラーは（スタック含め）全文記録する。秘匿値は payload に入れない方針のため
+      // 例外メッセージにも通常は鍵等は乗らないが、記録対象は例外文言のみに限定する。
+      const errorText = this.extractError(err);
+      // 試行記録を FAILED で確定（エラー全文 + 所要時間）。
+      await this.finishAttempt(attempt?.id, {
+        status: 'FAILED',
+        startedAt: attemptStartedAt,
+        error: errorText,
+      });
 
-      if (canRetry) {
-        // 一過性エラーとして QStash に再試行させる: QUEUED へ戻し（再実行可能に保つ）、
-        // attempts を記録したうえで例外を再 throw → ワーカーが非2xx を返す。
+      // この実行ぶんの試行回数（= attemptNo）。
+      const attemptsAfter = attemptNo;
+      // 自動リトライ条件: 上限(maxAttempts)未満であること。
+      // ワーカー経路(throwOnFailure)は QStash の自動リトライへ、
+      // inline 経路は QUEUED のままにして QStash/手動に委ねる（即時再帰はしない）。
+      const canAutoRetry = attemptsAfter < job.maxAttempts;
+
+      if (canAutoRetry) {
+        // 再試行可能: QUEUED へ戻し（runJob の冪等ガードを通せるようにする）、
+        // attempts/error を記録する。
         this.logger.warn(
-          `Job ${id} (${job.type}) failed (attempt ${attemptsAfter}/${JobService.MAX_ATTEMPTS}), requeueing for QStash retry: ${message}`,
+          `Job ${id} (${job.type}) failed (attempt ${attemptsAfter}/${job.maxAttempts}), requeueing for retry: ${message}`,
         );
         await this.prisma.backgroundJob.update({
           where: { id },
           data: {
             status: 'QUEUED',
-            error: message,
+            error: errorText,
             attempts: { increment: 1 },
             progress: 0,
             startedAt: null,
           },
         });
-        throw err instanceof Error ? err : new Error(message);
+
+        if (opts.throwOnFailure === true) {
+          // ワーカー経路: 例外を再 throw → ワーカーが非2xx を返し QStash 自動リトライが発火。
+          throw err instanceof Error ? err : new Error(message);
+        }
+
+        // inline 経路: 即時再帰は避け、QUEUED のままにして QStash/手動リトライに委ねる。
+        // FAILED ではなく QUEUED の job を返す（呼び出し側のポーリングは継続可能）。
+        const requeued = await this.prisma.backgroundJob.findUnique({ where: { id } });
+        return requeued ?? job;
       }
 
-      // リトライ不可（inline fallback、または試行回数を使い切った）→ FAILED で確定。
+      // 試行回数を使い切った → FAILED で確定。
       this.logger.error(
-        `Job ${id} (${job.type}) failed permanently (attempt ${attemptsAfter}): ${message}`,
+        `Job ${id} (${job.type}) failed permanently (attempt ${attemptsAfter}/${job.maxAttempts}): ${message}`,
       );
       return this.prisma.backgroundJob.update({
         where: { id },
         data: {
           status: 'FAILED',
-          error: message,
+          error: errorText,
           attempts: { increment: 1 },
           finishedAt: new Date(),
         },
       });
     }
+  }
+
+  /**
+   * 試行記録（RUNNING）を作成する。
+   * @@unique([jobId, attemptNo]) 違反など作成に失敗しても本体実行は止めず、
+   * undefined を返して記録だけ欠落させる（実行の冪等性・成功を優先）。
+   */
+  private async createAttempt(
+    jobId: string,
+    attemptNo: number,
+    startedAt: Date,
+  ): Promise<{ id: string } | undefined> {
+    try {
+      return await this.prisma.backgroundJobAttempt.create({
+        data: { jobId, attemptNo, status: 'RUNNING', startedAt },
+        select: { id: true },
+      });
+    } catch (e) {
+      this.logger.warn(
+        `Failed to create attempt record (job ${jobId}, attempt ${attemptNo}): ${(e as Error)?.message ?? String(e)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * 試行記録を終了状態（SUCCEEDED/FAILED）で確定する。
+   * finishedAt と durationMs（startedAt からの経過ms）を埋める。
+   */
+  private async finishAttempt(
+    attemptId: string | undefined,
+    args: {
+      status: 'SUCCEEDED' | 'FAILED';
+      startedAt: Date;
+      error?: string | null;
+    },
+  ): Promise<void> {
+    if (!attemptId) return;
+    const finishedAt = new Date();
+    try {
+      await this.prisma.backgroundJobAttempt.update({
+        where: { id: attemptId },
+        data: {
+          status: args.status,
+          error: args.error ?? null,
+          finishedAt,
+          durationMs: finishedAt.getTime() - args.startedAt.getTime(),
+        },
+      });
+    } catch (e) {
+      this.logger.warn(
+        `Failed to finalize attempt record ${attemptId}: ${(e as Error)?.message ?? String(e)}`,
+      );
+    }
+  }
+
+  /**
+   * 例外からエラー全文を抽出する（スタック含む）。
+   * 記録は例外文言のみに限定し、payload や鍵などの秘匿値は混ぜない。
+   */
+  private extractError(err: unknown): string {
+    if (err instanceof Error) {
+      return err.stack ? `${err.message}\n${err.stack}` : err.message;
+    }
+    return String(err);
   }
 
   /** ジョブ type を許可リスト（コントローラの起票検証に使う）。 */

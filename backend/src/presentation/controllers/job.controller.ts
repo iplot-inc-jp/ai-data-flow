@@ -25,7 +25,8 @@ import {
 } from '@nestjs/swagger';
 import { IsObject, IsOptional, IsString } from 'class-validator';
 import type { Request } from 'express';
-import type { BackgroundJob } from '@prisma/client';
+import type { BackgroundJob, BackgroundJobStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import {
   CurrentUser,
   CurrentUserPayload,
@@ -143,6 +144,7 @@ export class ProjectJobController {
   constructor(
     private readonly jobService: JobService,
     private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   @Post('ai-jobs')
@@ -184,17 +186,73 @@ export class ProjectJobController {
     });
   }
 
+  /**
+   * 管理者向けバッチジョブ一覧（試行記録つき）。
+   *
+   * 認可: ProjectAccessGuard（GET=view）を満たしたうえで、さらに isProjectAdmin
+   * （super-admin or org OWNER/ADMIN）でなければ 403。
+   * 各 job に attemptRecords（試行ごと status/error/時刻/duration）・attempts/maxAttempts を含む。
+   * フィルタ: status（BackgroundJobStatus）。limit。
+   */
+  @Get('batch-jobs')
+  @ApiOperation({ summary: '【管理者】バッチジョブ一覧（試行記録つき）' })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiResponse({ status: 403, description: '管理者権限がありません' })
+  async batchJobs(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ): Promise<BackgroundJob[]> {
+    const isAdmin = await this.projectAccess.isProjectAdmin(projectId, user.id);
+    if (!isAdmin) {
+      throw new ForbiddenException(
+        'バッチジョブ一覧の閲覧には管理者権限が必要です',
+      );
+    }
+
+    const where: Prisma.BackgroundJobWhereInput = { projectId };
+    const statusFilter = this.parseStatus(status);
+    if (statusFilter) {
+      where.status = statusFilter;
+    }
+
+    return this.prisma.backgroundJob.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: this.parseLimit(limit),
+      include: {
+        attemptRecords: { orderBy: { attemptNo: 'desc' } },
+      },
+    });
+  }
+
   private parseLimit(limit?: string): number {
     const n = Number.parseInt(limit ?? '', 10);
     if (!Number.isFinite(n) || n <= 0) return 20;
     return Math.min(n, 100);
   }
+
+  /** status クエリを BackgroundJobStatus に検証して返す（不正/未指定は undefined）。 */
+  private parseStatus(status?: string): BackgroundJobStatus | undefined {
+    if (!status) return undefined;
+    const allowed: BackgroundJobStatus[] = [
+      'QUEUED',
+      'RUNNING',
+      'SUCCEEDED',
+      'FAILED',
+    ];
+    return allowed.includes(status as BackgroundJobStatus)
+      ? (status as BackgroundJobStatus)
+      : undefined;
+  }
 }
 
 /**
- * 単一ジョブ取得（要認証）。
- *   - projectId ありの job … その projectId に view 権限が必要。
- *   - projectId null の job … 起票者本人 or super-admin のみ。
+ * 単一ジョブ取得・手動リトライ（要認証）。
+ *   - 取得: projectId ありの job … その projectId に view 権限が必要。
+ *           projectId null の job … 起票者本人 or super-admin のみ。
+ *   - リトライ: 管理者ゲート（projectId あり: isProjectAdmin、null: super-admin or 起票者）。
  */
 @ApiTags('ジョブ')
 @ApiBearerAuth()
@@ -203,10 +261,11 @@ export class JobByIdController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectAccess: ProjectAccessService,
+    private readonly jobService: JobService,
   ) {}
 
   @Get(':id')
-  @ApiOperation({ summary: 'ジョブ取得（ポーリング用）' })
+  @ApiOperation({ summary: 'ジョブ取得（ポーリング用。試行記録含む）' })
   @ApiParam({ name: 'id', description: 'ジョブID' })
   @ApiResponse({ status: 403, description: '権限がありません' })
   @ApiResponse({ status: 404, description: 'ジョブが見つかりません' })
@@ -214,7 +273,13 @@ export class JobByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<BackgroundJob> {
-    const job = await this.prisma.backgroundJob.findUnique({ where: { id } });
+    const job = await this.prisma.backgroundJob.findUnique({
+      where: { id },
+      include: {
+        // 試行ごとの status/error/時刻/duration を新しい順で同梱。
+        attemptRecords: { orderBy: { attemptNo: 'desc' } },
+      },
+    });
     if (!job) {
       throw new NotFoundException('ジョブが見つかりません');
     }
@@ -229,13 +294,56 @@ export class JobByIdController {
     if (job.createdById && job.createdById === user.id) {
       return job;
     }
-    const u = await this.prisma.user.findUnique({
-      where: { id: user.id },
-      select: { isSuperAdmin: true },
-    });
-    if (u?.isSuperAdmin) {
+    if (await this.isSuperAdmin(user.id)) {
       return job;
     }
     throw new ForbiddenException('このジョブを参照する権限がありません');
+  }
+
+  @Post(':id/retry')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'ジョブの手動リトライ（管理者）' })
+  @ApiParam({ name: 'id', description: 'ジョブID' })
+  @ApiResponse({ status: 202, description: '再起票成功（QUEUED の job）' })
+  @ApiResponse({ status: 400, description: 'リトライ不可な状態' })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: 'ジョブが見つかりません' })
+  async retry(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ): Promise<BackgroundJob> {
+    const job = await this.prisma.backgroundJob.findUnique({ where: { id } });
+    if (!job) {
+      throw new NotFoundException('ジョブが見つかりません');
+    }
+
+    // 管理者ゲート:
+    //   projectId あり → isProjectAdmin（super-admin or org OWNER/ADMIN）
+    //   projectId null → super-admin or 起票者本人
+    const authorized = job.projectId
+      ? await this.projectAccess.isProjectAdmin(job.projectId, user.id)
+      : (job.createdById === user.id) || (await this.isSuperAdmin(user.id));
+    if (!authorized) {
+      throw new ForbiddenException('このジョブをリトライする権限がありません');
+    }
+
+    try {
+      return await this.jobService.retry(id);
+    } catch (e) {
+      const msg = (e as Error)?.message ?? String(e);
+      // FAILED 以外などのリトライ不可は 400 で返す。
+      if (/can be retried|only FAILED/.test(msg)) {
+        throw new BadRequestException(msg);
+      }
+      throw e;
+    }
+  }
+
+  private async isSuperAdmin(userId: string): Promise<boolean> {
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { isSuperAdmin: true },
+    });
+    return !!u?.isSuperAdmin;
   }
 }

@@ -77,9 +77,12 @@ model BackgroundJob {
   payload     Json?
   // 成功時の結果（クライアントがポーリングで取得）
   result      Json?
+  // 最新（最終）試行のエラー。試行ごとの全履歴は BackgroundJobAttempt 参照
   error       String?             @db.Text
   progress    Int                 @default(0)
+  // これまでの試行回数 / 自動リトライ上限
   attempts    Int                 @default(0)
+  maxAttempts Int                 @default(3) @map("max_attempts")
   // 起票ユーザー（FKなし。任意）
   createdById String?             @map("created_by_id")
   createdAt   DateTime            @default(now()) @map("created_at")
@@ -87,11 +90,31 @@ model BackgroundJob {
   startedAt   DateTime?           @map("started_at")
   finishedAt  DateTime?           @map("finished_at")
 
-  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attemptRecords BackgroundJobAttempt[]
 
   @@index([projectId, createdAt])
   @@index([status])
   @@map("background_jobs")
+}
+
+// バックグラウンドジョブの「試行」1回ぶんの記録（リトライ回数とエラーを全て残す）。
+model BackgroundJobAttempt {
+  id         String              @id @default(uuid())
+  jobId      String              @map("job_id")
+  // 1始まりの試行番号
+  attemptNo  Int                 @map("attempt_no")
+  status     BackgroundJobStatus // RUNNING / SUCCEEDED / FAILED
+  error      String?             @db.Text
+  startedAt  DateTime            @default(now()) @map("started_at")
+  finishedAt DateTime?           @map("finished_at")
+  durationMs Int?                @map("duration_ms")
+
+  job BackgroundJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, attemptNo])
+  @@index([jobId])
+  @@map("background_job_attempts")
 }
 
 // ===========================================

@@ -30,7 +30,7 @@ import { useTableSort } from '@/lib/use-table-sort';
 import { SortableTh } from '@/components/ui/sortable-th';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
-import { BackgroundJobsPanel } from '@/components/background-jobs-panel';
+import { BatchJobsAdminPanel } from '@/components/batch-jobs-admin-panel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -890,8 +890,8 @@ export default function IntegrationsPage() {
       )}
       </EditGate>
 
-      {/* ===== バックグラウンド処理一覧（AIジョブ: Mermaid解析 / KPI生成 など） ===== */}
-      <BackgroundJobsPanel projectId={projectId} />
+      {/* ===== バックグラウンド処理 / バッチ管理（管理者限定: 試行履歴・再実行） ===== */}
+      <BatchJobsAdminPanel projectId={projectId} />
     </div>
   );
 }
