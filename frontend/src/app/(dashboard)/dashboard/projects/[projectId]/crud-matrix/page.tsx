@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useReadOnly } from '@/components/read-only-context';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import {
@@ -126,6 +127,7 @@ const METHOD_COLOR: Record<string, string> = {
 export default function CrudMatrixPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [tables, setTables] = useState<Table[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -252,6 +254,7 @@ export default function CrudMatrixPage() {
 
   // ④ API×ロールの allowed トグル
   const toggleApiRole = async (endpoint: ApiEndpoint, roleId: string) => {
+    if (!canEdit) return;
     const current = endpoint.rolePermissions?.find((p) => p.roleId === roleId)?.allowed ?? false;
     // 楽観的更新
     setApiEndpoints((prev) =>
@@ -278,6 +281,7 @@ export default function CrudMatrixPage() {
 
   // ⑤ ステータス×ロールの operations を保存
   const saveStatusRoleOps = async (statusId: string, roleId: string, operations: string[]) => {
+    if (!canEdit) return;
     // 楽観的更新
     setStatusTables((prev) =>
       prev.map((t) => ({
@@ -306,6 +310,7 @@ export default function CrudMatrixPage() {
 
   // ⑤ テーブルにステータスを追加
   const addStatus = async (tableId: string) => {
+    if (!canEdit) return;
     const value = (newStatus[tableId] || '').trim();
     if (!value) return;
     try {
@@ -387,6 +392,7 @@ export default function CrudMatrixPage() {
   }, [tables, roles, opsByTableRole]);
 
   const openEdit = (t: Table, r: Role) => {
+    if (!canEdit) return;
     const set = opsByTableRole.get(`${t.id}:${r.id}`) ?? new Set<Op>();
     setEdit({
       tableId: t.id,
@@ -398,6 +404,7 @@ export default function CrudMatrixPage() {
   };
 
   const handleSave = async () => {
+    if (!canEdit) return;
     if (!edit) return;
     const table = tables.find((t) => t.id === edit.tableId);
     const firstColumn = table?.columns?.[0];

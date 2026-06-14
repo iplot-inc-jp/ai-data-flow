@@ -25,6 +25,8 @@ export type TaskPriority = 'HIGH' | 'MEDIUM' | 'LOW';
 export interface CreateTaskProps {
   projectId: string;
   parentId?: string | null;
+  /** 外部トラッカー由来キー（例 "BACKLOG:IPLOT-12"）。手動作成は null/undefined。 */
+  sourceKey?: string | null;
   title: string;
   description?: string | null;
   status?: TaskStatus;
@@ -48,6 +50,8 @@ export interface ReconstructTaskProps {
   id: string;
   projectId: string;
   parentId: string | null;
+  /** 外部トラッカー由来キー（手動作成は null）。 */
+  sourceKey?: string | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -110,6 +114,7 @@ const VALID_PRIORITIES: TaskPriority[] = ['HIGH', 'MEDIUM', 'LOW'];
 export class Task extends BaseEntity {
   private readonly _projectId: string;
   private _parentId: string | null;
+  private _sourceKey: string | null;
   private _title: string;
   private _description: string | null;
   private _status: TaskStatus;
@@ -133,6 +138,7 @@ export class Task extends BaseEntity {
     id: string,
     projectId: string,
     parentId: string | null,
+    sourceKey: string | null,
     title: string,
     description: string | null,
     status: TaskStatus,
@@ -156,6 +162,7 @@ export class Task extends BaseEntity {
     super(id, createdAt, updatedAt);
     this._projectId = projectId;
     this._parentId = parentId;
+    this._sourceKey = sourceKey;
     this._title = title;
     this._description = description;
     this._status = status;
@@ -248,6 +255,7 @@ export class Task extends BaseEntity {
       id,
       props.projectId,
       props.parentId ?? null,
+      props.sourceKey?.trim() || null,
       title,
       props.description?.trim() || null,
       status,
@@ -277,6 +285,7 @@ export class Task extends BaseEntity {
       props.id,
       props.projectId,
       props.parentId,
+      props.sourceKey ?? null,
       props.title,
       props.description,
       props.status,
@@ -411,6 +420,11 @@ export class Task extends BaseEntity {
 
   get parentId(): string | null {
     return this._parentId;
+  }
+
+  /** 外部トラッカー由来キー（手動作成タスクは null）。 */
+  get sourceKey(): string | null {
+    return this._sourceKey;
   }
 
   get title(): string {

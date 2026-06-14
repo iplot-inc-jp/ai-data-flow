@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Users, Plus, User, Server, HelpCircle, Pencil, Trash2, Loader2, ChevronLeft } from 'lucide-react';
+import { useReadOnly } from '@/components/read-only-context';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
@@ -57,6 +58,7 @@ const roleTypeConfig = {
 export default function ProjectRolesPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [roles, setRoles] = useState<RoleData[]>([]);
   // 共通マスタのシステム一覧（type=SYSTEM のロールに紐付ける）。
@@ -263,6 +265,7 @@ export default function ProjectRolesPage() {
               ]}
             />
           </span>
+        {canEdit && (
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button className="bg-blue-600 hover:bg-blue-700">
@@ -363,6 +366,7 @@ export default function ProjectRolesPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        )}
         </div>
       </div>
 
@@ -397,6 +401,7 @@ export default function ProjectRolesPage() {
                         </div>
                       </div>
                     </div>
+                    {canEdit && (
                     <div className="flex gap-1">
                       <Button
                         variant="ghost"
@@ -415,6 +420,7 @@ export default function ProjectRolesPage() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -462,6 +468,7 @@ export default function ProjectRolesPage() {
             <p className="text-sm text-gray-400 mb-4">
               業務フローで使用するロールを追加しましょう
             </p>
+            {canEdit && (
             <Button
               className="bg-blue-600 hover:bg-blue-700"
               onClick={() => setIsCreateDialogOpen(true)}
@@ -469,6 +476,7 @@ export default function ProjectRolesPage() {
               <Plus className="h-4 w-4 mr-2" />
               ロール追加
             </Button>
+            )}
           </CardContent>
         </Card>
       )}

@@ -19,6 +19,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { FileDropZone } from '@/components/ui/file-drop-zone';
+import { useReadOnly } from '@/components/read-only-context';
 import {
   Loader2,
   Pencil,
@@ -83,6 +84,7 @@ export default function TaskDetailPage() {
   const params = useParams();
   const projectId = params.projectId as string;
   const taskId = params.taskId as string;
+  const { canEdit } = useReadOnly();
 
   const [task, setTask] = useState<Task | null>(null);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
@@ -292,6 +294,7 @@ export default function TaskDetailPage() {
   };
 
   const saveEdit = async () => {
+    if (!canEdit) return;
     if (!edit) return;
     if (!edit.title.trim()) {
       setSaveError('タイトルは必須です');
@@ -326,6 +329,7 @@ export default function TaskDetailPage() {
 
   // 進捗バーだけのクイック更新（ステータスバッジ）
   const quickStatus = async (status: TaskStatus) => {
+    if (!canEdit) return;
     if (!task) return;
     setTask({ ...task, status });
     setAllTasks((prev) =>
@@ -343,6 +347,7 @@ export default function TaskDetailPage() {
   // コメント操作
   // -------------------------------------------------------------------------
   const postComment = async () => {
+    if (!canEdit) return;
     const body = commentBody.trim();
     if (!body) return;
     setPostingComment(true);
@@ -363,6 +368,7 @@ export default function TaskDetailPage() {
   };
 
   const saveEditComment = async () => {
+    if (!canEdit) return;
     if (!editingCommentId) return;
     const body = editingCommentBody.trim();
     if (!body) return;
@@ -377,6 +383,7 @@ export default function TaskDetailPage() {
   };
 
   const deleteComment = async (id: string) => {
+    if (!canEdit) return;
     if (!confirm('このコメントを削除しますか？')) return;
     try {
       await commentsApi.delete(id);
@@ -390,6 +397,7 @@ export default function TaskDetailPage() {
   // 添付操作
   // -------------------------------------------------------------------------
   const handleUpload = async (files: File[]) => {
+    if (!canEdit) return;
     if (files.length === 0) return;
     setUploading(true);
     setUploadError(null);
@@ -410,6 +418,7 @@ export default function TaskDetailPage() {
   };
 
   const deleteAttachment = async (id: string) => {
+    if (!canEdit) return;
     if (!confirm('この添付ファイルを削除しますか？')) return;
     try {
       await attachmentsApi.delete(id);

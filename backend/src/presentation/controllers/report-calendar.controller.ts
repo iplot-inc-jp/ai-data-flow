@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -29,6 +30,8 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== DTOs ==========
 
@@ -168,6 +171,8 @@ class UpdateReportCalendarDto {
 
 @ApiTags('報告・連絡カレンダー')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/report-calendars')
 export class ReportCalendarController {
   constructor(
@@ -224,6 +229,8 @@ export class ReportCalendarController {
 
 @ApiTags('報告・連絡カレンダー')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('report-calendars')
 export class ReportCalendarByIdController {
   constructor(

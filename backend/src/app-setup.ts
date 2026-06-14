@@ -1,12 +1,31 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import * as bodyParser from 'body-parser';
+import type { IncomingMessage } from 'node:http';
 
 /**
- * アプリ共通構成（CORS / ValidationPipe / global prefix 'api' / Swagger）。
+ * アプリ共通構成（CORS / ValidationPipe / global prefix 'api' / Swagger / rawBody）。
  * main.ts（ローカル・通常サーバ）と serverless.ts（Vercel Functions）の両方から使う。
  * 例外フィルタ（DomainExceptionFilter）は AppModule の APP_FILTER で登録済み。
  */
 export function configureApp(app: INestApplication): void {
+  // ===== rawBody 保持（QStash 署名検証用） =====
+  // QStash の Upstash-Signature は「生のリクエストボディ」に対する署名なので、
+  // JSON parse 前の生文字列が必要。body-parser の verify フックで request に保持する。
+  // 既定の JSON パーサより前に登録することで、全ルートで rawBody を得られる。
+  // （署名検証は JobController の /api/jobs/run のみが利用する）
+  app.use(
+    bodyParser.json({
+      limit: '10mb',
+      verify: (req: IncomingMessage & { rawBody?: string }, _res, buf) => {
+        if (buf && buf.length) {
+          req.rawBody = buf.toString('utf8');
+        }
+      },
+    }),
+  );
+  app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+
   // Enable CORS
   const allowedOrigins: Array<string | RegExp> = [
     'http://localhost:3000',

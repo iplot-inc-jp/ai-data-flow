@@ -7,6 +7,7 @@ import {
   DfdFlow,
 } from '../../../domain';
 import { authorizeDiagram } from './dfd-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { DfdFlowOutput, toDfdFlowOutput } from './dfd.output';
 
 export interface AddDfdFlowInput {
@@ -30,10 +31,11 @@ export class AddDfdFlowUseCase {
     @Inject(DFD_REPOSITORY) private readonly repo: IDfdRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: AddDfdFlowInput): Promise<DfdFlowOutput> {
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.userId);
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.userId, this.projectAccess, 'edit');
     // 両端ノードが同じ図に属することを確認
     const src = await this.repo.findNodeById(input.sourceNodeId);
     const tgt = await this.repo.findNodeById(input.targetNodeId);
@@ -85,12 +87,13 @@ export class UpdateDfdFlowUseCase {
     @Inject(DFD_REPOSITORY) private readonly repo: IDfdRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateDfdFlowInput): Promise<DfdFlowOutput> {
     const flow = await this.repo.findFlowById(input.id);
     if (!flow) throw new EntityNotFoundError('DfdFlow', input.id);
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.userId);
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.userId, this.projectAccess, 'edit');
 
     if (input.dataItem !== undefined) flow.updateDataItem(input.dataItem);
     if (input.informationTypeId !== undefined)
@@ -120,6 +123,7 @@ export class DeleteDfdFlowUseCase {
     @Inject(DFD_REPOSITORY) private readonly repo: IDfdRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteDfdFlowInput): Promise<void> {
@@ -127,7 +131,7 @@ export class DeleteDfdFlowUseCase {
     if (!flow) {
       throw new EntityNotFoundError('DfdFlow', input.id);
     }
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.userId);
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.userId, this.projectAccess, 'edit');
     await this.repo.deleteFlow(input.id);
   }
 }

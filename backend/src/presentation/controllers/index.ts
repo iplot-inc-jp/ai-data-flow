@@ -1,6 +1,7 @@
 export * from './auth.controller';
 export * from './organization.controller';
 export * from './project.controller';
+export * from './project-member.controller';
 export * from './role.controller';
 export * from './table.controller';
 export * from './business-flow.controller';
@@ -29,3 +30,4 @@ export * from './project-charter.controller';
 export * from './change-log.controller';
 export * from './adoption-status.controller';
 export * from './kpi.controller';
+export * from './project-bundle.controller';

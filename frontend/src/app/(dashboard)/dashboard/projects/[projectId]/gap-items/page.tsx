@@ -47,6 +47,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { AnalysisTab } from './_components/analysis-tab';
 import { LedgerTab } from './_components/ledger-tab';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -135,6 +137,7 @@ export default function GapItemsPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [items, setItems] = useState<GapItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -159,8 +162,8 @@ export default function GapItemsPage() {
   // - mod+s         : 既定の保存挙動を抑止（各セルは blur で自動保存されるため）
   // - shift+/（?）   : 操作方法ダイアログを開く
   useKeyboardShortcuts([
-    { combo: 'mod+enter', handler: () => setIsCreateOpen(true) },
-    { combo: 'n', handler: () => setIsCreateOpen(true) },
+    { combo: 'mod+enter', handler: () => { if (canEdit) setIsCreateOpen(true); } },
+    { combo: 'n', handler: () => { if (canEdit) setIsCreateOpen(true); } },
     { combo: 'mod+s', handler: () => { /* blur で自動保存。ブラウザ保存ダイアログを抑止 */ }, whenTyping: true },
     { combo: 'shift+/', handler: () => setHowToOpen(true) },
   ]);
@@ -559,10 +562,12 @@ export default function GapItemsPage() {
             ]}
           />
           <ManualButton feature="gap-items" />
-          <Button onClick={() => setIsCreateOpen(true)} className="bg-blue-600 hover:bg-blue-700">
-            <Plus className="h-4 w-4 mr-2" />
-            GAP追加
-          </Button>
+          {canEdit && (
+            <Button onClick={() => setIsCreateOpen(true)} className="bg-blue-600 hover:bg-blue-700">
+              <Plus className="h-4 w-4 mr-2" />
+              GAP追加
+            </Button>
+          )}
         </div>
       </div>
 
@@ -593,6 +598,7 @@ export default function GapItemsPage() {
         </TabsList>
 
         <TabsContent value="list" className="space-y-6">
+      <EditGate dim={false}>
       {/* フィルタ + 集計 */}
       <Card className="bg-white border-gray-200">
         <CardContent className="p-4">
@@ -1023,16 +1029,21 @@ export default function GapItemsPage() {
           </CardContent>
         </Card>
       )}
+      </EditGate>
         </TabsContent>
 
         {/* 分析タブ: bunseki 公式を実装したミニツール群 */}
         <TabsContent value="analysis">
-          <AnalysisTab projectId={projectId} />
+          <EditGate dim={false}>
+            <AnalysisTab projectId={projectId} />
+          </EditGate>
         </TabsContent>
 
         {/* 課題一覧 / 対応表タブ: 既存GAP itemsの台帳＋完備チェック＋優先度スコア＋TOBE3段階 */}
         <TabsContent value="ledger">
-          <LedgerTab projectId={projectId} items={items} loading={loading} />
+          <EditGate dim={false}>
+            <LedgerTab projectId={projectId} items={items} loading={loading} />
+          </EditGate>
         </TabsContent>
       </Tabs>
 

@@ -15,6 +15,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/ui/page-header';
+import { EditGate } from '@/components/edit-gate';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { FileDropZone } from '@/components/ui/file-drop-zone';
@@ -710,6 +711,7 @@ export default function BusinessDefinitionPage() {
         }
       />
 
+      <EditGate dim={false}>
       {saveError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
           <AlertCircle className="h-4 w-4 shrink-0" />
@@ -1162,6 +1164,7 @@ export default function BusinessDefinitionPage() {
           )}
         </DialogContent>
       </Dialog>
+      </EditGate>
     </div>
   );
 }

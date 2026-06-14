@@ -8,6 +8,7 @@ import {
   DfdDiagram,
 } from '../../../domain';
 import { DfdDiagramOutput, toDfdDiagramOutput } from './dfd.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface GetFlowDfdInput { userId: string; flowId: string; }
 
@@ -18,6 +19,7 @@ export class GetFlowDfdUseCase {
     @Inject(BUSINESS_FLOW_REPOSITORY) private readonly flowRepo: IBusinessFlowRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetFlowDfdInput): Promise<DfdDiagramOutput> {
@@ -28,6 +30,8 @@ export class GetFlowDfdUseCase {
     if (!(await this.orgRepo.isMember(project.organizationId, input.userId))) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+    // プロジェクト単位 RBAC: 読取は VIEW 以上
+    await this.projectAccess.assertProjectAccess(flow.projectId, input.userId, 'view');
 
     let graph: DfdGraph | null = await this.repo.findGraphByProjectFlow(
       project.id,

@@ -4,6 +4,7 @@ import {
   Put,
   Body,
   Param,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +22,8 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== Pareto ==========
 class ParetoRowDto {
@@ -163,6 +166,8 @@ class ReplaceLeakDto {
 
 @ApiTags('GAP分析')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId')
 export class AnalysisController {
   constructor(private readonly prisma: PrismaService) {}

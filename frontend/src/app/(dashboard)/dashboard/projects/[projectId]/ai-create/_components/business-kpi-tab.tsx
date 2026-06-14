@@ -9,7 +9,7 @@
  * 下書きKPI（status=DRAFT・aiGenerated=true）を生成する。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GitBranch, Loader2, Sparkles, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -22,11 +22,14 @@ export function BusinessKpiTab({
   projectId,
   flows,
   onGenerated,
+  onJobEnqueued,
 }: {
   projectId: string;
   flows: BusinessFlowItem[];
   /** 生成された下書きKPI（一覧でハイライトするため親へ通知） */
   onGenerated: (created: KpiDto[]) => void;
+  /** AIジョブ起票直後の通知（バックグラウンド処理一覧の更新トリガー用） */
+  onJobEnqueued?: () => void;
 }) {
   const [flowId, setFlowId] = useState('');
   const [ioItems, setIoItems] = useState<IoSummaryItemDto[]>([]);
@@ -39,6 +42,12 @@ export function BusinessKpiTab({
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // 生成ポーリングの中断用。アンマウント時に abort して無限ポーリング/解放後 setState を防ぐ。
+  const genAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => genAbortRef.current?.abort();
+  }, []);
 
   const loadIoSummary = useCallback(async (targetFlowId: string) => {
     if (!targetFlowId) {
@@ -80,27 +89,41 @@ export function BusinessKpiTab({
 
   const handleGenerate = useCallback(async () => {
     if (!flowId || selectedIds.size === 0) return;
+    // 既存ポーリングがあれば中断してから新規開始。
+    genAbortRef.current?.abort();
+    const controller = new AbortController();
+    genAbortRef.current = controller;
     setGenerating(true);
     setGenerateError(null);
     setSuccessMessage(null);
     try {
-      const created = await kpiApi.generate(projectId, {
-        category: 'BUSINESS',
-        flowId,
-        informationTypeIds: Array.from(selectedIds),
-        instructions: instructions.trim() || undefined,
-        count,
-      });
+      const created = await kpiApi.generateViaJob(
+        projectId,
+        {
+          category: 'BUSINESS',
+          flowId,
+          informationTypeIds: Array.from(selectedIds),
+          instructions: instructions.trim() || undefined,
+          count,
+        },
+        () => onJobEnqueued?.(),
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       onGenerated(created);
       setSuccessMessage(
         `${created.length}件の下書きKPIを作成しました。下のKPI一覧（ハイライト表示）で内容を確認し、採用してください。`,
       );
     } catch (err) {
+      // アンマウント等で中断された場合は無視（解放後 setState を避ける）。
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return;
+      }
       setGenerateError(err instanceof Error ? err.message : 'KPIのAI生成に失敗しました');
     } finally {
-      setGenerating(false);
+      if (!controller.signal.aborted) setGenerating(false);
     }
-  }, [projectId, flowId, selectedIds, instructions, count, onGenerated]);
+  }, [projectId, flowId, selectedIds, instructions, count, onGenerated, onJobEnqueued]);
 
   return (
     <div className="space-y-4">

@@ -7,6 +7,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -28,6 +29,8 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== 定数 ==========
 
@@ -133,6 +136,8 @@ async function assertProjectMember(
 
 @ApiTags('導入状況')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/adoption-statuses')
 export class AdoptionStatusController {
   constructor(private readonly prisma: PrismaService) {}
@@ -278,6 +283,8 @@ export class AdoptionStatusController {
 
 @ApiTags('導入状況')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('adoption-statuses')
 export class AdoptionStatusByIdController {
   constructor(private readonly prisma: PrismaService) {}

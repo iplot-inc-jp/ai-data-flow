@@ -4,6 +4,7 @@ export * from './data-object.use-cases';
 export * from './object-relation.use-cases';
 export * from './save-object-positions.use-case';
 export * from './import-from-dfd.use-case';
+export * from './import-mermaid.use-case';
 export * from './get-er-graph.use-case';
 export * from './link-table-to-object.use-case';
 export * from './save-er-positions.use-case';

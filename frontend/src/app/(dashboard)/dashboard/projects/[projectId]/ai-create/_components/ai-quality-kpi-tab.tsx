@@ -8,7 +8,7 @@
  * 任意で対象フロー・測定対象の INPUT/OUTPUT も選択できる。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Server,
   GitBranch,
@@ -117,12 +117,15 @@ export function AiQualityKpiTab({
   flows,
   systems,
   onCreated,
+  onJobEnqueued,
 }: {
   projectId: string;
   flows: BusinessFlowItem[];
   systems: SystemMaster[];
   /** 追加・生成された下書きKPI（一覧でハイライトするため親へ通知） */
   onCreated: (created: KpiDto[]) => void;
+  /** AIジョブ起票直後の通知（バックグラウンド処理一覧の更新トリガー用） */
+  onJobEnqueued?: () => void;
 }) {
   const [systemId, setSystemId] = useState('');
   const [flowId, setFlowId] = useState('');
@@ -141,6 +144,12 @@ export function AiQualityKpiTab({
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // 生成ポーリングの中断用。アンマウント時に abort して無限ポーリング/解放後 setState を防ぐ。
+  const genAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => genAbortRef.current?.abort();
+  }, []);
 
   // 任意のフロー選択 → io-summary を取得（測定対象IOの候補）
   useEffect(() => {
@@ -214,28 +223,42 @@ export function AiQualityKpiTab({
 
   const handleGenerate = useCallback(async () => {
     if (!systemId) return;
+    // 既存ポーリングがあれば中断してから新規開始。
+    genAbortRef.current?.abort();
+    const controller = new AbortController();
+    genAbortRef.current = controller;
     setGenerating(true);
     setGenerateError(null);
     setSuccessMessage(null);
     try {
-      const created = await kpiApi.generate(projectId, {
-        category: 'AI_QUALITY',
-        systemId,
-        flowId: flowId || null,
-        informationTypeIds: Array.from(selectedIds),
-        instructions: instructions.trim() || undefined,
-        count,
-      });
+      const created = await kpiApi.generateViaJob(
+        projectId,
+        {
+          category: 'AI_QUALITY',
+          systemId,
+          flowId: flowId || null,
+          informationTypeIds: Array.from(selectedIds),
+          instructions: instructions.trim() || undefined,
+          count,
+        },
+        () => onJobEnqueued?.(),
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       onCreated(created);
       setSuccessMessage(
         `${created.length}件の下書きKPIを作成しました。下のKPI一覧（ハイライト表示）で内容を確認し、採用してください。`,
       );
     } catch (err) {
+      // アンマウント等で中断された場合は無視（解放後 setState を避ける）。
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return;
+      }
       setGenerateError(err instanceof Error ? err.message : 'KPIのAI生成に失敗しました');
     } finally {
-      setGenerating(false);
+      if (!controller.signal.aborted) setGenerating(false);
     }
-  }, [projectId, systemId, flowId, selectedIds, instructions, count, onCreated]);
+  }, [projectId, systemId, flowId, selectedIds, instructions, count, onCreated, onJobEnqueued]);
 
   return (
     <div className="space-y-4">

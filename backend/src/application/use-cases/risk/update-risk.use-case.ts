@@ -16,6 +16,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { RiskOutput, toRiskOutput } from './create-risk.use-case';
 import { assertRiskReferencesInProject } from './assert-risk-references';
 
@@ -71,6 +72,7 @@ export class UpdateRiskUseCase {
     @Inject(MEETING_REPOSITORY)
     private readonly meetingRepository: IMeetingRepository,
     private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateRiskInput): Promise<RiskOutput> {
@@ -94,6 +96,13 @@ export class UpdateRiskUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // 3.4 プロジェクト単位 RBAC: リスク更新は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      risk.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 3.5 参照ID（カテゴリ・サブ領域・オーナー・レビュー会議）が
     //     リスクと同一プロジェクトに属することを確認

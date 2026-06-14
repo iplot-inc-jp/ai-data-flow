@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { AsisMemoOutput, toAsisMemoOutput } from './create-asis-memo.use-case';
 
 export interface UpdateAsisMemoInput {
@@ -34,6 +35,7 @@ export class UpdateAsisMemoUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateAsisMemoInput): Promise<AsisMemoOutput> {
@@ -57,6 +59,13 @@ export class UpdateAsisMemoUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      asisMemo.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. ドメインロジック適用
     asisMemo.update({

@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteConstraintInput {
   userId: string;
@@ -27,6 +28,7 @@ export class DeleteConstraintUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteConstraintInput): Promise<void> {
@@ -49,6 +51,13 @@ export class DeleteConstraintUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      constraint.projectId,
+      input.userId,
+      'edit',
+    );
 
     await this.constraintRepository.delete(input.constraintId);
   }

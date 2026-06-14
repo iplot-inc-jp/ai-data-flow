@@ -13,6 +13,8 @@ import { ArrowLeft, FolderCog, Users, Loader2, Trash2, AlertTriangle } from 'luc
 import { HelpTooltip } from '@/components/ui/help-tooltip'
 import { HowToPanel } from '@/components/ui/how-to-panel'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
+import { useReadOnly } from '@/components/read-only-context'
+import { EditGate } from '@/components/edit-gate'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -35,7 +37,8 @@ export default function ProjectSettingsPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
-  
+  const { canEdit } = useReadOnly();
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
@@ -93,6 +96,7 @@ export default function ProjectSettingsPage() {
   }, [fetchProject, fetchRoles]);
 
   const handleSave = async () => {
+    if (!canEdit) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -118,6 +122,7 @@ export default function ProjectSettingsPage() {
   };
 
   const handleDelete = async () => {
+    if (!canEdit) return;
     setSaving(true);
     try {
       const headers = getHeaders();
@@ -153,7 +158,7 @@ export default function ProjectSettingsPage() {
       combo: 'mod+s',
       whenTyping: true,
       handler: () => {
-        if (!saving) handleSave();
+        if (!saving && canEdit) handleSave();
       },
     },
     { combo: 'shift+/', handler: openHowTo },
@@ -244,6 +249,7 @@ export default function ProjectSettingsPage() {
 
         {/* General Tab */}
         <TabsContent value="general">
+          <EditGate dim={false}>
           <Card className="bg-white border-gray-200">
             <CardHeader>
               <CardTitle className="text-gray-900">基本設定</CardTitle>
@@ -326,6 +332,7 @@ export default function ProjectSettingsPage() {
               </div>
             </CardContent>
           </Card>
+          </EditGate>
         </TabsContent>
 
         {/* Roles Tab */}

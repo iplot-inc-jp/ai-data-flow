@@ -15,6 +15,7 @@ import {
   ForbiddenError,
   ValidationError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateIssueNodeInput {
   userId: string;
@@ -60,6 +61,7 @@ export class UpdateIssueNodeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateIssueNodeInput): Promise<UpdateIssueNodeOutput> {
@@ -92,6 +94,13 @@ export class UpdateIssueNodeUseCase {
     if (!isMember) {
       throw new ForbiddenError('You do not have access to this project');
     }
+
+    // 4.5 プロジェクト単位 RBAC: ノード更新は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      tree.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 5. ドメインロジックで更新
     if (input.label !== undefined) {

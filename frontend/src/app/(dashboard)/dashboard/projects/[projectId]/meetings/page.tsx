@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { EditGate } from '@/components/edit-gate';
 import { Card, CardContent } from '@/components/ui/card';
 import { useTableSort } from '@/lib/use-table-sort';
 import { SortableTh } from '@/components/ui/sortable-th';
@@ -399,6 +400,7 @@ export default function MeetingsPage() {
         }
       />
 
+      <EditGate dim={false}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link
           href={`/dashboard/projects/${projectId}/stakeholder-management`}
@@ -1195,6 +1197,7 @@ export default function MeetingsPage() {
           </div>
         </div>
       )}
+      </EditGate>
     </div>
   );
 }

@@ -22,6 +22,7 @@ import { initOpenApi } from './lib/openapi.mjs';
 
 import * as generic from './tools/generic.mjs';
 import * as projects from './tools/projects.mjs';
+import * as projectBundle from './tools/project_bundle.mjs';
 import * as flows from './tools/flows.mjs';
 import * as issuesGaps from './tools/issues_gaps.mjs';
 import * as tobeRequirements from './tools/tobe_requirements.mjs';
@@ -31,6 +32,8 @@ import * as masters from './tools/masters.mjs';
 import * as dataObjectsDfd from './tools/data_objects_dfd.mjs';
 import * as catalog from './tools/catalog.mjs';
 import * as pm from './tools/pm.mjs';
+import * as rbac from './tools/rbac.mjs';
+import * as jobs from './tools/jobs.mjs';
 
 const API_URL = (process.env.AIDATAFLOW_API_URL || 'http://localhost:5021').replace(/\/$/, '');
 const API_KEY = process.env.AIDATAFLOW_API_KEY;
@@ -49,6 +52,7 @@ const server = new McpServer({ name: 'ai-data-flow', version: '1.0.0' });
 const modules = [
   generic,
   projects,
+  projectBundle,
   flows,
   issuesGaps,
   tobeRequirements,
@@ -58,6 +62,8 @@ const modules = [
   dataObjectsDfd,
   catalog,
   pm,
+  rbac,
+  jobs,
 ];
 
 for (const mod of modules) {

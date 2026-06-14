@@ -13,6 +13,7 @@ import {
   ValidationError,
 } from '../../../domain';
 import { MeetingOutput, toMeetingOutput } from './create-meeting.use-case';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface SetMeetingStakeholdersInput {
   userId: string;
@@ -35,6 +36,7 @@ export class SetMeetingStakeholdersUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: SetMeetingStakeholdersInput): Promise<MeetingOutput> {
@@ -58,6 +60,13 @@ export class SetMeetingStakeholdersUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // 3.5 プロジェクト単位 RBAC: 出席者の置換は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      meeting.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. 指定されたステークホルダーが同じプロジェクトに属することを検証
     const uniqueIds = Array.from(new Set(input.stakeholderIds));

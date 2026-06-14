@@ -1,4 +1,6 @@
-import { Controller, Post, Get, Put, Patch, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Put, Patch, Delete, Body, Param, HttpCode, HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { IsArray, IsString, IsNumber, IsOptional } from 'class-validator';
 import {
@@ -13,8 +15,12 @@ import {
   RoleTypeDto,
 } from '../dto';
 import { Inject } from '@nestjs/common';
-import { ROLE_REPOSITORY, RoleRepository } from '../../domain';
+import { ROLE_REPOSITORY, RoleRepository, EntityNotFoundError } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 class UpdateRoleOrderDto {
   @IsArray()
@@ -29,6 +35,8 @@ class UpdateRoleLaneHeightDto {
 
 @ApiTags('ロール')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('roles')
 export class RoleController {
   constructor(
@@ -38,7 +46,18 @@ export class RoleController {
     @Inject(ROLE_REPOSITORY)
     private readonly roleRepository: RoleRepository,
     private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
+
+  /** roleId -> projectId を解決して edit 強制（:id 書込用） */
+  private async assertRoleEditAccess(id: string, userId: string): Promise<void> {
+    const row = await this.prisma.role.findUnique({
+      where: { id },
+      select: { projectId: true },
+    });
+    if (!row) throw new EntityNotFoundError('Role', id);
+    await this.projectAccess.assertProjectAccess(row.projectId, userId, 'edit');
+  }
 
   @Get('project/:projectId')
   @ApiOperation({ summary: 'ロール一覧取得' })
@@ -64,8 +83,10 @@ export class RoleController {
   @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
   @ApiResponse({ status: 409, description: '同名のロールが既に存在します' })
   async create(
+    @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateRoleRequestDto,
   ): Promise<RoleResponseDto> {
+    await this.projectAccess.assertProjectAccess(dto.projectId, user.id, 'edit');
     const result = await this.createRoleUseCase.execute({
       projectId: dto.projectId,
       name: dto.name,
@@ -90,9 +111,11 @@ export class RoleController {
   @ApiResponse({ status: 200, description: '更新成功', type: RoleResponseDto })
   @ApiResponse({ status: 404, description: 'ロールが見つかりません' })
   async update(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body() dto: UpdateRoleRequestDto,
   ): Promise<RoleResponseDto> {
+    await this.assertRoleEditAccess(id, user.id);
     const result = await this.updateRoleUseCase.execute({
       id,
       name: dto.name,
@@ -159,9 +182,11 @@ export class RoleController {
   @ApiParam({ name: 'id', description: 'ロールID' })
   @ApiResponse({ status: 200, description: '更新成功' })
   async updateLaneHeight(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body() dto: UpdateRoleLaneHeightDto,
   ): Promise<RoleResponseDto> {
+    await this.assertRoleEditAccess(id, user.id);
     const role = await this.prisma.role.update({
       where: { id },
       data: { laneHeight: dto.laneHeight },
@@ -189,7 +214,11 @@ export class RoleController {
   @Delete(':id')
   @ApiOperation({ summary: 'ロール削除' })
   @ApiResponse({ status: 200, description: '削除成功' })
-  async delete(@Param('id') id: string) {
+  async delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.assertRoleEditAccess(id, user.id);
     await this.roleRepository.delete(id);
     return { success: true };
   }

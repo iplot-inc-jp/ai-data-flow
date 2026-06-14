@@ -16,6 +16,7 @@ import {
   toTobeVisionOutput,
   assertAsisFlowBelongsToProject,
 } from './create-tobe-vision.use-case';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateTobeVisionInput {
   userId: string;
@@ -43,6 +44,7 @@ export class UpdateTobeVisionUseCase {
     private readonly organizationRepository: OrganizationRepository,
     @Inject(BUSINESS_FLOW_REPOSITORY)
     private readonly businessFlowRepository: IBusinessFlowRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateTobeVisionInput): Promise<TobeVisionOutput> {
@@ -66,6 +68,13 @@ export class UpdateTobeVisionUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      tobeVision.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 3.5 asisFlowId 整合性確認（同一プロジェクトの ASIS フローのみ許可）
     await assertAsisFlowBelongsToProject(

@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteIssueTreeInput {
   userId: string;
@@ -27,6 +28,7 @@ export class DeleteIssueTreeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteIssueTreeInput): Promise<void> {
@@ -51,7 +53,14 @@ export class DeleteIssueTreeUseCase {
       throw new ForbiddenError('You do not have access to this project');
     }
 
-    // 4. 削除
+    // 4. プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      tree.projectId,
+      input.userId,
+      'edit',
+    );
+
+    // 5. 削除
     await this.issueTreeRepository.delete(tree.id);
   }
 }

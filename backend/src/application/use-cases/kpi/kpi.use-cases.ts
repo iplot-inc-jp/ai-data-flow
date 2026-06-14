@@ -15,6 +15,7 @@ import {
   KpiStatusValue,
 } from '../../../domain';
 import { authorizeProject } from './kpi-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { KpiOutput, toKpiOutput } from './kpi.output';
 
 // ============================================================
@@ -135,10 +136,11 @@ export class CreateKpiUseCase {
     @Inject(KPI_REPOSITORY) private readonly repo: IKpiRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: CreateKpiInput): Promise<KpiOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
 
     // 空文字の参照IDは null（未指定）に正規化してから検証・保存する
     const flowId = normalizeRefId(input.flowId) ?? null;
@@ -222,12 +224,13 @@ export class UpdateKpiUseCase {
     @Inject(KPI_REPOSITORY) private readonly repo: IKpiRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateKpiInput): Promise<KpiOutput> {
     const kpi = await this.repo.findById(input.id);
     if (!kpi) throw new EntityNotFoundError('Kpi', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId, this.projectAccess, 'edit');
 
     // 空文字の参照IDは null（解除）に正規化。undefined は「変更なし」のまま
     const flowId = normalizeRefId(input.flowId);
@@ -293,12 +296,13 @@ export class DeleteKpiUseCase {
     @Inject(KPI_REPOSITORY) private readonly repo: IKpiRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteKpiInput): Promise<void> {
     const kpi = await this.repo.findById(input.id);
     if (!kpi) throw new EntityNotFoundError('Kpi', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId, this.projectAccess, 'edit');
     await this.repo.delete(input.id);
   }
 }
@@ -319,12 +323,13 @@ export class SetKpiInformationTypesUseCase {
     @Inject(KPI_REPOSITORY) private readonly repo: IKpiRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: SetKpiInformationTypesInput): Promise<KpiOutput> {
     const kpi = await this.repo.findById(input.kpiId);
     if (!kpi) throw new EntityNotFoundError('Kpi', input.kpiId);
-    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId, this.projectAccess, 'edit');
 
     // 同一プロジェクト検証（存在しないID / 他プロジェクトの情報種別は拒否）
     const uniqueIds = Array.from(new Set(input.informationTypeIds));

@@ -1,4 +1,6 @@
-import { Controller, Get, Put, Body, Param } from '@nestjs/common';
+import { Controller, Get, Put, Body, Param,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString } from 'class-validator';
 import {
@@ -7,6 +9,8 @@ import {
   ListFlowDefinitionsUseCase,
 } from '../../application';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 class UpsertFlowDefinitionDto {
   @IsOptional() @IsString() purpose?: string;
@@ -26,6 +30,8 @@ class UpsertFlowDefinitionDto {
 
 @ApiTags('業務定義')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class FlowDefinitionController {
   constructor(

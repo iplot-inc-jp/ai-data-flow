@@ -11,6 +11,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateIssueTreeInput {
   userId: string;
@@ -42,6 +43,7 @@ export class UpdateIssueTreeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateIssueTreeInput): Promise<UpdateIssueTreeOutput> {
@@ -66,7 +68,14 @@ export class UpdateIssueTreeUseCase {
       throw new ForbiddenError('You do not have access to this project');
     }
 
-    // 4. ドメインロジックで更新
+    // 4. プロジェクト単位 RBAC: 書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      tree.projectId,
+      input.userId,
+      'edit',
+    );
+
+    // 5. ドメインロジックで更新
     if (input.name !== undefined) {
       tree.changeName(input.name);
     }

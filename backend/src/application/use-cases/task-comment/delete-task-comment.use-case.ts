@@ -11,6 +11,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteTaskCommentInput {
   userId: string;
@@ -32,6 +33,7 @@ export class DeleteTaskCommentUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteTaskCommentInput): Promise<void> {
@@ -49,6 +51,14 @@ export class DeleteTaskCommentUseCase {
     if (!project) {
       throw new EntityNotFoundError('Project', task.projectId);
     }
+
+    // プロジェクト単位 RBAC: コメント削除は書込のため edit 強制（VIEW のみのユーザーは
+    // 自分のコメントでも削除不可）。
+    await this.projectAccess.assertProjectAccess(
+      task.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 作者本人なら無条件で許可、そうでなければ組織メンバーであることを要求
     if (!comment.isAuthor(input.userId)) {

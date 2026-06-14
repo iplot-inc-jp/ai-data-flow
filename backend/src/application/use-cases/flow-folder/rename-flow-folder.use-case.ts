@@ -10,6 +10,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { FlowFolderOutput, toFlowFolderOutput } from './flow-folder.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface RenameFlowFolderInput {
   userId: string;
@@ -29,6 +30,7 @@ export class RenameFlowFolderUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: RenameFlowFolderInput): Promise<FlowFolderOutput> {
@@ -49,6 +51,13 @@ export class RenameFlowFolderUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: フォルダ名変更は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      folder.projectId,
+      input.userId,
+      'edit',
+    );
 
     folder.rename(input.name);
     await this.flowFolderRepository.save(folder);

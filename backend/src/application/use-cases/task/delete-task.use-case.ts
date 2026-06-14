@@ -10,6 +10,8 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { rollupAncestorDates } from './rollup-parent-dates';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { TaskWebhookService } from '../../../infrastructure/services/task-webhook.service';
 
 export interface DeleteTaskInput {
   userId: string;
@@ -30,6 +32,8 @@ export class DeleteTaskUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
+    private readonly taskWebhook: TaskWebhookService,
   ) {}
 
   async execute(input: DeleteTaskInput): Promise<void> {
@@ -51,8 +55,24 @@ export class DeleteTaskUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
+    // プロジェクト単位 RBAC: タスク削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      task.projectId,
+      input.userId,
+      'edit',
+    );
+
     // 削除前に旧親を保持し、削除後にその期間を再計算する
     const oldParentId = task.parentId;
+    // Webhook 配信用に削除前のスナップショットを保持（削除後は参照できない）
+    const snapshot = {
+      id: task.id,
+      projectId: task.projectId,
+      parentId: task.parentId,
+      title: task.title,
+      status: task.status,
+      priority: task.priority,
+    };
 
     await this.taskRepository.delete(input.taskId);
 
@@ -60,5 +80,13 @@ export class DeleteTaskUseCase {
     if (oldParentId) {
       await rollupAncestorDates(this.taskRepository, oldParentId);
     }
+
+    // Webhook 配信（task.deleted）。best-effort で本処理を巻き込まない。
+    await this.taskWebhook.enqueueForEvent(
+      snapshot.projectId,
+      'task.deleted',
+      snapshot,
+      input.userId,
+    );
   }
 }

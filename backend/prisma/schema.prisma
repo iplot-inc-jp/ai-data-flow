@@ -28,8 +28,147 @@ model User {
   organizationMembers OrganizationMember[]
   settings            UserSetting?
   apiKeys             ApiKey[]
+  projectMemberships  ProjectMember[]
 
   @@map("users")
+}
+
+// プロジェクト単位のユーザー権限（閲覧 / 編集）。
+// 実効権限: 全体管理者・会社 OWNER/ADMIN は常に EDIT。
+// プロジェクトに ProjectMember 行が1件も無ければ、後方互換で全 org メンバー = EDIT。
+// 行が存在する場合は、掲載ユーザーはその accessLevel、未掲載の org メンバーは権限なし。
+enum ProjectAccessLevel {
+  VIEW
+  EDIT
+}
+
+model ProjectMember {
+  id          String             @id @default(uuid())
+  projectId   String             @map("project_id")
+  userId      String             @map("user_id")
+  accessLevel ProjectAccessLevel @default(EDIT) @map("access_level")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@map("project_members")
+}
+
+// バックグラウンドジョブ（AI生成の非同期化・定期ジョブの実行記録）。
+// Upstash Redis をキュー/ロックに、本テーブルを永続ステータス/結果に使う。
+enum BackgroundJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model BackgroundJob {
+  id          String              @id @default(uuid())
+  projectId   String?             @map("project_id")
+  // ジョブ種別（例: AI_MERMAID_FLOW / AI_MERMAID_OBJECTMAP / AI_KPI / AI_SCHEMA_ANALYZE / AI_ISSUE_SUGGEST）
+  type        String
+  status      BackgroundJobStatus @default(QUEUED)
+  // 実行に必要な入力（リクエスト相当）。秘匿情報は入れない方針
+  payload     Json?
+  // 成功時の結果（クライアントがポーリングで取得）
+  result      Json?
+  // 最新（最終）試行のエラー。試行ごとの全履歴は BackgroundJobAttempt 参照
+  error       String?             @db.Text
+  progress    Int                 @default(0)
+  // これまでの試行回数 / 自動リトライ上限
+  attempts    Int                 @default(0)
+  maxAttempts Int                 @default(3) @map("max_attempts")
+  // 起票ユーザー（FKなし。任意）
+  createdById String?             @map("created_by_id")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  startedAt   DateTime?           @map("started_at")
+  finishedAt  DateTime?           @map("finished_at")
+
+  project        Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attemptRecords BackgroundJobAttempt[]
+
+  @@index([projectId, createdAt])
+  @@index([status])
+  @@map("background_jobs")
+}
+
+// 外部課題トラッカー（Backlog / Jira）接続。CSV不要のフル移行＋差分/定期同期に使う。
+enum IssueTrackerProvider {
+  BACKLOG
+  JIRA
+}
+
+model IssueTrackerConnection {
+  id            String               @id @default(uuid())
+  projectId     String               @map("project_id")
+  provider      IssueTrackerProvider
+  // Backlog: スペースホスト（例 iplot.backlog.com）。Jira: サイトURL（例 https://xxx.atlassian.net）
+  host          String
+  // Jira のみ: 認証メールアドレス（Backlog は不要）
+  email         String?
+  // Backlog: APIキー / Jira: APIトークン。AES-256-GCM 暗号化保存。レスポンスでは返さない
+  credentialEnc String               @map("credential_enc")
+  // 取り込み対象のプロジェクトキー（Backlog projectKey / Jira project key）
+  projectKey    String?              @map("project_key")
+  lastSyncedAt  DateTime?            @map("last_synced_at")
+  autoSync      Boolean              @default(false) @map("auto_sync")
+  syncIntervalMinutes Int            @default(60) @map("sync_interval_minutes")
+  status        String               @default("active")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("issue_tracker_connections")
+}
+
+// Webhook 設定（プロジェクトごとの送信先。ipro-kun 等の外部連携）。
+// 配信自体は BackgroundJob(type=WEBHOOK_DELIVERY) に乗せ、自動リトライ＋試行記録を再利用する。
+model Webhook {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  // 送信先URL（管理画面で設定）
+  targetUrl  String   @map("target_url")
+  // 署名用シークレット（AES-256-GCM 暗号化保存。HMAC-SHA256 署名に使用。レスポンスでは返さない）
+  secretEnc  String?  @map("secret_enc")
+  // 購読イベント（例: ["task.created","task.updated","task.status_changed","task.deleted"]）
+  events     Json
+  active     Boolean  @default(true)
+  // 任意の表示名・補足
+  label      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("webhooks")
+}
+
+// バックグラウンドジョブの「試行」1回ぶんの記録（リトライ回数とエラーを全て残す）。
+model BackgroundJobAttempt {
+  id         String              @id @default(uuid())
+  jobId      String              @map("job_id")
+  // 1始まりの試行番号
+  attemptNo  Int                 @map("attempt_no")
+  status     BackgroundJobStatus // RUNNING / SUCCEEDED / FAILED
+  error      String?             @db.Text
+  startedAt  DateTime            @default(now()) @map("started_at")
+  finishedAt DateTime?           @map("finished_at")
+  durationMs Int?                @map("duration_ms")
+
+  job BackgroundJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, attemptNo])
+  @@index([jobId])
+  @@map("background_job_attempts")
 }
 
 // ===========================================
@@ -131,6 +270,10 @@ model Project {
   dataObjectRelations     DataObjectRelation[]
   dataObjectAnnotations   DataObjectAnnotation[]
   kpis                    Kpi[]
+  members                 ProjectMember[]
+  backgroundJobs          BackgroundJob[]
+  webhooks                Webhook[]
+  trackerConnections      IssueTrackerConnection[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1189,6 +1332,8 @@ model SubProject {
   stakeholderAssignments StakeholderSubProject[]
   lessons          LessonLearned[]
   meetingLinks     MeetingSubProject[]
+  dataObjects            DataObject[]
+  dataObjectAnnotations  DataObjectAnnotation[]
 
   @@map("sub_projects")
 }
@@ -1338,6 +1483,10 @@ model Task {
   projectId      String       @map("project_id")
   // 親タスク（subtask / 親タスク）
   parentId       String?      @map("parent_id")
+  // 外部トラッカー(Backlog/Jira)からの移行・同期で冪等 upsert するための由来キー。
+  // 例: "BACKLOG:IPLOT-12" / "JIRA:ABC-34"。手動作成タスクは null。
+  // (projectId, sourceKey) で一意にし、再 import 時に重複作成せず更新する。
+  sourceKey      String?      @map("source_key")
   title          String
   description    String?      @db.Text
   status         TaskStatus   @default(OPEN)
@@ -1372,6 +1521,8 @@ model Task {
   comments     TaskComment[]
   attachments  Attachment[]
 
+  // 外部トラッカー由来キーでの冪等 upsert 用（同一プロジェクト内で一意）。
+  @@unique([projectId, sourceKey], name: "projectId_sourceKey")
   @@map("tasks")
 }
 
@@ -1522,6 +1673,8 @@ enum RelationCardinality {
 model DataObject {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 所属領域（SubProject）。スコープ囲みでの自動紐付け・紐付け画面で設定。null=未分類
+  subProjectId String? @map("sub_project_id")
   name        String
   description String?  @db.Text
   color       String?
@@ -1533,6 +1686,7 @@ model DataObject {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject   SubProject?          @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   dfdNodes     DfdNode[]
   tables       Table[]
   outRelations DataObjectRelation[] @relation("DataObjectRelSource")
@@ -1576,11 +1730,19 @@ model DataObjectAnnotation {
   width     Float?             @map("width")
   height    Float?             @map("height")
   color     String?
+  // kind=SCOPE の枠線スタイル 'dashed' | 'solid' と背景塗りの不透明度(0-1)（FlowAnnotation と同規約）
+  borderStyle String?          @map("border_style")
+  fillOpacity Float?           @map("fill_opacity")
+  // kind=SCOPE が表す領域（SubProject）。この囲みに入ったオブジェクトを自動でこの領域に紐付ける
+  subProjectId String?         @map("sub_project_id")
+  // 囲み（ウィンドウ）の表示/非表示トグル
+  visible    Boolean           @default(true)
   order     Int                @default(0)
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@map("data_object_annotations")
@@ -2255,6 +2417,8 @@ model ChangeLog {
   entity     String? // path から導出した対象種別（business-flows/tasks/risks 等）
   action     String? // CREATE / UPDATE / DELETE
   summary    String?
+  // リクエストボディ（秘匿情報は [REDACTED] にマスク・サイズ上限ありの JSON 文字列）
+  body       String?  @db.Text
   statusCode Int?     @map("status_code")
   createdAt  DateTime @default(now()) @map("created_at")
 

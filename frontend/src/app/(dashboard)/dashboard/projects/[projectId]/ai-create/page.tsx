@@ -11,7 +11,7 @@
  * KPI の取得・作成・更新・削除・生成はすべて @/lib/kpis の kpiApi 経由。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { BarChart3, Cpu } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
@@ -25,6 +25,11 @@ import type { BusinessFlowItem, RoleItem } from './_components/types';
 import { BusinessKpiTab } from './_components/business-kpi-tab';
 import { AiQualityKpiTab } from './_components/ai-quality-kpi-tab';
 import { KpiList } from './_components/kpi-list';
+import { EditGate } from '@/components/edit-gate';
+import {
+  BackgroundJobsPanel,
+  type BackgroundJobsPanelHandle,
+} from '@/components/background-jobs-panel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -52,6 +57,12 @@ export default function AiCreatePage() {
 
   // 直前に生成/追加されたKPI（一覧でハイライト）
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+
+  // バックグラウンド処理一覧（KPI生成ジョブ起票後に refresh する）
+  const jobsPanelRef = useRef<BackgroundJobsPanelHandle | null>(null);
+  const handleJobEnqueued = useCallback(() => {
+    jobsPanelRef.current?.refresh();
+  }, []);
 
   const loadKpis = useCallback(async () => {
     setKpisError(null);
@@ -138,32 +149,47 @@ export default function AiCreatePage() {
               </TabsTrigger>
             </TabsList>
             <TabsContent value="business" className="mt-4">
-              <BusinessKpiTab projectId={projectId} flows={flows} onGenerated={handleCreated} />
+              <EditGate dim={false}>
+                <BusinessKpiTab
+                  projectId={projectId}
+                  flows={flows}
+                  onGenerated={handleCreated}
+                  onJobEnqueued={handleJobEnqueued}
+                />
+              </EditGate>
             </TabsContent>
             <TabsContent value="ai-quality" className="mt-4">
-              <AiQualityKpiTab
-                projectId={projectId}
-                flows={flows}
-                systems={systems}
-                onCreated={handleCreated}
-              />
+              <EditGate dim={false}>
+                <AiQualityKpiTab
+                  projectId={projectId}
+                  flows={flows}
+                  systems={systems}
+                  onCreated={handleCreated}
+                  onJobEnqueued={handleJobEnqueued}
+                />
+              </EditGate>
             </TabsContent>
           </Tabs>
         </div>
       </Card>
 
       {/* KPI一覧（タブ共通） */}
-      <KpiList
-        kpis={kpis}
-        loading={kpisLoading}
-        error={kpisError}
-        highlightIds={highlightIds}
-        flows={flows}
-        systems={systems}
-        roles={roles}
-        informationTypes={informationTypes}
-        onChanged={loadKpis}
-      />
+      <EditGate dim={false}>
+        <KpiList
+          kpis={kpis}
+          loading={kpisLoading}
+          error={kpisError}
+          highlightIds={highlightIds}
+          flows={flows}
+          systems={systems}
+          roles={roles}
+          informationTypes={informationTypes}
+          onChanged={loadKpis}
+        />
+      </EditGate>
+
+      {/* ===== バックグラウンド処理一覧（KPI生成などのAIジョブ） ===== */}
+      <BackgroundJobsPanel ref={jobsPanelRef} projectId={projectId} />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { SubProjectPicker } from '@/components/ui/sub-project-picker';
 import type { SubProjectMaster } from '@/lib/masters';
+import { useReadOnly } from '@/components/read-only-context';
 import {
   Dialog,
   DialogContent,
@@ -88,6 +89,7 @@ export default function ProjectFlowsPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   // サイドバーの「業務フロー(ASIS)/(TOBE)」リンクは ?kind=asis|tobe を付ける。
   // それを ASIS/TOBE フィルタの初期値に反映する。
@@ -495,7 +497,8 @@ export default function ProjectFlowsPage() {
             </Button>
           </Link>
 
-          {/* Create flow */}
+          {/* Create flow（編集権限がある場合のみ） */}
+          {canEdit && (
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
               <Button className="bg-blue-600 hover:bg-blue-700">
@@ -587,6 +590,7 @@ export default function ProjectFlowsPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          )}
         </div>
       </div>
 
@@ -810,7 +814,7 @@ export default function ProjectFlowsPage() {
                             {section.node ? section.node.subProject.name : '領域なし'}
                           </h2>
                           <span className="text-xs text-gray-400">{section.flows.length}</span>
-                          {section.node && (
+                          {section.node && canEdit && (
                             <button
                               type="button"
                               onClick={() => {
@@ -908,7 +912,8 @@ export default function ProjectFlowsPage() {
                                   </div>
                                 </CardContent>
                               </Link>
-                              {/* Per-flow domain assignment */}
+                              {/* Per-flow domain assignment（編集権限がある場合のみ） */}
+                              {canEdit && (
                               <div className="space-y-1.5 border-t border-gray-100 px-6 py-3">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-gray-400 whitespace-nowrap w-20">
@@ -929,6 +934,7 @@ export default function ProjectFlowsPage() {
                                   />
                                 </div>
                               </div>
+                              )}
                             </Card>
                           ))}
                         </div>
@@ -950,7 +956,7 @@ export default function ProjectFlowsPage() {
                     ? '検索条件・領域を変更してください'
                     : '最初のフローを作成しましょう'}
                 </p>
-                {!searchQuery && selectedDomainId === ALL_DOMAINS && (
+                {!searchQuery && selectedDomainId === ALL_DOMAINS && canEdit && (
                   <Button
                     className="bg-blue-600 hover:bg-blue-700"
                     onClick={() => setIsCreateDialogOpen(true)}

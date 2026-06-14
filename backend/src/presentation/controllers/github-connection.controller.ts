@@ -8,6 +8,7 @@ import {
   Param,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsOptional, IsBoolean, IsInt, Min } from 'class-validator';
@@ -16,6 +17,8 @@ import { CryptoService } from '../../infrastructure/services/crypto.service';
 import { SyncService } from '../../infrastructure/services/sync.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== DTOs ==========
 class CreateGithubConnectionDto {
@@ -64,6 +67,8 @@ class UpdateGithubConnectionDto {
 
 @ApiTags('GitHub連携')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class GithubConnectionController {
   constructor(

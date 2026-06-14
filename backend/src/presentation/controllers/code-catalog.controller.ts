@@ -9,6 +9,7 @@ import {
   Inject,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
@@ -29,6 +30,8 @@ import {
   ForbiddenError,
   ValidationError,
 } from '../../domain';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== DTOs ==========
 class UpdateApiEndpointDto {
@@ -112,6 +115,8 @@ class UpdateEdgeApiLinksDto {
 
 @ApiTags('コード抽出')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class CodeCatalogController {
   constructor(

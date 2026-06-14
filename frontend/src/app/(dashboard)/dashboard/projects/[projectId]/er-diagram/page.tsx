@@ -28,6 +28,8 @@ import { ErCanvas } from './_components/ErCanvas';
 import { TableListPanel } from './_components/TableListPanel';
 import { CreateObjectDialog } from './_components/CreateObjectDialog';
 import { computeAutoArrange, type ErDisplayMode, type Point } from './_components/er-layout';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 
 /** ドラッグ後の位置保存デバウンス（ms） */
 const SAVE_DEBOUNCE_MS = 800;
@@ -35,6 +37,7 @@ const SAVE_DEBOUNCE_MS = 800;
 export default function ErDiagramPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [graph, setGraph] = useState<ErGraphDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -292,10 +295,12 @@ export default function ErDiagramPage() {
         backLabel="プロジェクトへ戻る"
         actions={
           <>
+            {canEdit && (
             <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => openCreateDialog()}>
               <Plus className="mr-2 h-4 w-4" />
               オブジェクト追加
             </Button>
+            )}
             <HowToPanel
               title="ER図の使い方"
               steps={[
@@ -376,6 +381,7 @@ export default function ErDiagramPage() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {canEdit && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -385,12 +391,14 @@ export default function ErDiagramPage() {
                   <Plus className="mr-1.5 h-4 w-4" />
                   オブジェクトを追加
                 </Button>
+                )}
                 <Link href={`/dashboard/projects/${projectId}/object-map`}>
                   <Button variant="outline" size="sm" className="border-amber-300 text-amber-700 hover:bg-amber-100">
                     <Boxes className="mr-1.5 h-4 w-4" />
                     関係性マップへ
                   </Button>
                 </Link>
+                {canEdit && (
                 <Button
                   size="sm"
                   className="bg-amber-600 hover:bg-amber-700"
@@ -404,6 +412,7 @@ export default function ErDiagramPage() {
                   )}
                   DFDから取り込み
                 </Button>
+                )}
               </div>
             </div>
           )}
@@ -416,17 +425,18 @@ export default function ErDiagramPage() {
                 positions={positions}
                 mode={mode}
                 onModeChange={setMode}
-                onMoveTable={handleMoveTable}
-                onDragEnd={handleDragEnd}
-                onAutoArrange={() => void handleAutoArrange()}
+                onMoveTable={canEdit ? handleMoveTable : () => {}}
+                onDragEnd={canEdit ? handleDragEnd : () => {}}
+                onAutoArrange={canEdit ? () => void handleAutoArrange() : () => {}}
                 arranging={arranging}
                 savingPositions={savingPositions}
               />
             )}
           </div>
 
-          {/* 一覧パネル（オブジェクト別グルーピング＋所属変更） */}
+          {/* 一覧パネル（オブジェクト別グルーピング＋所属変更）（閲覧専用時は編集を無効化） */}
           {graph && (
+            <EditGate dim={false}>
             <TableListPanel
               projectId={projectId}
               objects={graph.objects}
@@ -435,6 +445,7 @@ export default function ErDiagramPage() {
               onLinkChange={(tableId, dataObjectId) => void handleLinkChange(tableId, dataObjectId)}
               onCreateForTable={(tableId) => openCreateDialog(tableId)}
             />
+            </EditGate>
           )}
         </>
       )}

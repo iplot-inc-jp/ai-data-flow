@@ -28,6 +28,11 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useTableSort } from '@/lib/use-table-sort';
 import { SortableTh } from '@/components/ui/sortable-th';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
+import { BatchJobsAdminPanel } from '@/components/batch-jobs-admin-panel';
+import { WebhooksAdminPanel } from '@/components/webhooks-admin-panel';
+import { TrackerConnectionsAdminPanel } from '@/components/tracker-connections-admin-panel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -278,6 +283,7 @@ function SyncRunsTable({ runs }: { runs: SyncRun[] }) {
 export default function IntegrationsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [connections, setConnections] = useState<GithubConnection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -293,8 +299,8 @@ export default function IntegrationsPage() {
   // - mod+s         : 既定の保存挙動を抑止（同期間隔は blur で自動保存されるため）
   // - shift+/（?）   : 操作方法ダイアログを開く
   useKeyboardShortcuts([
-    { combo: 'mod+enter', handler: () => setShowCreate(true) },
-    { combo: 'n', handler: () => setShowCreate(true) },
+    { combo: 'mod+enter', handler: () => { if (canEdit) setShowCreate(true); } },
+    { combo: 'n', handler: () => { if (canEdit) setShowCreate(true); } },
     { combo: 'mod+s', handler: () => { /* blur で自動保存。ブラウザ保存ダイアログを抑止 */ }, whenTyping: true },
     { combo: 'shift+/', handler: () => setHowToOpen(true) },
   ]);
@@ -564,13 +570,16 @@ export default function IntegrationsPage() {
               { keys: '?', desc: 'この操作方法を開く' },
             ]}
           />
-          <Button onClick={() => setShowCreate((v) => !v)} className="bg-blue-600 hover:bg-blue-700">
-            <Plus className="h-4 w-4 mr-2" />
-            リポジトリ連携
-          </Button>
+          {canEdit && (
+            <Button onClick={() => setShowCreate((v) => !v)} className="bg-blue-600 hover:bg-blue-700">
+              <Plus className="h-4 w-4 mr-2" />
+              リポジトリ連携
+            </Button>
+          )}
         </div>
       </div>
 
+      <EditGate dim={false}>
       {/* 説明バナー */}
       <Card className="bg-blue-50/50 border-blue-200">
         <CardContent className="p-4">
@@ -881,6 +890,16 @@ export default function IntegrationsPage() {
           })}
         </div>
       )}
+      </EditGate>
+
+      {/* ===== 課題トラッカー連携（Backlog/Jira・管理者限定: CRUD/接続テスト/フル移行・差分同期） ===== */}
+      <TrackerConnectionsAdminPanel projectId={projectId} />
+
+      {/* ===== タスク Webhook（外部送信・管理者限定: CRUD/テスト送信） ===== */}
+      <WebhooksAdminPanel projectId={projectId} />
+
+      {/* ===== バックグラウンド処理 / バッチ管理（管理者限定: 試行履歴・再実行） ===== */}
+      <BatchJobsAdminPanel projectId={projectId} />
     </div>
   );
 }

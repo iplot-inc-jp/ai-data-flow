@@ -25,6 +25,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
     id: string;
     projectId: string;
     parentId: string | null;
+    sourceKey: string | null;
     title: string;
     description: string | null;
     status: string;
@@ -49,6 +50,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
       id: record.id,
       projectId: record.projectId,
       parentId: record.parentId,
+      sourceKey: record.sourceKey,
       title: record.title,
       description: record.description,
       status: record.status as TaskStatus,
@@ -110,10 +112,23 @@ export class TaskRepositoryImpl implements ITaskRepository {
     return records.map((r) => this.toDomain(r));
   }
 
+  async findByProjectIdAndSourceKey(
+    projectId: string,
+    sourceKey: string,
+  ): Promise<Task | null> {
+    const record = await this.prisma.task.findUnique({
+      where: { projectId_sourceKey: { projectId, sourceKey } },
+      include: ISSUE_NODE_INCLUDE,
+    });
+    if (!record) return null;
+    return this.toDomain(record);
+  }
+
   async save(task: Task): Promise<void> {
     const data = {
       projectId: task.projectId,
       parentId: task.parentId,
+      sourceKey: task.sourceKey,
       title: task.title,
       description: task.description,
       status: task.status as TaskStatus,

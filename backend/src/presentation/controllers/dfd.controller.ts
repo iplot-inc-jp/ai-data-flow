@@ -1,5 +1,6 @@
 import {
   Controller, Get, Post, Patch, Put, Delete, Body, Param, HttpCode, Inject,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiProperty } from '@nestjs/swagger';
 import {
@@ -28,6 +29,9 @@ import {
 import { DfdNodeKindValue } from '../../domain/entities/dfd-node.entity';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 const KINDS = ['FUNCTION', 'EXTERNAL_ENTITY', 'DATA_STORE'];
 
@@ -173,6 +177,8 @@ class UpdateDfdAnnotationDto {
 
 @ApiTags('DFD（データフロー図）')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class DfdController {
   constructor(
@@ -191,6 +197,7 @@ export class DfdController {
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
     private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   // ========== 第2レベル（フロー） ==========
@@ -318,8 +325,8 @@ export class DfdController {
     @Param('diagramId') diagramId: string,
     @Body() dto: CreateDfdAnnotationDto,
   ) {
-    // 認可: diagram -> project -> organization メンバーシップ
-    await this.assertDiagramMembership(diagramId, user.id);
+    // 認可: diagram -> project -> organization メンバーシップ + edit 強制
+    await this.assertDiagramMembership(diagramId, user.id, 'edit');
 
     const created = await this.prisma.dfdAnnotation.create({
       data: {
@@ -349,8 +356,8 @@ export class DfdController {
   ) {
     const annotation = await this.prisma.dfdAnnotation.findUnique({ where: { id } });
     if (!annotation) throw new EntityNotFoundError('DfdAnnotation', id);
-    // 認可: annotation -> diagram -> project -> organization メンバーシップ
-    await this.assertDiagramMembership(annotation.diagramId, user.id);
+    // 認可: annotation -> diagram -> project -> organization メンバーシップ + edit 強制
+    await this.assertDiagramMembership(annotation.diagramId, user.id, 'edit');
 
     const data: {
       kind?: DfdAnnotationKind;
@@ -387,15 +394,22 @@ export class DfdController {
   ) {
     const annotation = await this.prisma.dfdAnnotation.findUnique({ where: { id } });
     if (!annotation) throw new EntityNotFoundError('DfdAnnotation', id);
-    // 認可: annotation -> diagram -> project -> organization メンバーシップ
-    await this.assertDiagramMembership(annotation.diagramId, user.id);
+    // 認可: annotation -> diagram -> project -> organization メンバーシップ + edit 強制
+    await this.assertDiagramMembership(annotation.diagramId, user.id, 'edit');
 
     await this.prisma.dfdAnnotation.delete({ where: { id } });
     return { success: true };
   }
 
-  /** diagram -> project -> organization のメンバーシップ認可 */
-  private async assertDiagramMembership(diagramId: string, userId: string): Promise<void> {
+  /**
+   * diagram -> project -> organization のメンバーシップ認可。
+   * 併せてプロジェクト単位 RBAC（VIEW/EDIT）を強制する（既定 view、書込は edit）。
+   */
+  private async assertDiagramMembership(
+    diagramId: string,
+    userId: string,
+    required: 'view' | 'edit' = 'view',
+  ): Promise<void> {
     const diagram = await this.dfdRepo.findDiagramById(diagramId);
     if (!diagram) throw new EntityNotFoundError('DfdDiagram', diagramId);
     const project = await this.projectRepo.findById(diagram.projectId);
@@ -403,6 +417,7 @@ export class DfdController {
     if (!(await this.orgRepo.isMember(project.organizationId, userId))) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+    await this.projectAccess.assertProjectAccess(diagram.projectId, userId, required);
   }
 
   private annotationToResponse(a: {

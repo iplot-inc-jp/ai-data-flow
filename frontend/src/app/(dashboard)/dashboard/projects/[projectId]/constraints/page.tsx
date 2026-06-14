@@ -17,6 +17,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { EditGate } from '@/components/edit-gate';
 import { SortableTh } from '@/components/ui/sortable-th';
 import { useTableSort } from '@/lib/use-table-sort';
 import {
@@ -147,7 +148,8 @@ export default function ConstraintsPage() {
         }
       />
 
-      {/* 作成フォーム（kind + title + category） */}
+      {/* 作成フォーム（kind + title + category）（閲覧専用時は無効化） */}
+      <EditGate>
       <Card className="bg-white border-gray-200">
         <CardContent className="flex flex-wrap items-end gap-2 p-4">
           <div className="w-32 space-y-1">
@@ -208,6 +210,7 @@ export default function ConstraintsPage() {
           </Button>
         </CardContent>
       </Card>
+      </EditGate>
 
       {/* カテゴリ候補（自由文字列の補助） */}
       <datalist id="constraint-category-options">
@@ -259,6 +262,7 @@ export default function ConstraintsPage() {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : (
+        <EditGate dim={false}>
         <Card className="bg-white border-gray-200">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -339,6 +343,7 @@ export default function ConstraintsPage() {
             </div>
           </CardContent>
         </Card>
+        </EditGate>
       )}
     </div>
   );

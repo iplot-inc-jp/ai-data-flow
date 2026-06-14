@@ -5,6 +5,7 @@ import {
   ORGANIZATION_REPOSITORY, OrganizationRepository,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface SaveErPositionsInput {
   userId: string;
@@ -19,10 +20,11 @@ export class SaveErPositionsUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: SaveErPositionsInput): Promise<void> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
     await this.repo.bulkSaveErPositions(input.projectId, input.positions ?? []);
   }
 }

@@ -1,4 +1,6 @@
-import { Controller, Post, Get, Body, Param, HttpCode, HttpStatus, Inject } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, HttpCode, HttpStatus, Inject,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import {
   CreateProjectUseCase,
@@ -16,9 +18,13 @@ import {
   OrganizationRepository,
   ForbiddenError,
 } from '../../domain';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 @ApiTags('プロジェクト')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects')
 export class ProjectByIdController {
   constructor(
@@ -64,6 +70,8 @@ export class ProjectByIdController {
 
 @ApiTags('プロジェクト')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('organizations/:organizationId/projects')
 export class ProjectController {
   constructor(

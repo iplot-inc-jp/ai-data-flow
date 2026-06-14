@@ -14,6 +14,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { randomUUID } from 'crypto';
 
 export interface CreateNodeChildFlowInput {
@@ -80,6 +81,7 @@ export class CreateNodeChildFlowUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(
@@ -107,6 +109,13 @@ export class CreateNodeChildFlowUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 子フロー作成は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      parentFlow.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 既に子フローが紐づいている場合は冪等にそのフローを返す
     if (node.childFlowId) {

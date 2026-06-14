@@ -6,11 +6,17 @@ import {
   Delete,
   Body,
   Param,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { IsString, IsOptional, IsNumber } from 'class-validator';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { v4 as uuid } from 'uuid';
+import { EntityNotFoundError } from '../../domain';
+import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 // DTOs
 class CreateSubProjectDto {
@@ -52,9 +58,27 @@ class UpdateSubProjectDto {
 
 @ApiTags('サブプロジェクト')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class SubProjectController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
+  ) {}
+
+  /** subProjectId から所属プロジェクトを引いて edit 権限を強制する（:id 書込用） */
+  private async assertSubProjectEditAccess(
+    id: string,
+    userId: string,
+  ): Promise<void> {
+    const row = await this.prisma.subProject.findUnique({
+      where: { id },
+      select: { projectId: true },
+    });
+    if (!row) throw new EntityNotFoundError('SubProject', id);
+    await this.projectAccess.assertProjectAccess(row.projectId, userId, 'edit');
+  }
 
   @Get('projects/:projectId/sub-projects')
   @ApiOperation({ summary: 'サブプロジェクト一覧取得' })
@@ -92,7 +116,12 @@ export class SubProjectController {
   @Put('sub-projects/:id')
   @ApiOperation({ summary: 'サブプロジェクト更新' })
   @ApiParam({ name: 'id', description: 'サブプロジェクトID' })
-  async update(@Param('id') id: string, @Body() dto: UpdateSubProjectDto) {
+  async update(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateSubProjectDto,
+  ) {
+    await this.assertSubProjectEditAccess(id, user.id);
     const data: {
       name?: string;
       description?: string;
@@ -115,7 +144,11 @@ export class SubProjectController {
   @Delete('sub-projects/:id')
   @ApiOperation({ summary: 'サブプロジェクト削除' })
   @ApiParam({ name: 'id', description: 'サブプロジェクトID' })
-  async delete(@Param('id') id: string) {
+  async delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.assertSubProjectEditAccess(id, user.id);
     // 紐づくフローの subProjectId はスキーマの onDelete: SetNull で自動的に NULL になる
     await this.prisma.subProject.delete({ where: { id } });
     return { success: true };

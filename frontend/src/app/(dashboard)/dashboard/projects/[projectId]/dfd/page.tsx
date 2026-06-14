@@ -23,6 +23,8 @@ import {
   type InformationType,
 } from '@/lib/dfd';
 import { dataObjectApi, type DataObjectDto } from '@/lib/data-objects';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 
 /**
  * 第1レベルDFD（プロジェクト全体）。
@@ -34,6 +36,9 @@ export default function ProjectDfdPage() {
   const router = useRouter();
   const projectId = params.projectId as string;
   const { toast } = useToast();
+  const { canEdit } = useReadOnly();
+  // 閲覧専用時に編集系コールバックを無効化（DfdCanvas は全て ?. 呼び）。
+  const ro = <T,>(fn: T): T | undefined => (canEdit ? fn : undefined);
 
   const [diagram, setDiagram] = useState<DfdDiagram | null>(null);
   const [loading, setLoading] = useState(true);
@@ -343,8 +348,9 @@ export default function ProjectDfdPage() {
         <Card className="bg-white border-gray-200">
           <CardContent className="py-12 text-center space-y-3">
             <p className="text-gray-500">
-              第1レベルDFDはまだ生成されていません。「DFDを生成」でプロジェクトの業務フローから自動生成します。
+              第1レベルDFDはまだ生成されていません。{canEdit ? '「DFDを生成」でプロジェクトの業務フローから自動生成します。' : '編集権限がないため生成できません。'}
             </p>
+            {canEdit && (
             <Button onClick={handleRegenerate} disabled={busy}>
               {busy ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -353,6 +359,7 @@ export default function ProjectDfdPage() {
               )}
               DFDを生成
             </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -365,6 +372,7 @@ export default function ProjectDfdPage() {
                 未統合のデータストアが {diagram.unlinkedDataStoreCount} 件あります。
                 オブジェクト（共通マスタ）に統合すると、オブジェクトマップ・ER図と名前が同期されます。
               </p>
+              {canEdit && (
               <Button
                 size="sm"
                 onClick={handleIntegrateDataStores}
@@ -378,6 +386,7 @@ export default function ProjectDfdPage() {
                 )}
                 オブジェクトに統合
               </Button>
+              )}
             </div>
           )}
 
@@ -414,20 +423,20 @@ export default function ProjectDfdPage() {
                 projectId={projectId}
                 informationTypes={informationTypes}
                 dataObjects={dataObjects}
-                onAddNode={handleAddNode}
-                onUpdateNode={handleUpdateNode}
-                onDeleteNode={handleDeleteNode}
-                onAddFlow={handleAddFlow}
-                onUpdateFlow={handleUpdateFlow}
-                onReconnectFlow={handleReconnectFlow}
-                onDeleteFlow={handleDeleteFlow}
-                onSavePositions={handleSavePositions}
-                onRegenerate={handleRegenerate}
+                onAddNode={ro(handleAddNode)}
+                onUpdateNode={ro(handleUpdateNode)}
+                onDeleteNode={ro(handleDeleteNode)}
+                onAddFlow={ro(handleAddFlow)}
+                onUpdateFlow={ro(handleUpdateFlow)}
+                onReconnectFlow={ro(handleReconnectFlow)}
+                onDeleteFlow={ro(handleDeleteFlow)}
+                onSavePositions={ro(handleSavePositions)}
+                onRegenerate={ro(handleRegenerate)}
                 onFunctionOpen={handleFunctionOpen}
                 annotations={annotations}
-                onAddAnnotation={handleAddAnnotation}
-                onUpdateAnnotation={handleUpdateAnnotation}
-                onDeleteAnnotation={handleDeleteAnnotation}
+                onAddAnnotation={ro(handleAddAnnotation)}
+                onUpdateAnnotation={ro(handleUpdateAnnotation)}
+                onDeleteAnnotation={ro(handleDeleteAnnotation)}
               />
             </div>
           ) : diagram ? (
@@ -438,7 +447,9 @@ export default function ProjectDfdPage() {
 
       {/* 情報種別レジストリ（プロジェクト単位。DFDの有無に関わらず常時表示） */}
       {!loading && !error && (
-        <InformationTypeRegistry projectId={projectId} onInformationTypesChange={setInformationTypes} />
+        <EditGate dim={false}>
+          <InformationTypeRegistry projectId={projectId} onInformationTypesChange={setInformationTypes} />
+        </EditGate>
       )}
     </div>
   );

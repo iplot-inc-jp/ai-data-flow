@@ -19,6 +19,7 @@ import {
   FlowNodeLinkOutput,
   toFlowNodeLinkOutput,
 } from './flow-node-link.output';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface CreateNodeLinkInput {
   userId: string;
@@ -45,6 +46,7 @@ export class CreateNodeLinkUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: CreateNodeLinkInput): Promise<FlowNodeLinkOutput> {
@@ -70,6 +72,13 @@ export class CreateNodeLinkUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: リンク作成は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      flow.projectId,
+      input.userId,
+      'edit',
+    );
 
     // ターゲットフロー存在確認
     const targetFlow = await this.flowRepository.findById(input.targetFlowId);

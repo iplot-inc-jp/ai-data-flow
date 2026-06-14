@@ -12,6 +12,7 @@ import {
   RelationPathStyleValue,
 } from '../../../domain/entities/data-object-relation.entity';
 import { authorizeProject } from './data-object-authz';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { ObjectRelationOutput, toObjectRelationOutput } from './data-object.output';
 
 /** 端点オブジェクトが存在し、同一プロジェクトに属することを検証する */
@@ -46,10 +47,11 @@ export class CreateObjectRelationUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: CreateObjectRelationInput): Promise<ObjectRelationOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
     // source=target は entity 側で拒否
     const relation = DataObjectRelation.create(
       {
@@ -106,12 +108,13 @@ export class UpdateObjectRelationUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: UpdateObjectRelationInput): Promise<ObjectRelationOutput> {
     const relation = await this.repo.findRelationById(input.id);
     if (!relation) throw new EntityNotFoundError('DataObjectRelation', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, relation.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, relation.projectId, input.userId, this.projectAccess, 'edit');
 
     if (input.sourceObjectId !== undefined || input.targetObjectId !== undefined) {
       const sourceObjectId = input.sourceObjectId ?? relation.sourceObjectId;
@@ -144,12 +147,13 @@ export class DeleteObjectRelationUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteObjectRelationInput): Promise<void> {
     const relation = await this.repo.findRelationById(input.id);
     if (!relation) throw new EntityNotFoundError('DataObjectRelation', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, relation.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, relation.projectId, input.userId, this.projectAccess, 'edit');
     await this.repo.deleteRelation(input.id);
   }
 }

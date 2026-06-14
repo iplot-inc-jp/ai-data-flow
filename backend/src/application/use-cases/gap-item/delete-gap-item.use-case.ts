@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteGapItemInput {
   userId: string;
@@ -27,6 +28,7 @@ export class DeleteGapItemUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteGapItemInput): Promise<void> {
@@ -50,6 +52,13 @@ export class DeleteGapItemUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // 3.5 プロジェクト単位 RBAC: GAP削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      gapItem.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. 削除
     await this.gapItemRepository.delete(input.id);

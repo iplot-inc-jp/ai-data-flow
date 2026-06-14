@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,6 +31,8 @@ import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== DTOs ==========
 
@@ -73,6 +76,8 @@ class MoveFlowFolderDto {
 
 @ApiTags('フローフォルダ')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('projects/:projectId/flow-folders')
 export class FlowFolderController {
   constructor(
@@ -121,6 +126,8 @@ export class FlowFolderController {
 
 @ApiTags('フローフォルダ')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller('flow-folders')
 export class FlowFolderByIdController {
   constructor(

@@ -10,6 +10,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { GapItemOutput, toGapItemOutput } from './create-gap-item.use-case';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface ResolveGapItemInput {
   userId: string;
@@ -28,6 +29,7 @@ export class ResolveGapItemUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: ResolveGapItemInput): Promise<GapItemOutput> {
@@ -51,6 +53,13 @@ export class ResolveGapItemUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // 3.5 プロジェクト単位 RBAC: GAP解決は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      gapItem.projectId,
+      input.userId,
+      'edit',
+    );
 
     // 4. ドメインロジック適用
     gapItem.resolve();

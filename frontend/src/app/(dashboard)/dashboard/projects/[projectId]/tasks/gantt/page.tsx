@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { useReadOnly } from '@/components/read-only-context';
 import {
   Select,
   SelectContent,
@@ -113,6 +114,7 @@ const emptySidebarForm: SidebarForm = {
 export default function GanttPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
@@ -347,6 +349,7 @@ export default function GanttPage() {
   // バー移動 / リサイズ確定。frappe の end は終了日「込み」なのでそのまま期限日にする。
   const handleDateChange = useCallback(
     async (id: string, start: Date, end: Date) => {
+      if (!canEdit) return;
       try {
         await tasksApi.update(id, {
           startDate: dateToYmd(start),
@@ -358,12 +361,13 @@ export default function GanttPage() {
         await fetchAll();
       }
     },
-    [fetchAll]
+    [fetchAll, canEdit]
   );
 
   // 進捗ハンドル操作確定。
   const handleProgressChange = useCallback(
     async (id: string, progress: number) => {
+      if (!canEdit) return;
       try {
         await tasksApi.update(id, {
           progress: Math.max(0, Math.min(100, Math.round(progress))),
@@ -374,7 +378,7 @@ export default function GanttPage() {
         await fetchAll();
       }
     },
-    [fetchAll]
+    [fetchAll, canEdit]
   );
 
   // バークリック（通常モード）: 右側の編集サイドバーを開き、フォームへ現在値を流し込む。
@@ -405,6 +409,7 @@ export default function GanttPage() {
 
   // サイドバーの保存。成功後はタスク一覧を再取得してガントに反映し、サイドバーは開いたまま。
   const handleSidebarSave = useCallback(async () => {
+    if (!canEdit) return;
     if (!selectedTaskId) return;
     if (!sidebarForm.title.trim()) {
       setSidebarError('タイトルは必須です');
@@ -437,7 +442,7 @@ export default function GanttPage() {
     } finally {
       setSidebarSaving(false);
     }
-  }, [selectedTaskId, sidebarForm, fetchAll]);
+  }, [selectedTaskId, sidebarForm, fetchAll, canEdit]);
 
   // サイドバーで編集中のタスク（再取得後も tasks から引き直す）。消えていたら閉じる扱い。
   const selectedTask = useMemo(
@@ -455,6 +460,7 @@ export default function GanttPage() {
   // 先行(fromId)→後続(toId) の依存を作成する。
   const handleConnect = useCallback(
     (fromId: string, toId: string) => {
+      if (!canEdit) return;
       if (fromId === toId) return;
       // 同一依存が既にあれば何もしない（重複防止）。逆向きの重複も防ぐ。
       const exists = dependencies.some(
@@ -473,12 +479,13 @@ export default function GanttPage() {
         }
       })();
     },
-    [dependencies, fetchAll]
+    [dependencies, fetchAll, canEdit]
   );
 
   // 矢印クリック -> その依存を削除（確認あり）。
   const handleArrowClick = useCallback(
     async (fromId: string, toId: string) => {
+      if (!canEdit) return;
       const dep = dependencies.find(
         (d) => d.predecessorId === fromId && d.successorId === toId
       );
@@ -492,12 +499,13 @@ export default function GanttPage() {
         await fetchAll();
       }
     },
-    [dependencies, fetchAll]
+    [dependencies, fetchAll, canEdit]
   );
 
   // 親タスクの変更（GUI）。'' は「なし（トップレベル）」= parentId:null。
   const handleParentChange = useCallback(
     async (value: string) => {
+      if (!canEdit) return;
       if (!depTaskId) return;
       try {
         await tasksApi.update(depTaskId, { parentId: value || null });
@@ -507,7 +515,7 @@ export default function GanttPage() {
         await fetchAll();
       }
     },
-    [depTaskId, fetchAll]
+    [depTaskId, fetchAll, canEdit]
   );
 
   // ESC で全画面を解除（入力欄フォーカス中は無視）。他ページの全画面と同じ作法。
@@ -564,6 +572,7 @@ export default function GanttPage() {
 
   // 先行を追加: addDep(後続Id=選択中タスク, 先行Id=ピック)。
   const handleAddPredecessor = useCallback(async () => {
+    if (!canEdit) return;
     if (!depTaskId || !pickPredId) return;
     try {
       await tasksApi.addDep(depTaskId, pickPredId);
@@ -573,11 +582,12 @@ export default function GanttPage() {
       console.error('Failed to add dependency:', err);
       await fetchAll();
     }
-  }, [depTaskId, pickPredId, fetchAll]);
+  }, [depTaskId, pickPredId, fetchAll, canEdit]);
 
   // 依存を削除: removeDep(dependency.id)。
   const handleRemoveDep = useCallback(
     async (dependencyId: string) => {
+      if (!canEdit) return;
       try {
         await tasksApi.removeDep(dependencyId);
         await fetchAll();
@@ -586,7 +596,7 @@ export default function GanttPage() {
         await fetchAll();
       }
     },
-    [fetchAll]
+    [fetchAll, canEdit]
   );
 
   // 選択中タスクを後続とする既存依存（先行リスト）。

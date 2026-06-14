@@ -8,6 +8,7 @@ import {
   Param,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsOptional } from 'class-validator';
@@ -16,6 +17,8 @@ import { Client } from 'pg';
 import { createConnection } from 'mysql2/promise';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../infrastructure/services/crypto.service';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 // ========== DTOs ==========
 class CreateDatabaseConnectionDto {
@@ -59,6 +62,8 @@ interface InformationSchemaColumn {
 
 @ApiTags('DB接続')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class DatabaseConnectionController {
   constructor(

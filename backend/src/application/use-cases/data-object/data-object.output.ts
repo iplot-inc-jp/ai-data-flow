@@ -19,6 +19,8 @@ export interface DataObjectOutput {
   name: string;
   description: string | null;
   color: string | null;
+  /** 所属領域（SubProject）。null=未分類 */
+  subProjectId: string | null;
   positionX: number;
   positionY: number;
   order: number;
@@ -101,6 +103,7 @@ export function toDataObjectOutput(
     name: o.name,
     description: o.description,
     color: o.color,
+    subProjectId: o.subProjectId,
     positionX: o.positionX,
     positionY: o.positionY,
     order: o.order,

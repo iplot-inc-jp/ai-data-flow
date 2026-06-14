@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   HttpException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -58,9 +59,13 @@ import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.se
 import { ClaudeService } from '../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { IssueNodeKind } from '../../domain';
+import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
+import { ProjectAccessGuard } from '../guards/project-access.guard';
 
 @ApiTags('イシューツリー')
 @ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
 @Controller()
 export class IssueTreeController {
   constructor(

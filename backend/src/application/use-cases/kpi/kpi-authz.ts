@@ -4,17 +4,29 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import {
+  ProjectAccessService,
+  RequiredAccess,
+} from '../../../infrastructure/services/project-access.service';
 
-/** projectId をプロジェクトメンバー認可する（data-object-authz と同パターン） */
+/**
+ * projectId をプロジェクトメンバー認可する（data-object-authz と同パターン）。
+ * projectAccess+required を渡すと、プロジェクト単位 RBAC（VIEW/EDIT）も併せて強制する。
+ */
 export async function authorizeProject(
   projectRepo: ProjectRepository,
   orgRepo: OrganizationRepository,
   projectId: string,
   userId: string,
+  projectAccess?: ProjectAccessService,
+  required: RequiredAccess = 'view',
 ): Promise<void> {
   const project = await projectRepo.findById(projectId);
   if (!project) throw new EntityNotFoundError('Project', projectId);
   if (!(await orgRepo.isMember(project.organizationId, userId))) {
     throw new ForbiddenError('You are not a member of this organization');
+  }
+  if (projectAccess) {
+    await projectAccess.assertProjectAccess(projectId, userId, required);
   }
 }

@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface RemoveTaskDependencyInput {
   userId: string;
@@ -28,6 +29,7 @@ export class RemoveTaskDependencyUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: RemoveTaskDependencyInput): Promise<void> {
@@ -55,6 +57,13 @@ export class RemoveTaskDependencyUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 依存削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      successor.projectId,
+      input.userId,
+      'edit',
+    );
 
     await this.taskRepository.deleteDependency(input.dependencyId);
   }

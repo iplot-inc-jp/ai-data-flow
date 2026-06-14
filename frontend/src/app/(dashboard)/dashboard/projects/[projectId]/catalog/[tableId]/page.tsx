@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { EditGate } from '@/components/edit-gate';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -328,6 +329,7 @@ export default function ProjectTableDetailPage() {
         </span>
       </div>
 
+      <EditGate dim={false}>
       {tableData.description && (
         <p className="text-gray-600">{tableData.description}</p>
       )}
@@ -587,6 +589,7 @@ export default function ProjectTableDetailPage() {
           )}
         </CardContent>
       </Card>
+      </EditGate>
     </div>
   );
 }

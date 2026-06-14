@@ -28,6 +28,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { useReadOnly } from '@/components/read-only-context';
+import { EditGate } from '@/components/edit-gate';
 import { EditableMemoBoard } from '@/components/records/editable-memo-board';
 import {
   asisMemoApi,
@@ -185,6 +187,7 @@ export default function AsisManagementPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [flows, setFlows] = useState<BusinessFlow[]>([]);
   const [subProjects, setSubProjects] = useState<SubProject[]>([]);
@@ -409,7 +412,7 @@ export default function AsisManagementPage() {
           <Loader2 className="h-8 w-8 animate-spin text-amber-600" />
         </div>
       ) : (
-        <>
+        <EditGate dim={false}>
           {/* ── Section: ASIS業務フロー ───────────────────────── */}
           <section className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -642,7 +645,7 @@ export default function AsisManagementPage() {
               ]}
             />
           </section>
-        </>
+        </EditGate>
       )}
 
       {/* ── ASISフロー作成ダイアログ ─────────────────────── */}

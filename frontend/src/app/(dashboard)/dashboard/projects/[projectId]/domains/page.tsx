@@ -29,6 +29,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { EditGate } from '@/components/edit-gate';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import {
   listStakeholders,
@@ -293,7 +294,8 @@ export default function DomainsPage() {
         }
       />
 
-      {/* 追加フォーム */}
+      {/* 追加フォーム（閲覧専用時は無効化） */}
+      <EditGate>
       <Card className="p-4">
         <div className="space-y-3">
           {/* 領域の追加 */}
@@ -353,6 +355,7 @@ export default function DomainsPage() {
 
         {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
       </Card>
+      </EditGate>
 
       {/* 一覧（親子インデント） */}
       <Card className="p-0">
@@ -365,6 +368,7 @@ export default function DomainsPage() {
             領域がありません。上のフォームから領域を追加してください。
           </p>
         ) : (
+          <EditGate dim={false}>
           <ul className="divide-y divide-gray-100">
             {treeRows.map(({ row, depth }) => (
               <DomainRow
@@ -379,6 +383,7 @@ export default function DomainsPage() {
               />
             ))}
           </ul>
+          </EditGate>
         )}
       </Card>
 

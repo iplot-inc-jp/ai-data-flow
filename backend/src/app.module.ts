@@ -112,6 +112,7 @@ import {
   DeleteTaskUseCase,
   AddTaskDependencyUseCase,
   RemoveTaskDependencyUseCase,
+  ImportBacklogTasksUseCase,
   // Task Comment
   CreateTaskCommentUseCase,
   GetTaskCommentsUseCase,
@@ -133,12 +134,14 @@ import {
   GetObjectGraphUseCase,
   CreateDataObjectUseCase,
   UpdateDataObjectUseCase,
+  UpdateDataObjectSubProjectUseCase,
   DeleteDataObjectUseCase,
   CreateObjectRelationUseCase,
   UpdateObjectRelationUseCase,
   DeleteObjectRelationUseCase,
   SaveObjectPositionsUseCase,
   ImportFromDfdUseCase,
+  ImportMermaidUseCase,
   GetErGraphUseCase,
   LinkTableToObjectUseCase,
   SaveErPositionsUseCase,
@@ -276,6 +279,8 @@ import {
   KpiRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
+  ProjectAccessService,
+  ProjectBundleService,
 } from './infrastructure';
 
 // Presentation
@@ -284,6 +289,8 @@ import {
   OrganizationController,
   ProjectController,
   ProjectByIdController,
+  ProjectMemberController,
+  ProjectMyAccessController,
   RoleController,
   TableController,
   BusinessFlowController,
@@ -331,6 +338,9 @@ import {
   AdoptionStatusController,
   AdoptionStatusByIdController,
   KpiController,
+  ProjectBundleController,
+  OrganizationProjectImportController,
+  ExportSchemaController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -340,6 +350,7 @@ import { RequirementController } from './presentation/controllers/requirement.co
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
 import { ApiKeyController } from './presentation/controllers/api-key.controller';
 import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
+import { CronController } from './presentation/controllers/cron.controller';
 import { CodeCatalogController } from './presentation/controllers/code-catalog.controller';
 import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
 import { AttachmentController } from './presentation/controllers/attachment.controller';
@@ -371,6 +382,17 @@ import { GithubService } from './infrastructure/services/github.service';
 import { CodeExtractionService } from './infrastructure/services/code-extraction.service';
 import { SyncService } from './infrastructure/services/sync.service';
 import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.service';
+import { QStashService } from './infrastructure/services/qstash.service';
+import { JobService } from './infrastructure/services/job.service';
+import { TaskWebhookService } from './infrastructure/services/task-webhook.service';
+import { TrackerImportService } from './infrastructure/services/trackers/tracker-import.service';
+import { WebhookController } from './presentation/controllers/webhook.controller';
+import { TrackerConnectionController } from './presentation/controllers/tracker-connection.controller';
+import {
+  JobWorkerController,
+  ProjectJobController,
+  JobByIdController,
+} from './presentation/controllers/job.controller';
 
 @Module({
   imports: [
@@ -392,10 +414,13 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
   ],
   controllers: [
     HealthController,
+    CronController,
     AuthController,
     OrganizationController,
     ProjectController,
     ProjectByIdController,
+    ProjectMemberController,
+    ProjectMyAccessController,
     RoleController,
     TableController,
     BusinessFlowController,
@@ -462,6 +487,18 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     AdoptionStatusController,
     AdoptionStatusByIdController,
     KpiController,
+    // Project Bundle (export/import)
+    ProjectBundleController,
+    OrganizationProjectImportController,
+    ExportSchemaController,
+    // Background Jobs (Upstash QStash)
+    JobWorkerController,
+    ProjectJobController,
+    JobByIdController,
+    // タスク Webhook（outbound: Brain Pro → 外部/ipro-kun）
+    WebhookController,
+    // 外部トラッカー（Backlog/Jira）移行・同期
+    TrackerConnectionController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -688,6 +725,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     DeleteTaskUseCase,
     AddTaskDependencyUseCase,
     RemoveTaskDependencyUseCase,
+    ImportBacklogTasksUseCase,
     // Task Comment
     CreateTaskCommentUseCase,
     GetTaskCommentsUseCase,
@@ -709,12 +747,14 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetObjectGraphUseCase,
     CreateDataObjectUseCase,
     UpdateDataObjectUseCase,
+    UpdateDataObjectSubProjectUseCase,
     DeleteDataObjectUseCase,
     CreateObjectRelationUseCase,
     UpdateObjectRelationUseCase,
     DeleteObjectRelationUseCase,
     SaveObjectPositionsUseCase,
     ImportFromDfdUseCase,
+    ImportMermaidUseCase,
     GetErGraphUseCase,
     LinkTableToObjectUseCase,
     SaveErPositionsUseCase,
@@ -810,6 +850,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GenerateKpisUseCase,
 
     // ========== Services ==========
+    ProjectAccessService,
+    ProjectBundleService,
     ClaudeService,
     ApiKeyService,
     CryptoService,
@@ -818,6 +860,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     CodeExtractionService,
     SyncService,
     SyncSchedulerService,
+    QStashService,
+    JobService,
+    TaskWebhookService,
+    TrackerImportService,
 
     // ========== Global Guards ==========
     {

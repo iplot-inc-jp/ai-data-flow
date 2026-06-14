@@ -9,6 +9,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteRiskCategoryInput {
   userId: string;
@@ -28,6 +29,7 @@ export class DeleteRiskCategoryUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: DeleteRiskCategoryInput): Promise<void> {
@@ -50,6 +52,13 @@ export class DeleteRiskCategoryUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: リスクカテゴリ削除は書込のため edit 強制
+    await this.projectAccess.assertProjectAccess(
+      category.projectId,
+      input.userId,
+      'edit',
+    );
 
     await this.riskCategoryRepository.delete(input.riskCategoryId);
   }
