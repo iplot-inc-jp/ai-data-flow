@@ -1,6 +1,8 @@
 // KPI（業務KPI・AI精度KPI）の API クライアント。
 // fetch 作法・headers()・エラーメッセージは dfd.ts の informationTypeApi / data-objects.ts を踏襲する。
 
+import { enqueueAiJob, getJob, isTerminalStatus } from '@/lib/jobs';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
 function headers(): Record<string, string> {
@@ -257,5 +259,85 @@ export const kpiApi = {
       throw new Error(message);
     }
     return res.json();
+  },
+
+  /**
+   * AIでKPI候補を生成（バックグラウンドジョブ AI_KPI 経由）。
+   *
+   * ジョブを起票し 1.5 秒間隔でポーリングして終端まで待つ。
+   *   SUCCEEDED: result = { kind: 'KPIS', kpis } の kpis を返す。
+   *   FAILED:    job.error を throw（同期 generate と同じくダイアログがエラー表示）。
+   * onEnqueued は起票直後（jobId 確定時）に一度だけ呼ばれる（一覧の更新トリガー用）。
+   *
+   * 無限ポーリング防止:
+   *   - options.signal: 呼び出し側（コンポーネント）のアンマウント時に abort して
+   *     ポーリングを即停止できる（AbortError を throw。呼び出し側で握り潰す想定）。
+   *   - options.timeoutMs: 上限経過時間（既定 5 分）。QStash の publish 失敗で job が
+   *     QUEUED のまま、または RUNNING のまま終端化しないケースで永久に回り続けないよう、
+   *     これを超えたらタイムアウト error を throw する。
+   */
+  async generateViaJob(
+    projectId: string,
+    body: GenerateKpisBody,
+    onEnqueued?: (jobId: string) => void,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<KpiDto[]> {
+    const signal = options?.signal;
+    const timeoutMs = options?.timeoutMs ?? 5 * 60 * 1000; // 既定 5 分
+
+    const throwIfAborted = () => {
+      if (signal?.aborted) {
+        throw new DOMException('KPI生成のポーリングを中止しました', 'AbortError');
+      }
+    };
+
+    throwIfAborted();
+    const { jobId } = await enqueueAiJob(projectId, 'AI_KPI', {
+      category: body.category,
+      flowId: body.flowId ?? null,
+      systemId: body.systemId ?? null,
+      informationTypeIds: body.informationTypeIds,
+      instructions: body.instructions ?? null,
+      count: body.count,
+    });
+    onEnqueued?.(jobId);
+
+    const POLL_MS = 1500;
+    const startedAt = Date.now();
+    // abort されたら sleep を即解除する sleep。
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new DOMException('KPI生成のポーリングを中止しました', 'AbortError'));
+          return;
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, ms);
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(new DOMException('KPI生成のポーリングを中止しました', 'AbortError'));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+
+    for (;;) {
+      throwIfAborted();
+      const job = await getJob(jobId);
+      if (isTerminalStatus(job.status)) {
+        if (job.status === 'FAILED') {
+          throw new Error(job.error ?? 'KPIのAI生成に失敗しました');
+        }
+        const result = job.result as { kind?: string; kpis?: KpiDto[] } | null;
+        return result?.kpis ?? [];
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(
+          'KPIのAI生成がタイムアウトしました（時間をおいて再試行するか、ジョブ一覧をご確認ください）',
+        );
+      }
+      await sleep(POLL_MS);
+    }
   },
 };

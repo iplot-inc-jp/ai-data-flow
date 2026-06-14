@@ -377,6 +377,13 @@ import { GithubService } from './infrastructure/services/github.service';
 import { CodeExtractionService } from './infrastructure/services/code-extraction.service';
 import { SyncService } from './infrastructure/services/sync.service';
 import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.service';
+import { QStashService } from './infrastructure/services/qstash.service';
+import { JobService } from './infrastructure/services/job.service';
+import {
+  JobWorkerController,
+  ProjectJobController,
+  JobByIdController,
+} from './presentation/controllers/job.controller';
 
 @Module({
   imports: [
@@ -471,6 +478,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     AdoptionStatusController,
     AdoptionStatusByIdController,
     KpiController,
+    // Background Jobs (Upstash QStash)
+    JobWorkerController,
+    ProjectJobController,
+    JobByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -830,6 +841,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     CodeExtractionService,
     SyncService,
     SyncSchedulerService,
+    QStashService,
+    JobService,
 
     // ========== Global Guards ==========
     {

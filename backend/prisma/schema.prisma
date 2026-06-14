@@ -58,6 +58,42 @@ model ProjectMember {
   @@map("project_members")
 }
 
+// バックグラウンドジョブ（AI生成の非同期化・定期ジョブの実行記録）。
+// Upstash Redis をキュー/ロックに、本テーブルを永続ステータス/結果に使う。
+enum BackgroundJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model BackgroundJob {
+  id          String              @id @default(uuid())
+  projectId   String?             @map("project_id")
+  // ジョブ種別（例: AI_MERMAID_FLOW / AI_MERMAID_OBJECTMAP / AI_KPI / AI_SCHEMA_ANALYZE / AI_ISSUE_SUGGEST）
+  type        String
+  status      BackgroundJobStatus @default(QUEUED)
+  // 実行に必要な入力（リクエスト相当）。秘匿情報は入れない方針
+  payload     Json?
+  // 成功時の結果（クライアントがポーリングで取得）
+  result      Json?
+  error       String?             @db.Text
+  progress    Int                 @default(0)
+  attempts    Int                 @default(0)
+  // 起票ユーザー（FKなし。任意）
+  createdById String?             @map("created_by_id")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  startedAt   DateTime?           @map("started_at")
+  finishedAt  DateTime?           @map("finished_at")
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([status])
+  @@map("background_jobs")
+}
+
 // ===========================================
 // 組織・プロジェクト
 // ===========================================
@@ -158,6 +194,7 @@ model Project {
   dataObjectAnnotations   DataObjectAnnotation[]
   kpis                    Kpi[]
   members                 ProjectMember[]
+  backgroundJobs          BackgroundJob[]
 
   @@unique([organizationId, slug])
   @@map("projects")

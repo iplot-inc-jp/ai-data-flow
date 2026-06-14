@@ -39,6 +39,13 @@ import { ObjectScopeLinkPanel } from './_components/ObjectScopeLinkPanel';
 import { DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from './_components/object-map-shared';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
+import {
+  BackgroundJobsPanel,
+  type BackgroundJobsPanelHandle,
+} from '@/components/background-jobs-panel';
+import { enqueueAiJob } from '@/lib/jobs';
+import { useBackgroundJob } from '@/hooks/use-background-job';
+import type { ObjectGraphDto as JobObjectGraph } from '@/lib/data-objects';
 
 /** スコープ囲みの既定色（インディゴ。キャンバスの DEFAULT_SCOPE_COLOR と揃える） */
 const DEFAULT_SCOPE_COLOR = '#6366f1';
@@ -59,6 +66,17 @@ export default function ObjectMapPage() {
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   // 領域紐付けパネルで保存中のオブジェクトID（ピッカーを一時無効化）
   const [savingScopeObjectId, setSavingScopeObjectId] = useState<string | null>(null);
+  // バックグラウンド処理一覧（ジョブ起票後に refresh する）
+  const jobsPanelRef = useRef<BackgroundJobsPanelHandle | null>(null);
+
+  // ===== Mermaid生成ジョブの監視（useBackgroundJob で 1.5 秒ポーリング） =====
+  // 進行中のジョブIDを state で持ち、フックに監視させる。
+  // handleImportMermaid はこのジョブの終端状態に解決/棄却する Promise を返す
+  // （キャンバス側ダイアログのスピナー/エラー表示はこの Promise に従う）。
+  const [mermaidJobId, setMermaidJobId] = useState<string | null>(null);
+  const { job: mermaidJob } = useBackgroundJob(mermaidJobId);
+  // ダイアログに返した Promise の resolve/reject をフック側の終端で呼ぶための保管。
+  const mermaidSettlers = useRef<{ resolve: () => void; reject: (e: Error) => void } | null>(null);
 
   const showError = useCallback(
     (err: unknown, fallback: string) => {
@@ -489,16 +507,49 @@ export default function ObjectMapPage() {
     [showError],
   );
 
-  // ===== Mermaidから生成 =====
+  // ===== Mermaidから生成（バックグラウンドジョブ経由） =====
+  // AI_MERMAID_OBJECTMAP を起票し、jobId を state へ → useBackgroundJob が監視する。
+  // 返す Promise はジョブの終端状態で解決/棄却する（下の effect で settle）。
+  //   SUCCEEDED: result.graph をマップへ反映し再取得して resolve（ダイアログが閉じる）。
+  //   FAILED:    error で reject（キャンバス側ダイアログがエラー表示する）。
   const handleImportMermaid = useCallback(
-    async (mermaid: string) => {
-      // 失敗時はキャンバス側ダイアログがエラー表示するので throw する
-      const g = await dataObjectApi.importMermaid(projectId, mermaid);
-      setGraph(g);
-      await refresh(); // 注釈などその他もまとめて再取得（楽観の取りこぼし防止）
+    (mermaid: string): Promise<void> => {
+      return new Promise<void>((resolve, reject) => {
+        // 直前の未解決ジョブがあれば棄却（多重起票の取りこぼし防止）。
+        mermaidSettlers.current?.reject(new Error('別のMermaid生成が開始されました'));
+        mermaidSettlers.current = { resolve, reject };
+        enqueueAiJob(projectId, 'AI_MERMAID_OBJECTMAP', { mermaid })
+          .then(({ jobId }) => {
+            jobsPanelRef.current?.refresh();
+            setMermaidJobId(jobId);
+          })
+          .catch((err) => {
+            mermaidSettlers.current = null;
+            reject(err instanceof Error ? err : new Error('ジョブの起票に失敗しました'));
+          });
+      });
     },
-    [projectId, refresh],
+    [projectId],
   );
+
+  // Mermaid生成ジョブが終端に達したら Promise を settle し、後始末する。
+  useEffect(() => {
+    if (!mermaidJob) return;
+    if (mermaidJob.status !== 'SUCCEEDED' && mermaidJob.status !== 'FAILED') return;
+    const settlers = mermaidSettlers.current;
+    mermaidSettlers.current = null;
+    setMermaidJobId(null); // 監視停止
+    jobsPanelRef.current?.refresh();
+
+    if (mermaidJob.status === 'FAILED') {
+      settlers?.reject(new Error(mermaidJob.error ?? 'Mermaidからの生成に失敗しました'));
+      return;
+    }
+    // SUCCEEDED: result = { kind: 'OBJECT_GRAPH', graph }
+    const result = mermaidJob.result as { kind?: string; graph?: JobObjectGraph } | null;
+    if (result?.graph) setGraph(result.graph);
+    void refresh().finally(() => settlers?.resolve()); // 再取得後にダイアログを閉じる
+  }, [mermaidJob, refresh]);
 
   // ===== オブジェクトの領域紐付け（領域紐付けパネル） =====
   const handleLinkObjectToSubProject = useCallback(
@@ -584,6 +635,16 @@ export default function ObjectMapPage() {
           ここで決めた骨格が、データカタログのテーブル・ER図の点線囲みにつながります。
         </p>
       </div>
+
+      {/* Mermaid生成ジョブの進捗（useBackgroundJob 監視中のみ表示） */}
+      {mermaidJob && (mermaidJob.status === 'QUEUED' || mermaidJob.status === 'RUNNING') && (
+        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          <span>
+            Mermaidからオブジェクト関係性マップを生成中…（{mermaidJob.status} {mermaidJob.progress}%）
+          </span>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -718,6 +779,11 @@ export default function ObjectMapPage() {
           </div>
           </EditGate>
         </>
+      )}
+
+      {/* ===== バックグラウンド処理一覧（Mermaid→マップ生成などのAIジョブ） ===== */}
+      {!loading && !error && (
+        <BackgroundJobsPanel ref={jobsPanelRef} projectId={projectId} />
       )}
     </div>
   );
