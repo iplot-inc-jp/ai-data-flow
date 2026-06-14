@@ -78,7 +78,7 @@ class RunJobDto {
  * 署名検証ができないため、このルートは 401 を返して「無認証実行」を防ぐ。
  * ローカルではそもそもジョブは enqueue 内で inline 実行されるため、このルートは使わない。
  */
-@ApiTags('Background Jobs')
+@ApiTags('ジョブ')
 @Controller('jobs')
 export class JobWorkerController {
   constructor(
@@ -134,7 +134,7 @@ export class JobWorkerController {
 /**
  * プロジェクト単位のジョブ起票・一覧（要認証・edit/view 権限）。
  */
-@ApiTags('Background Jobs')
+@ApiTags('ジョブ')
 @ApiBearerAuth()
 @ProjectScopedAccess()
 @UseGuards(ProjectAccessGuard)
@@ -196,7 +196,7 @@ export class ProjectJobController {
  *   - projectId ありの job … その projectId に view 権限が必要。
  *   - projectId null の job … 起票者本人 or super-admin のみ。
  */
-@ApiTags('Background Jobs')
+@ApiTags('ジョブ')
 @ApiBearerAuth()
 @Controller('jobs')
 export class JobByIdController {

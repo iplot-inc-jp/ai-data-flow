@@ -1,10 +1,10 @@
 # ai-data-flow MCP server
 
-ai-data-flow バックエンド（NestJS, `/api` 全292ルート）を **APIキー認証**で叩く MCP サーバ。
+ai-data-flow バックエンド（NestJS, `/api` 全302ルート）を **APIキー認証**で叩く MCP サーバ。
 Claude（Code / Desktop）から IPLoT 方法論パイプライン（Ph.0〜7・ASIS/TOBE業務フロー・イシューツリー・GAP・DFD・データカタログ・タスク・リスク・KPI・導入状況）を直接操作できる。
 
-- curated ツール **91個**（モジュール別、下表）
-- curated にない操作は `list_capabilities` で探して `api_request` で叩く（全292ルートを網羅）
+- curated ツール **102個**（モジュール別、下表）
+- curated にない操作は `list_capabilities` で探して `api_request` で叩く（全302ルートを網羅）
 
 ## セットアップ
 
@@ -94,7 +94,7 @@ AIDATAFLOW_API_KEY=sk_... node index.mjs
 
 | ツール | 説明 |
 |---|---|
-| `list_capabilities` | OpenAPI 全292ルートをタグ別に列挙（`domain` で部分一致フィルタ）。curated にない操作はまずこれで探す |
+| `list_capabilities` | OpenAPI 全302ルートをタグ別に列挙（`domain` で部分一致フィルタ）。curated にない操作はまずこれで探す |
 | `api_request` | 任意ルートを直接叩く脱出ハッチ（method / path / query / body）。path は `/projects/...` 形式（`/api` プレフィックス不要） |
 | `whoami` | GET /auth/me。APIキーの疎通・権限確認 |
 
@@ -211,6 +211,10 @@ AIDATAFLOW_API_KEY=sk_... node index.mjs
 | `data_object_relation_create` | POST /projects/:projectId/data-object-relations |
 | `data_object_import_from_dfd` | POST /projects/:projectId/data-objects/import-from-dfd（冪等） |
 | `data_object_link_table` | PUT /tables/:tableId/data-object（null で解除） |
+| `data_object_set_sub_project` | PUT /data-objects/:id/sub-project（領域紐付け。null で解除） |
+| `data_object_annotation_create` | POST /projects/:projectId/data-object-annotations（kind: STICKY\|COMMENT\|SCOPE） |
+| `data_object_apply_scope_links` | POST /data-object-annotations/:id/apply-scope-links（SCOPE枠内を一括領域紐付け） |
+| `data_object_import_mermaid` | POST /projects/:projectId/data-objects/import-mermaid（Mermaid をAI解析→オブジェクトマップに取り込み。冪等。**Anthropic APIキー必須**、未設定は 400） |
 
 ### データカタログ（tools/catalog.mjs）
 
@@ -234,7 +238,28 @@ AIDATAFLOW_API_KEY=sk_... node index.mjs
 | `kpi_update` | PATCH /kpis/:id |
 | `adoption_status_list` | GET /projects/:projectId/adoption-statuses |
 | `adoption_status_upsert` | PUT /projects/:projectId/adoption-statuses/upsert |
-| `change_log_list` | GET /projects/:projectId/change-logs |
+| `change_log_list` | GET /projects/:projectId/change-logs（操作履歴・body含む。`limit` 可。会社/全体管理者限定） |
+
+### RBAC（tools/rbac.mjs）
+
+プロジェクト単位のメンバー権限。`*_set` / `*_remove` は管理者（全体管理者 or 会社 OWNER/ADMIN）限定。
+
+| ツール | エンドポイント |
+|---|---|
+| `project_member_list` | GET /projects/:projectId/members（org 全ユーザー＋実効権限。userId はここから） |
+| `project_member_set` | PUT /projects/:projectId/members/:userId（accessLevel: VIEW\|EDIT、upsert） |
+| `project_member_remove` | DELETE /projects/:projectId/members/:userId（既定に戻す） |
+| `project_my_access` | GET /projects/:projectId/my-access（自分の実効権限。**最低 VIEW が必要**。アクセス権なしは accessLevel:null でなく 403） |
+
+### ジョブ（tools/jobs.mjs）
+
+重いAI生成は**非同期ジョブ**。`ai_job_enqueue` で起票 → `ai_job_get` でポーリングして完了を待つ（本番 QStash／ローカル inline 実行）。
+
+| ツール | エンドポイント |
+|---|---|
+| `ai_job_enqueue` | POST /projects/:projectId/ai-jobs（type: AI_MERMAID_OBJECTMAP\|AI_MERMAID_FLOW\|AI_KPI\|AI_ISSUE_SUGGEST、payload）。戻り `{jobId, status}`。MERMAID系は payload.mermaid（既存 Mermaid）必須＝生成でなく解析。OBJECTMAP は取り込み済み（再 import 不要）、FLOW は result に flow を返す |
+| `ai_job_get` | GET /jobs/:id（status=SUCCEEDED で result を読む） |
+| `ai_jobs_list` | GET /projects/:projectId/jobs（直近一覧。`limit` 可） |
 
 ## 汎用 `api_request` の使い方
 
@@ -284,7 +309,9 @@ mcp/
     ├── tasks.mjs              # タスク（WBS）
     ├── risks_stakeholders.mjs # リスク（RBS）・ステークホルダー（RACI）
     ├── masters.mjs            # 領域/情報種別/システム/制約/ロール
-    ├── data_objects_dfd.mjs   # DFD・データオブジェクト
+    ├── data_objects_dfd.mjs   # DFD・データオブジェクト（領域紐付け/注釈/Mermaidインポート含む）
     ├── catalog.mjs            # テーブル/カラム/CRUD
-    └── pm.mjs                 # 憲章/KPI/導入状況/変更履歴
+    ├── pm.mjs                 # 憲章/KPI/導入状況/変更履歴
+    ├── rbac.mjs               # プロジェクト単位メンバー権限（VIEW/EDIT）・my-access
+    └── jobs.mjs               # 非同期AIジョブ（enqueue → ai_job_get ポーリング）
 ```

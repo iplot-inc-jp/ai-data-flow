@@ -1,6 +1,6 @@
 # Brain Pro REST API 早見表（タグ別）
 
-`GET /api/docs-json`（OpenAPI 3, **292オペレーション / 185パス**）をタグ別に要約したもの。
+`GET /api/docs-json`（OpenAPI 3, **302オペレーション / 194パス**）をタグ別に要約したもの。
 すべて実在エンドポイント。完全な機械可読仕様は `/api/docs-json`、人間用 UI は `/api/docs`。
 
 凡例:
@@ -39,6 +39,17 @@
 - POST /api/organizations/{organizationId}/projects  — プロジェクト作成 body:{*name, *slug, description}
 - GET /api/organizations/{organizationId}/projects  — プロジェクト一覧取得
 - GET /api/projects/{id}  — プロジェクト詳細取得
+
+### プロジェクトメンバー（RBAC） (4)
+- GET /api/projects/{projectId}/members  — メンバー一覧＋実効権限（その org の全ユーザー。userId/email/name/orgRole/explicitLevel/effectiveLevel）【管理者限定】
+- PUT /api/projects/{projectId}/members/{userId}  — 明示アクセスレベルを upsert body:{*accessLevel=VIEW|EDIT}【管理者限定】
+- DELETE /api/projects/{projectId}/members/{userId}  — 明示権限を削除して既定（org ロール由来）に戻す【管理者限定】
+- GET /api/projects/{projectId}/my-access  — 呼出ユーザーの実効アクセス（{accessLevel: EDIT|VIEW|null}）【権限不要】
+
+### ジョブ（非同期AI生成） (3)
+- POST /api/projects/{projectId}/ai-jobs  — AIジョブ起票 body:{*type=AI_MERMAID_OBJECTMAP|AI_MERMAID_FLOW|AI_KPI|AI_ISSUE_SUGGEST, payload}（返り値 {jobId, status}。本番は QStash、ローカルは inline 実行）。AI_MERMAID_OBJECTMAP/AI_MERMAID_FLOW は payload.mermaid（既存 Mermaid テキスト）必須＝「与えた Mermaid を解析する」処理であって生成ではない（無いと FAILED）。OBJECTMAP は解析して関係性マップに取り込み済み（result {kind:"OBJECT_GRAPH", graph}。再 import 不要）、FLOW は result {kind:"MERMAID_FLOW", flow} を返す（永続せず）
+- GET /api/jobs/{id}  — ジョブ取得（ポーリング用。status QUEUED/RUNNING/SUCCEEDED/FAILED、result）
+- GET /api/projects/{projectId}/jobs  — 直近ジョブ一覧（新しい順。?limit=）
 
 ### プロジェクトフェーズ (7)
 - GET /api/projects/{projectId}/phases  — フェーズ一覧取得
@@ -271,7 +282,7 @@
 - DELETE /api/adoption-statuses/{id}  — 削除
 
 ### 変更履歴 (1)
-- GET /api/projects/{projectId}/change-logs  — 変更履歴一覧（新しい順）
+- GET /api/projects/{projectId}/change-logs  — 変更履歴一覧（新しい順。body 含む。?limit=）【管理者限定：org OWNER/ADMIN・全体管理者。一般メンバーは 403】
 
 ### Tables（データカタログ） (13)
 - GET /api/tables/project/{projectId}  — テーブル一覧
@@ -305,11 +316,13 @@
 - PATCH /api/dfd-annotations/{id}  — 注釈更新（同上）
 - DELETE /api/dfd-annotations/{id}  — 注釈削除
 
-### データオブジェクト（オブジェクト関係性マップ・ER図） (16)
+### データオブジェクト（オブジェクト関係性マップ・ER図） (19)
 - GET /api/projects/{projectId}/data-objects  — 関係性マップ取得（objects＋relations）
 - POST /api/projects/{projectId}/data-objects  — オブジェクト作成 body:{*name, description, color, positionX, positionY, order}
 - PATCH /api/data-objects/{id}  — オブジェクト更新 body:{name, description, color, order}
 - DELETE /api/data-objects/{id}  — オブジェクト削除
+- PUT /api/data-objects/{id}/sub-project  — 領域（サブプロジェクト）紐付け body:{subProjectId}（null で解除）
+- POST /api/projects/{projectId}/data-objects/import-mermaid  — Mermaid 記法（erDiagram等）をAI解析して冪等インポート body:{*mermaid}（**内部で Anthropic API を呼ぶため Anthropic APIキー必須。未設定は 400「Anthropic APIキーが未設定です」**）
 - POST /api/projects/{projectId}/data-object-relations  — 関係線作成（source=target拒否） body:{*sourceObjectId, *targetObjectId, cardinality=ONE_TO_ONE|ONE_TO_MANY|MANY_TO_MANY, label, description, pathStyle=straight|bezier, sourceHandle=top|right|bottom|left, targetHandle=top|right|bottom|left}
 - PATCH /api/data-object-relations/{id}  — 関係線更新（同上）
 - DELETE /api/data-object-relations/{id}  — 関係線削除
@@ -318,10 +331,11 @@
 - GET /api/projects/{projectId}/er-graph  — ER図グラフ（objects＋tables＋fkEdges＋relations）
 - PUT /api/projects/{projectId}/er-positions  — ER図テーブル位置一括保存 body:{*positions}
 - PUT /api/tables/{tableId}/data-object  — テーブルをオブジェクトに紐づけ/解除 body:{dataObjectId}（null で解除）
-- GET /api/projects/{projectId}/data-object-annotations  — 付箋/メモ一覧
-- POST /api/projects/{projectId}/data-object-annotations  — 付箋/メモ追加 body:{kind=STICKY|COMMENT, text, positionX, positionY, color, order}
-- PATCH /api/data-object-annotations/{id}  — 付箋/メモ更新 body:{text, positionX, positionY, width, height, color, order}
-- DELETE /api/data-object-annotations/{id}  — 付箋/メモ削除
+- GET /api/projects/{projectId}/data-object-annotations  — 付箋/メモ/領域枠 一覧
+- POST /api/projects/{projectId}/data-object-annotations  — 付箋/メモ/領域枠 追加 body:{kind=STICKY|COMMENT|SCOPE, text, positionX, positionY, width, height, color, borderStyle=dashed|solid, fillOpacity, subProjectId, visible, order}（SCOPE=領域枠）
+- PATCH /api/data-object-annotations/{id}  — 注釈更新（同上フィールド）
+- DELETE /api/data-object-annotations/{id}  — 注釈削除
+- POST /api/data-object-annotations/{id}/apply-scope-links  — SCOPE 枠内のオブジェクトを枠の subProjectId に一括紐付け（ボディ不要）
 
 ### CRUOA情報の地図 (2)
 - GET /api/business-flows/{flowId}/cruoa  — CRUOA情報の地図（列/行/セル）取得
@@ -382,6 +396,8 @@
 ## メモ
 
 - 一覧→詳細→作成→更新の順に ID を取り回す（ID をでっち上げない）。
-- `*_sync` / `import-from-dfd` / `phases/initialize` / `risk-categories`（0件シード）/ `roadmap-phases`（0件シード）は冪等。
-- `category`/`kind`/`status`/`direction`/`raci` などの enum は上記の候補値だけを使う。
+- `*_sync` / `import-from-dfd` / `phases/initialize` / `risk-categories`（0件シード）/ `roadmap-phases`（0件シード）は冪等。`import-mermaid` も冪等（get-or-create）だが **AI 解析を伴い Anthropic APIキーが必要**（鍵なしで叩ける純粋な初期化とは別扱い。未設定は 400）。
+- `category`/`kind`/`status`/`direction`/`raci`/`accessLevel`/`type`（ジョブ）などの enum は上記の候補値だけを使う。
 - 「行一括置換」系（analysis-*, cruoa, gap-ledgers の PUT）は既存行を入れ替えるので、現状を GET してからマージする。
+- **権限**: 閲覧専用（プロジェクトメンバー権限 VIEW）のユーザーは書き込みが 403。`my-access` で確認できる（ただし `my-access` 自体も最低 VIEW を要し、アクセス権の無い project では `accessLevel:null` ではなく 403 が返る）。`members` 系・`change-logs` は管理者限定。
+- **重いAI生成**は `POST /projects/:id/ai-jobs`（type 指定）→ `GET /jobs/:id` をポーリングで（同期APIではなく非同期ジョブ）。

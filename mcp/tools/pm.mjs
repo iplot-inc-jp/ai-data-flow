@@ -125,10 +125,18 @@ export function registerTools(server, call) {
 
   server.tool(
     'change_log_list',
-    'プロジェクトの変更履歴を取得する（新しい順）。誰が何をいつ変えたかの監査ログ。',
+    'プロジェクトの変更履歴（操作履歴・監査ログ。リクエストbody含む）を新しい順で取得する。' +
+      '誰が何をいつ変えたかを記録。閲覧は会社管理者（org OWNER/ADMIN）・全体管理者（super-admin）のみ。一般メンバーは 403。',
     {
       projectId: z.string().describe('プロジェクトID'),
+      limit: z
+        .number()
+        .int()
+        .optional()
+        .describe('取得件数（1〜300、既定 100）'),
     },
-    wrap(({ projectId }) => call('GET', `/projects/${projectId}/change-logs`)),
+    wrap(({ projectId, limit }) =>
+      call('GET', `/projects/${projectId}/change-logs`, { query: { limit } }),
+    ),
   );
 }

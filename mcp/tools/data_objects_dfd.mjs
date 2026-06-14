@@ -151,4 +151,86 @@ export function registerTools(server, call) {
       call('PUT', `/tables/${tableId}/data-object`, { body: { dataObjectId } }),
     ),
   );
+
+  server.tool(
+    'data_object_set_sub_project',
+    'データオブジェクトを領域（サブプロジェクト）に紐付け/解除する。' +
+      'subProjectId に null を渡すと領域紐付けを解除。SCOPE 注釈（領域枠）と組み合わせて使う。',
+    {
+      id: z.string().describe('データオブジェクトID'),
+      subProjectId: z
+        .string()
+        .nullable()
+        .describe('領域（サブプロジェクト）ID。null で紐付け解除'),
+    },
+    wrap(({ id, subProjectId }) =>
+      call('PUT', `/data-objects/${id}/sub-project`, { body: { subProjectId } }),
+    ),
+  );
+
+  server.tool(
+    'data_object_annotation_create',
+    'オブジェクト関係性マップ上の注釈を作成する。kind=STICKY（付箋）/ COMMENT（メモ）/ SCOPE（領域枠）。' +
+      'SCOPE はキャンバス上の矩形で領域（サブプロジェクト）を可視化する枠で、borderStyle/fillOpacity/subProjectId/visible を指定し、' +
+      'data_object_apply_scope_links でその枠内のオブジェクトを subProjectId に一括紐付けできる。' +
+      '取得は api_request の GET /projects/:projectId/data-object-annotations、' +
+      '更新・削除は api_request の PATCH/DELETE /data-object-annotations/:id。',
+    {
+      projectId: z.string().describe('プロジェクトID'),
+      kind: z
+        .enum(['STICKY', 'COMMENT', 'SCOPE'])
+        .describe('注釈種別（STICKY=付箋 / COMMENT=メモ / SCOPE=領域枠）'),
+      text: z.string().optional().describe('注釈テキスト'),
+      positionX: z.number().optional().describe('X座標'),
+      positionY: z.number().optional().describe('Y座標'),
+      width: z.number().nullable().optional().describe('幅（SCOPE枠で使う）'),
+      height: z.number().nullable().optional().describe('高さ（SCOPE枠で使う）'),
+      color: z.string().nullable().optional().describe('カラー（HEX形式）'),
+      borderStyle: z
+        .enum(['dashed', 'solid'])
+        .optional()
+        .describe('枠線スタイル（SCOPE枠: dashed/solid）'),
+      fillOpacity: z
+        .number()
+        .nullable()
+        .optional()
+        .describe('塗りつぶし不透明度（0〜1、SCOPE枠）'),
+      subProjectId: z
+        .string()
+        .nullable()
+        .optional()
+        .describe('紐づく領域（サブプロジェクト）ID（SCOPE枠）'),
+      visible: z.boolean().optional().describe('表示/非表示'),
+      order: z.number().optional().describe('並び順'),
+    },
+    wrap(({ projectId, ...body }) =>
+      call('POST', `/projects/${projectId}/data-object-annotations`, { body }),
+    ),
+  );
+
+  server.tool(
+    'data_object_apply_scope_links',
+    'SCOPE 注釈（領域枠）の矩形内に収まるデータオブジェクトを、その注釈の subProjectId に一括で領域紐付けする。' +
+      'data_object_annotation_create で kind=SCOPE の注釈を作った後に呼ぶ。ボディ不要。',
+    {
+      id: z.string().describe('SCOPE 注釈ID（data_object_annotation_create の戻り）'),
+    },
+    wrap(({ id }) => call('POST', `/data-object-annotations/${id}/apply-scope-links`)),
+  );
+
+  server.tool(
+    'data_object_import_mermaid',
+    'Mermaid 記法（erDiagram 等）をAIで解析してオブジェクト関係性マップに冪等インポートする（同期）。' +
+      'mermaid テキストは呼び出し側が用意する。内部で Anthropic API を呼ぶため Anthropic APIキーが必要' +
+      '（未設定だと 400「Anthropic APIキーが未設定です」）。' +
+      '同じ取り込みを非同期ジョブで回したい場合は ai_job_enqueue(type=AI_MERMAID_OBJECTMAP, payload={mermaid:...}) ' +
+      'を使う（こちらもジョブ内で取り込みまで行うので、別途ここへ渡し直す必要はない）。',
+    {
+      projectId: z.string().describe('プロジェクトID'),
+      mermaid: z.string().describe('Mermaid 記法のグラフ定義（例: "erDiagram\\n  CUSTOMER ||--o{ ORDER : places"）'),
+    },
+    wrap(({ projectId, mermaid }) =>
+      call('POST', `/projects/${projectId}/data-objects/import-mermaid`, { body: { mermaid } }),
+    ),
+  );
 }
