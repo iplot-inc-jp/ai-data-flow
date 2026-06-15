@@ -823,6 +823,7 @@ export default function ObjectMapPage() {
                   handleObjectMoved(id, x, y);
                   applyScopeMembershipOnMove(id, x, y);
                 }}
+                onObjectMovedSilent={handleObjectMoved}
                 onCreateRelation={(s, t, sh, th) =>
                   handleCreateRelation(s, t, undefined, undefined, sh, th)
                 }

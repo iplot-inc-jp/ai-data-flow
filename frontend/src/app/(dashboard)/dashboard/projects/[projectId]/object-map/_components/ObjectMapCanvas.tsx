@@ -213,6 +213,12 @@ export interface ObjectMapCanvasProps {
   focusNonce?: number;
   /** ノードドラッグ終了時（親側で楽観更新＋デバウンス保存する） */
   onObjectMoved: (id: string, x: number, y: number) => void;
+  /**
+   * 囲い move に追従して内包オブジェクトを一緒に動かす際の「位置のみ」確定。
+   * 領域編入/はみ出し拡大の再計算を伴わない（囲い側の geometry 変更で別途行われるため）。
+   * 省略時は onObjectMoved にフォールバック。
+   */
+  onObjectMovedSilent?: (id: string, x: number, y: number) => void;
   /** sourceHandle/targetHandle は辺ノブで指定された場合のみ非null（null=自動アンカー） */
   onCreateRelation: (
     sourceObjectId: string,
@@ -277,6 +283,7 @@ export function ObjectMapCanvas({
   focusObjectId,
   focusNonce,
   onObjectMoved: onObjectMovedRaw,
+  onObjectMovedSilent: onObjectMovedSilentRaw,
   onCreateRelation: onCreateRelationRaw,
   onUpdateRelation: onUpdateRelationRaw,
   onDeleteRelation: onDeleteRelationRaw,
@@ -297,6 +304,7 @@ export function ObjectMapCanvas({
   // 閲覧専用時は編集系コールバックを no-op に差し替える（ドラッグ確定・接続・編集・削除を無効化）。
   const noop = useCallback(() => {}, []);
   const onObjectMoved = readOnly ? noop : onObjectMovedRaw;
+  const onObjectMovedSilent = readOnly ? noop : onObjectMovedSilentRaw ?? onObjectMovedRaw;
   const onCreateRelation = readOnly ? (async () => {}) : onCreateRelationRaw;
   const onUpdateRelation = readOnly ? (async () => {}) : onUpdateRelationRaw;
   const onDeleteRelation = readOnly ? (async () => {}) : onDeleteRelationRaw;
@@ -901,12 +909,14 @@ export function ObjectMapCanvas({
             width: d.last.w,
             height: d.last.h,
           });
-          // 内包メンバーの新位置を確定（囲いと同じ delta）
+          // 内包メンバーの新位置を確定（囲いと同じ delta）。
+          // 位置のみ確定（領域編入/はみ出し拡大の再計算なし）。それは囲い側の
+          // geometry 変更（onScopeGeometryChanged→applyScopeLinks）で正しい新位置基準に行われる。
           if (d.mode === 'move' && members.length > 0) {
             const ddx = d.last.x - d.baseX;
             const ddy = d.last.y - d.baseY;
             for (const m of members) {
-              onObjectMoved(m.id, Math.round(m.baseX + ddx), Math.round(m.baseY + ddy));
+              onObjectMovedSilent(m.id, Math.round(m.baseX + ddx), Math.round(m.baseY + ddy));
             }
           }
         }
@@ -916,7 +926,7 @@ export function ObjectMapCanvas({
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [screenToWorld, scopeRect, onScopeGeometryChanged, objects, posOf, onObjectMoved],
+    [screenToWorld, scopeRect, onScopeGeometryChanged, objects, posOf, onObjectMovedSilent],
   );
 
   // ===== Mermaidから生成 =====
