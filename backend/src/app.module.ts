@@ -464,6 +464,10 @@ import { KnowledgeSettingsController } from './presentation/controllers/knowledg
 // ナレッジグラフ Google Drive ソースアダプタ（Phase 3）
 import { DriveService } from './infrastructure/knowledge/drive.service';
 import { DriveController } from './presentation/controllers/drive.controller';
+// Liveblocks リアルタイム・プレゼンス（トークン発行）
+import { LiveblocksController } from './presentation/controllers/liveblocks.controller';
+import { IssueLiveblocksTokenUseCase } from './application/use-cases/liveblocks/issue-liveblocks-token.use-case';
+import { LiveblocksTokenService } from './infrastructure/services/liveblocks-token.service';
 
 @Module({
   imports: [
@@ -593,6 +597,8 @@ import { DriveController } from './presentation/controllers/drive.controller';
     KnowledgeSettingsController,
     // Google Drive ソースアダプタ（Phase 3）
     DriveController,
+    // Liveblocks リアルタイム・プレゼンス
+    LiveblocksController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -992,6 +998,9 @@ import { DriveController } from './presentation/controllers/drive.controller';
 
     // ========== Services ==========
     ProjectAccessService,
+    // Liveblocks プレゼンス（トークン発行ユースケース + SDK ラッパ）
+    IssueLiveblocksTokenUseCase,
+    LiveblocksTokenService,
     ProjectBundleService,
     EntityJsonService,
     ClaudeService,
