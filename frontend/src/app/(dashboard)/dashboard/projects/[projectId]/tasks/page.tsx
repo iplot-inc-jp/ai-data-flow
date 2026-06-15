@@ -28,6 +28,7 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { BacklogImportDialog } from '@/components/backlog-import-dialog';
+import { JiraImportDialog } from '@/components/jira-import-dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
@@ -149,6 +150,7 @@ export default function TasksPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Backlog CSV 取込ダイアログ
   const [importOpen, setImportOpen] = useState(false);
+  const [jiraImportOpen, setJiraImportOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -628,6 +630,17 @@ export default function TasksPage() {
               >
                 <FileSpreadsheet className="h-4 w-4" />
                 Backlogから取込
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                variant="outline"
+                onClick={() => setJiraImportOpen(true)}
+                className="gap-1.5"
+                title="Jira（Atlassian）の課題エクスポート CSV を取り込みます"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Jiraから取込
               </Button>
             )}
             {canEdit && (
@@ -1312,6 +1325,14 @@ export default function TasksPage() {
       <BacklogImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
+        projectId={projectId}
+        onImported={fetchAll}
+      />
+
+      {/* Jira CSV 取込ダイアログ（sourceKey 冪等 upsert・作成/更新/スキップ表示） */}
+      <JiraImportDialog
+        open={jiraImportOpen}
+        onOpenChange={setJiraImportOpen}
         projectId={projectId}
         onImported={fetchAll}
       />

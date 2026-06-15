@@ -79,6 +79,18 @@ export interface ImportBacklogResult {
   errors: ImportBacklogRowError[];
 }
 
+/**
+ * POST /projects/:id/tasks/import-jira の結果。
+ * Backlog 版に加え、sourceKey='JIRA:<Issue key>' での冪等 upsert により
+ * 既存課題を更新した件数（updated）を含む。
+ */
+export interface ImportJiraResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: ImportBacklogRowError[];
+}
+
 /** 作成/更新時に送る入力（id・projectId はパス側で扱うため除外可能） */
 export type TaskInput = Partial<Omit<Task, 'id' | 'projectId'>> & {
   title: string;
@@ -268,6 +280,18 @@ export const tasksApi = {
       headers: authHeaders(),
       body: JSON.stringify({ csv }),
     }).then((r) => handle<ImportBacklogResult>(r)),
+
+  /**
+   * POST /api/projects/:projectId/tasks/import-jira { csv }
+   * Jira の課題エクスポート CSV を取り込む。sourceKey='JIRA:<Issue key>' で
+   * 冪等 upsert（再取込で重複させず更新）。文字コードは frontend 側で UTF-8 に解決して送る。
+   */
+  importJira: (projectId: string, csv: string) =>
+    fetch(`${API_URL}/api/projects/${projectId}/tasks/import-jira`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ csv }),
+    }).then((r) => handle<ImportJiraResult>(r)),
 
   /** GET /api/tasks/:id */
   get: (id: string) =>
