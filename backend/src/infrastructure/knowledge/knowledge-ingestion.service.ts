@@ -6,6 +6,7 @@ import { CompanyKeyService } from '../services/company-key.service';
 import { ClaudeService } from '../services/claude.service';
 import { JobService } from '../services/job.service';
 import { FileExtractionService, FileKind } from './file-extraction.service';
+import { DriveService } from './drive.service';
 import { buildMergePlan } from './lib/merge-plan';
 import {
   aggregateBatchStatus,
@@ -47,6 +48,7 @@ export class KnowledgeIngestionService {
     private readonly extraction: FileExtractionService,
     private readonly claude: ClaudeService,
     private readonly companyKey: CompanyKeyService,
+    private readonly drive: DriveService,
     // JobService ↔ KnowledgeIngestionService は相互参照（dispatch が本サービスを呼ぶ）。
     @Inject(forwardRef(() => JobService))
     private readonly jobService: JobService,
@@ -154,10 +156,16 @@ export class KnowledgeIngestionService {
 
       // ===== MERGING: ナレッジグラフへ冪等反映 =====
       await this.transition(file, 'MERGING', 'ナレッジグラフへ反映', 85);
+      // contentText（全文保持の意図, spec §4.2）:
+      //   - テキスト系（前処理で全文あり）: extractedText を使う。
+      //   - PDF/画像（vision）: AI が書き起こした fullText、無ければ summary を最低限保持する。
+      const contentText = needsVision
+        ? extraction.fullText?.trim() || extraction.summary || null
+        : extractedText;
       const knowledgeDocumentId = await this.merge(file, extraction, {
         kind,
         mimeType: mimeType ?? file.mimeType ?? null,
-        contentText: needsVision ? null : extractedText,
+        contentText,
       });
 
       // ===== SUCCEEDED =====
@@ -229,6 +237,13 @@ export class KnowledgeIngestionService {
           KnowledgeIngestionService.EXPAND_MAX_COMPRESSED_BYTES,
       });
 
+      // 冪等化: リトライ/再実行で子を二重作成しないよう、この アーカイブ由来の
+      // 既存子（parentFileId = file.id）を先に削除してから作り直す。
+      // （onDelete: Cascade は親バッチ削除時のみ。ここは親=アーカイブの子掃除を明示的に行う。）
+      await this.prisma.ingestionFile.deleteMany({
+        where: { parentFileId: file.id },
+      });
+
       // 各エントリを Blob 保存し、子 IngestionFile(PENDING) を作成。
       const children: IngestionFile[] = [];
       for (const entry of plan.entries) {
@@ -261,15 +276,10 @@ export class KnowledgeIngestionService {
         await this.fileRepository.saveMany(children);
       }
 
-      // 親バッチの totalFiles/pendingFiles を子の数だけ増やす（展開で子が増えるため）。
+      // 親バッチカウンタは実際の子行から再計算する（blind な加算だとリトライで二重加算になる）。
+      // refreshBatch は findByBatchId を全スキャンして total/pending/succeeded/failed を再集計するため冪等。
+      await this.refreshBatch(file.batchId);
       const batch = await this.batchRepository.findById(file.batchId);
-      if (batch && children.length > 0) {
-        batch.update({
-          totalFiles: batch.totalFiles + children.length,
-          pendingFiles: batch.pendingFiles + children.length,
-        });
-        await this.batchRepository.save(batch);
-      }
 
       // 各子に KG_INGEST_FILE / KG_EXPAND_ARCHIVE を起票（payload=fileId）。
       for (const child of children) {
@@ -386,7 +396,28 @@ export class KnowledgeIngestionService {
       return { bytes, mimeType: file.mimeType ?? mimeType };
     }
 
-    // UPLOAD は作成時に blobUrl が入っている前提。DRIVE は Phase3。
+    if (file.sourceType === 'DRIVE') {
+      // DRIVE: sourceRef = driveFileId。Drive からダウンロード → Blob 保存 → blobUrl 確定。
+      // 以後（リトライ含む）は冒頭の blobUrl 分岐で Blob から読むため Drive を再度叩かない。
+      if (!file.sourceRef) {
+        throw new Error('DRIVE の sourceRef（driveFileId）が未設定です');
+      }
+      const { bytes, mimeType, filename } = await this.drive.downloadFile(
+        file.projectId,
+        file.sourceRef,
+      );
+      const saved = await this.blob.save(
+        `ingestion/${file.projectId}/${file.id}/${file.filename || filename}`,
+        bytes,
+        mimeType ?? undefined,
+      );
+      file.update({ blobUrl: saved.url });
+      await this.fileRepository.save(file);
+      // Google ネイティブのエクスポートで mimeType が変わるため、Drive 由来を優先して返す。
+      return { bytes, mimeType: mimeType ?? file.mimeType };
+    }
+
+    // UPLOAD は作成時に blobUrl が入っている前提。
     throw new Error(
       `原本の取得元が不明です（sourceType=${file.sourceType}, blobUrl 未設定）`,
     );
@@ -399,18 +430,23 @@ export class KnowledgeIngestionService {
     if (!file.sourceRef) {
       throw new Error('ATTACHMENT の sourceRef（attachmentId）が未設定です');
     }
-    const att = await this.prisma.attachment.findUnique({
-      where: { id: file.sourceRef },
+    // クロスプロジェクト流出防止: attachment は file.projectId にスコープして取得する。
+    // 他プロジェクトの attachmentId を sourceRef に詰めても projectId 不一致で見つからない。
+    const att = await this.prisma.attachment.findFirst({
+      where: { id: file.sourceRef, projectId: file.projectId },
       select: { data: true, url: true, mimeType: true },
     });
     if (!att) {
-      throw new Error(`Attachment ${file.sourceRef} が見つかりません`);
+      throw new Error(
+        `Attachment ${file.sourceRef} が見つかりません（プロジェクト不一致の可能性）`,
+      );
     }
     if (att.data) {
       return { bytes: Buffer.from(att.data), mimeType: att.mimeType };
     }
     // ディスク参照（既存ローカル行）。url は `/uploads/...` 配信パス。
-    const bytes = await this.blob.read(this.attachmentDiskPath(att.url));
+    // サーバ導出パス（DB 由来）なので readUploadFile（UPLOAD_DIR 限定）で読む。
+    const bytes = await this.blob.readUploadFile(this.attachmentDiskPath(att.url));
     return { bytes, mimeType: att.mimeType };
   }
 
@@ -479,6 +515,7 @@ export class KnowledgeIngestionService {
 
   private emptyExtraction(): {
     summary: string;
+    fullText?: string;
     tags: string[];
     entities: { label: string; kind: string; description?: string }[];
     relations: { from: string; to: string; label?: string }[];
@@ -499,6 +536,7 @@ export class KnowledgeIngestionService {
     file: IngestionFile,
     extraction: {
       summary: string;
+      fullText?: string;
       tags: string[];
       entities: { label: string; kind: string; description?: string }[];
       relations: { from: string; to: string; label?: string }[];
@@ -535,6 +573,14 @@ export class KnowledgeIngestionService {
           });
 
       // 2. 再実行のクリーン化: 既存 mention と この文書発の relation を削除。
+      //    削除前に「この文書が mention していた nodeId」を捕捉しておく。
+      //    再抽出でその node が外れた場合でも mentionCount を再計算する対象に含めるため
+      //    （含めないと旧 node の mentionCount が stale のまま残る）。
+      const priorMentionNodes = await tx.knowledgeMention.findMany({
+        where: { documentId: doc.id },
+        select: { nodeId: true },
+      });
+      const priorMentionNodeIds = priorMentionNodes.map((m) => m.nodeId);
       await tx.knowledgeMention.deleteMany({ where: { documentId: doc.id } });
       await tx.knowledgeRelation.deleteMany({ where: { sourceDocumentId: doc.id } });
 
@@ -613,8 +659,14 @@ export class KnowledgeIngestionService {
         });
       }
 
-      // mentionCount を各ノードの実 mention 数で再計算（名寄せの可視化用）。
-      for (const nodeId of nodeIdByKey.values()) {
+      // mentionCount を実 mention 数で再計算（名寄せの可視化用）。
+      // 新規 node に加え、再抽出で外れた旧 node（priorMentionNodeIds）も対象に含める
+      // ことで、外れた node の count が減算されず stale になるのを防ぐ。
+      const nodesToRecount = new Set<string>([
+        ...nodeIdByKey.values(),
+        ...priorMentionNodeIds,
+      ]);
+      for (const nodeId of nodesToRecount) {
         const count = await tx.knowledgeMention.count({ where: { nodeId } });
         await tx.knowledgeNode.update({
           where: { id: nodeId },

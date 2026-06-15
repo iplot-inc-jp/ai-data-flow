@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { assertSafeOutboundUrl } from './url-safety';
 
 /**
  * 原本ファイル・生成画像の保管を抽象化するサービス。
@@ -78,26 +79,114 @@ export class BlobStorageService {
   }
 
   /**
+   * @vercel/blob の公開ストアのホストかどうか。
+   * 形式は `<storeId>.public.blob.vercel-storage.com`（リージョン別の `*.public.blob...` も含む）。
+   * read() のアローリスト判定に使う（任意の https へ fetch させない = SSRF 防止）。
+   */
+  private isVercelBlobHost(hostname: string): boolean {
+    const h = hostname.toLowerCase();
+    return (
+      h === 'blob.vercel-storage.com' ||
+      h.endsWith('.public.blob.vercel-storage.com')
+    );
+  }
+
+  /**
+   * `file://` URL / 生パスを正規化した絶対パスにし、UPLOAD_DIR 配下かつ
+   * 取り込み専用領域（`ingestion` キー由来）であることを検証して返す。違反は throw。
+   *
+   * - シンボリックリンク等での外抜けを防ぐため path.resolve 済みの前置一致で判定する。
+   * - 取り込み領域の限定: save() は key `ingestion/<projectId>/<id>/<name>` を
+   *   ディスク fallback では区切りを `_` に潰して `ingestion_<...>` という単一ファイル名にする
+   *   （Blob/将来のレイアウトでは segment 維持もありうる）。そのため
+   *   「いずれかのパスセグメントが `ingestion`」または「basename が `ingestion_` で始まる」
+   *   のどちらかを満たすものだけ許可し、UPLOAD_DIR 内の他用途ファイル
+   *   （添付の生ファイル等）を blobUrl 偽装で読み出されるのを防ぐ。
+   */
+  private resolveSafeDiskPath(rawPath: string): string {
+    const baseDir = path.resolve(this.uploadDir);
+    const resolved = path.resolve(rawPath);
+    const rel = path.relative(baseDir, resolved);
+    // baseDir の外（'..' で始まる）や絶対パスに戻るものは拒否。
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(
+        `BlobStorageService.read: path is outside UPLOAD_DIR: ${rawPath}`,
+      );
+    }
+    // 取り込み領域に限定（segment `ingestion` か basename `ingestion_...`）。
+    const segments = rel.split(/[/\\]+/);
+    const basename = segments[segments.length - 1] ?? '';
+    const isIngestion =
+      segments.includes('ingestion') || basename.startsWith('ingestion_');
+    if (!isIngestion) {
+      throw new Error(
+        `BlobStorageService.read: path is not under the ingestion area: ${rawPath}`,
+      );
+    }
+    return resolved;
+  }
+
+  /**
+   * UPLOAD_DIR 配下のサーバ導出パス（既存 Attachment のディスク保存 `<id>-<name>` 等）を読む。
+   * read() と違い `ingestion/` セグメントは要求しないが、UPLOAD_DIR 配下であることは強制する
+   * （DB 由来 url の traversal 防御）。client 由来の blobUrl にはこのメソッドを使わないこと。
+   */
+  async readUploadFile(diskPath: string): Promise<Buffer> {
+    if (!diskPath) {
+      throw new Error('BlobStorageService.readUploadFile: diskPath is empty');
+    }
+    const baseDir = path.resolve(this.uploadDir);
+    const resolved = path.resolve(diskPath);
+    const rel = path.relative(baseDir, resolved);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(
+        `BlobStorageService.readUploadFile: path is outside UPLOAD_DIR: ${diskPath}`,
+      );
+    }
+    return fs.promises.readFile(resolved);
+  }
+
+  /**
    * `save()` が返した URL（Blob 公開 URL）または `file://` パス、もしくは生のディスクパスから
    * バイト列を読み出して Buffer で返す。
+   *
+   * SSRF/LFI 対策のアローリスト:
+   *   - https かつ @vercel/blob の公開ホスト（`*.public.blob.vercel-storage.com`）のみ fetch。
+   *     さらに assertSafeOutboundUrl で内部/メタデータ宛を遮断（DNS リバインディング含む）。
+   *   - file:// / 生パスは UPLOAD_DIR 配下かつ `ingestion/` セグメントを含むものだけ readFile。
+   * それ以外（任意 http(s)、file:///etc/passwd、UPLOAD_DIR 外）は throw。
    */
   async read(urlOrKey: string): Promise<Buffer> {
     if (!urlOrKey) {
       throw new Error('BlobStorageService.read: urlOrKey is empty');
     }
 
-    // ディスク（file:// または絶対/相対パス）。
+    // ディスク（file:// または絶対/相対パス）。UPLOAD_DIR 配下の ingestion/ のみ許可。
     if (urlOrKey.startsWith('file://')) {
       const p = urlOrKey.slice('file://'.length);
-      return fs.promises.readFile(p);
+      return fs.promises.readFile(this.resolveSafeDiskPath(p));
     }
     if (!/^https?:\/\//i.test(urlOrKey)) {
       // http(s) でない＝ローカルパス扱い。
-      return fs.promises.readFile(urlOrKey);
+      return fs.promises.readFile(this.resolveSafeDiskPath(urlOrKey));
     }
 
-    // http(s) は fetch して取得（Blob 公開 URL を含む）。
-    const res = await fetch(urlOrKey);
+    // http(s): https かつ Vercel Blob 公開ホストのみ許可。
+    let parsed: URL;
+    try {
+      parsed = new URL(urlOrKey);
+    } catch {
+      throw new Error(`BlobStorageService.read: invalid URL: ${urlOrKey}`);
+    }
+    if (parsed.protocol !== 'https:' || !this.isVercelBlobHost(parsed.hostname)) {
+      throw new Error(
+        `BlobStorageService.read: URL is not an allowed Vercel Blob host: ${parsed.protocol}//${parsed.hostname}`,
+      );
+    }
+    // 内部/メタデータ宛・DNS リバインディングを遮断（解決後 IP まで検証）。
+    await assertSafeOutboundUrl(urlOrKey);
+
+    const res = await fetch(urlOrKey, { redirect: 'manual' });
     if (!res.ok) {
       throw new Error(
         `BlobStorageService.read: fetch failed ${res.status} for ${urlOrKey}`,

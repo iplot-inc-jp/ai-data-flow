@@ -350,7 +350,7 @@ export default function ProjectDfdPage() {
               size="sm"
               canEdit={canEdit}
               withModeChoice={false}
-              importHint="選択した JSON でこの第1レベルDFDの中身（ノード・データフロー・注釈）を丸ごと置き換えます。"
+              importHint="選択した JSON でこの第1レベルDFDの中身（ノード・データフロー）を丸ごと置き換えます。注意: 手動で追加したノードだけでなく、自動生成（generate）で作られたノード/フローも区別なく全置換されます。FUNCTION ノードの refFlowId（業務フローへのリンク）は、GET の値をそのまま往復させた場合のみ保持され、自動生成の冪等突合に使われます。値を書き換える / 落とすと自動生成が別ノードを作り直すため、リンクは編集しないでください。"
               getExport={() => entityJsonIo.exportProjectDfd(projectId)}
               onImport={(parsed) =>
                 entityJsonIo.importProjectDfd(projectId, parsed as EntityBundle)

@@ -15,11 +15,15 @@
 //   選択可能な既存添付:
 //     GET    /api/projects/:id/ingestion-sources/attachments → SelectableAttachment[]
 //   グラフ:
-//     GET    /api/projects/:id/knowledge/graph          → KnowledgeGraph
+//     GET    /api/projects/:id/knowledge/graph          → KnowledgeGraph（nodes + edges + documents）
 //     GET    /api/projects/:id/knowledge/search?q=      → KnowledgeSearchResult
 //   設定:
 //     GET    /api/projects/:id/knowledge/settings       → ProjectKnowledgeSettings（get-or-create 既定）
 //     PUT    /api/projects/:id/knowledge/settings       → ProjectKnowledgeSettings
+//   Google Drive（Phase 3。driveEnabled でない＝401/未設定 のときは UI で「未設定」表示）:
+//     GET    /api/projects/:id/drive/auth-url           → { authUrl }（未接続→新規ウィンドウで OAuth）
+//     GET    /api/projects/:id/drive/files?folderId=    → { connected, email?, files: DriveFile[] }
+//     DELETE /api/projects/:id/drive/connection         → { success }
 //
 // raw fetch + localStorage 'accessToken'（既存 lib 慣習。src/lib/api.ts は使わない）。
 
@@ -216,8 +220,11 @@ export interface KnowledgeNode {
   updatedAt: string;
 }
 
-/** グラフのエッジ（ノード ↔ ノード）。 */
-export interface KnowledgeRelation {
+/**
+ * グラフのエッジ（ノード ↔ ノード）。
+ * backend KnowledgeEdgeOutput と一致（graph API は `edges` で返す。`createdAt` は含まない）。
+ */
+export interface KnowledgeEdge {
   id: string;
   projectId: string;
   fromNodeId: string;
@@ -226,8 +233,13 @@ export interface KnowledgeRelation {
   type: string | null;
   confidence: number | null;
   sourceDocumentId: string | null;
-  createdAt: string;
 }
+
+/**
+ * @deprecated `KnowledgeEdge` を使う。graph API のエッジは `edges` 名・`createdAt` なし。
+ * canvas 等の旧コードが `createdAt` を補完して渡す経路があるため任意フィールドとして残す。
+ */
+export type KnowledgeRelation = KnowledgeEdge & { createdAt?: string };
 
 /** グラフの文書ノード。 */
 export interface KnowledgeDocument {
@@ -246,10 +258,10 @@ export interface KnowledgeDocument {
   updatedAt: string;
 }
 
-/** グラフ全体（nodes + edges + documents）。 */
+/** グラフ全体（nodes + edges + documents）。backend KnowledgeGraphOutput と一致。 */
 export interface KnowledgeGraph {
   nodes: KnowledgeNode[];
-  relations: KnowledgeRelation[];
+  edges: KnowledgeEdge[];
   documents: KnowledgeDocument[];
 }
 
@@ -257,6 +269,50 @@ export interface KnowledgeGraph {
 export interface KnowledgeSearchResult {
   nodes: KnowledgeNode[];
   documents: KnowledgeDocument[];
+}
+
+// ---------------------------------------------------------------------------
+// Google Drive（Phase 3）型
+// ---------------------------------------------------------------------------
+
+/** Drive 認証 URL（未接続のとき新規ウィンドウで開く）。 */
+export interface DriveAuthUrl {
+  authUrl: string;
+}
+
+/** Drive のファイル/フォルダ 1 件（files.list 由来。folder は再帰のため）。 */
+export interface DriveFile {
+  /** driveFileId。バッチ作成の sourceRef に使う。 */
+  id: string;
+  name: string;
+  mimeType?: string | null;
+  /** Drive はフォルダも mimeType で表すが、利便のため明示フラグも受ける。 */
+  isFolder?: boolean;
+  size?: number | null;
+  modifiedTime?: string | null;
+  iconLink?: string | null;
+}
+
+/**
+ * Drive ファイル一覧レスポンス。
+ * - connected=false: 未接続（getAuthUrl→認証が必要）。
+ * - email: 接続済みアカウント（任意表示）。
+ */
+export interface DriveFileList {
+  connected: boolean;
+  email?: string | null;
+  files: DriveFile[];
+}
+
+/**
+ * Drive 機能が未設定/未許可（401 や 404、env 未設定）を表す番兵エラー。
+ * これを catch した UI は「未設定」表示にして他タブを使えるままにする。
+ */
+export class DriveNotConfiguredError extends Error {
+  constructor(message = 'Google Drive 連携は未設定です') {
+    super(message);
+    this.name = 'DriveNotConfiguredError';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -466,7 +522,7 @@ export const knowledgeSettingsApi = {
 // ---------------------------------------------------------------------------
 
 export const knowledgeGraphApi = {
-  /** グラフ全体（nodes+edges+documents）。GET /api/projects/:id/knowledge/graph */
+  /** グラフ全体（nodes + edges + documents）。GET /api/projects/:id/knowledge/graph */
   async getGraph(projectId: string): Promise<KnowledgeGraph> {
     const res = await fetch(
       `${API_URL}/api/projects/${projectId}/knowledge/graph`,
@@ -486,6 +542,79 @@ export const knowledgeGraphApi = {
       { headers: headers() },
     );
     return ok<KnowledgeSearchResult>(res, 'ナレッジ検索に失敗しました');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Google Drive（Phase 3）API
+// ---------------------------------------------------------------------------
+
+/**
+ * Drive 機能が未設定/未許可とみなす HTTP ステータス:
+ *   401（未認証）/ 403（権限なし）/ 404（ルート/接続なし）/
+ *   501（未実装）/ 503（連携サービス未設定・未起動）。
+ * UI はこれを catch して「未設定」表示にし、他タブは使えるままにする。
+ */
+function isDriveNotConfigured(status: number): boolean {
+  return (
+    status === 401 ||
+    status === 403 ||
+    status === 404 ||
+    status === 501 ||
+    status === 503
+  );
+}
+
+export const driveApi = {
+  /**
+   * 認証 URL を取得（未接続のとき新規ウィンドウで開いて OAuth）。
+   * GET /api/projects/:id/drive/auth-url
+   */
+  async getAuthUrl(projectId: string): Promise<DriveAuthUrl> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/drive/auth-url`,
+      { headers: headers() },
+    );
+    if (!res.ok) {
+      if (isDriveNotConfigured(res.status)) throw new DriveNotConfiguredError();
+      await throwApiError(res, 'Drive 認証 URL の取得に失敗しました');
+    }
+    return res.json() as Promise<DriveAuthUrl>;
+  },
+
+  /**
+   * 接続済みなら Drive のファイル一覧。folderId 指定でそのフォルダ配下。
+   * GET /api/projects/:id/drive/files?folderId=（backend は @Query('folderId')）
+   */
+  async listFiles(projectId: string, folderId?: string): Promise<DriveFileList> {
+    const params = new URLSearchParams();
+    if (folderId) params.set('folderId', folderId);
+    const qs = params.toString();
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/drive/files${qs ? `?${qs}` : ''}`,
+      { headers: headers() },
+    );
+    if (!res.ok) {
+      if (isDriveNotConfigured(res.status)) throw new DriveNotConfiguredError();
+      await throwApiError(res, 'Drive ファイル一覧の取得に失敗しました');
+    }
+    return res.json() as Promise<DriveFileList>;
+  },
+
+  /**
+   * Drive 接続を解除（refresh token 破棄）。
+   * DELETE /api/projects/:id/drive/connection
+   */
+  async deleteConnection(projectId: string): Promise<{ success: boolean }> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/drive/connection`,
+      { method: 'DELETE', headers: headers() },
+    );
+    if (!res.ok) {
+      if (isDriveNotConfigured(res.status)) throw new DriveNotConfiguredError();
+      await throwApiError(res, 'Drive 接続の解除に失敗しました');
+    }
+    return res.json() as Promise<{ success: boolean }>;
   },
 };
 

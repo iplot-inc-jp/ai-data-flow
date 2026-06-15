@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../persistence/prisma/prisma.service';
 
@@ -40,6 +41,13 @@ export interface FlowBundleFlow {
   description?: string | null;
   kind?: 'ASIS' | 'TOBE';
   confidence?: 'HYPOTHESIS' | 'CONFIRMED';
+  /**
+   * 所属サブ領域（SubProject）の名前参照。SubProject は name の @@unique を持たない
+   * ため get で名前を返し、create では「名前一致の既存」へ解決するのみ（無ければ未設定）。
+   */
+  subProjectName?: string | null;
+  /** 所属フォルダ（FlowFolder）の実 DB id。get→PUT/POST で原値を保持。 */
+  folderId?: string | null;
   /** スイムレーン レーン高さの手動オーバーライド。{ [roleName]: height } で名前参照。 */
   laneHeights?: Record<string, number>;
 }
@@ -232,6 +240,7 @@ export class EntityJsonService {
     const flow = await this.prisma.businessFlow.findUnique({
       where: { id: flowId },
       include: {
+        subProject: { select: { name: true } },
         definition: true,
         annotations: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] },
         nodes: {
@@ -336,6 +345,8 @@ export class EntityJsonService {
         description: flow.description,
         kind: flow.kind,
         confidence: flow.confidence,
+        subProjectName: flow.subProject?.name ?? null,
+        folderId: flow.folderId ?? null,
         laneHeights: this.laneHeightsToNames(
           (flow.laneHeights ?? {}) as Record<string, number>,
           flow.nodes,
@@ -363,6 +374,17 @@ export class EntityJsonService {
     const newFlowId = randomUUID();
     await this.prisma.$transaction(
       async (tx) => {
+        // 所属サブ領域/フォルダの round-trip 復元（名前 or id で解決。無ければ未設定）。
+        const subProjectId = await this.resolveSubProjectIdByName(
+          tx,
+          projectId,
+          bundle.flow?.subProjectName ?? null,
+        );
+        const folderId = await this.resolveFolderId(
+          tx,
+          projectId,
+          bundle.flow?.folderId ?? null,
+        );
         await tx.businessFlow.create({
           data: {
             id: newFlowId,
@@ -371,13 +393,15 @@ export class EntityJsonService {
             description: bundle.flow?.description ?? null,
             kind: bundle.flow?.kind ?? 'ASIS',
             confidence: bundle.flow?.confidence ?? 'HYPOTHESIS',
+            subProjectId,
+            folderId,
             laneHeights: {},
           },
         });
-        await this.rebuildFlowChildren(tx, projectId, newFlowId, bundle);
+        return this.rebuildFlowChildren(tx, projectId, newFlowId, bundle);
       },
       { timeout: 120_000, maxWait: 20_000 },
-    );
+    ).then((warnings) => this.logBundleWarnings('createFlowFromBundle', newFlowId, warnings));
     return { flowId: newFlowId };
   }
 
@@ -394,8 +418,30 @@ export class EntityJsonService {
     if (!flow) throw new Error(`BusinessFlow not found: ${flowId}`);
     const projectId = flow.projectId;
 
-    await this.prisma.$transaction(
+    const warnings = await this.prisma.$transaction(
       async (tx) => {
+        // 所属サブ領域/フォルダの round-trip 更新（明示提供時のみ反映）。
+        const subProjectId =
+          bundle.flow?.subProjectName !== undefined
+            ? {
+                subProjectId: await this.resolveSubProjectIdByName(
+                  tx,
+                  projectId,
+                  bundle.flow.subProjectName ?? null,
+                ),
+              }
+            : {};
+        const folderId =
+          bundle.flow?.folderId !== undefined
+            ? {
+                folderId: await this.resolveFolderId(
+                  tx,
+                  projectId,
+                  bundle.flow.folderId ?? null,
+                ),
+              }
+            : {};
+
         // flow メタ更新（laneHeights は roleName→roleId 解決後に再構築するため後段で）
         await tx.businessFlow.update({
           where: { id: flowId },
@@ -406,6 +452,8 @@ export class EntityJsonService {
               : {}),
             ...(bundle.flow?.kind ? { kind: bundle.flow.kind } : {}),
             ...(bundle.flow?.confidence ? { confidence: bundle.flow.confidence } : {}),
+            ...subProjectId,
+            ...folderId,
           },
         });
 
@@ -418,19 +466,24 @@ export class EntityJsonService {
         await tx.flowAnnotation.deleteMany({ where: { flowId } });
         await tx.flowDefinition.deleteMany({ where: { flowId } });
 
-        await this.rebuildFlowChildren(tx, projectId, flowId, bundle);
+        return this.rebuildFlowChildren(tx, projectId, flowId, bundle);
       },
       { timeout: 120_000, maxWait: 20_000 },
     );
+    this.logBundleWarnings('replaceFlowFromBundle', flowId, warnings);
   }
 
-  /** flow の子要素を localId 参照で作り直す共通処理（create / replace 双方で使用）。 */
+  /**
+   * flow の子要素を localId 参照で作り直す共通処理（create / replace 双方で使用）。
+   * @returns 取り込み中に発生した警告（childFlowId 衝突による null 化など。取り込み自体は成功）。
+   */
   private async rebuildFlowChildren(
     tx: PrismaTx,
     projectId: string,
     flowId: string,
     bundle: FlowBundle,
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const warnings: string[] = [];
     // ---- nodes（localId→新 uuid, roleName→roleId）----
     const nodeIdMap = new Map<string, string>();
     const roleCache = new Map<string, string>();
@@ -444,6 +497,22 @@ export class EntityJsonService {
         n.roleName ?? null,
         roleCache,
       );
+      // childFlowId はグローバル @unique。create/別フローへの replace では、ソース側の
+      // 旧ノード（別フロー）が同じ childFlowId を保持していると P2002 で全 tx ロールバック
+      // になる。衝突時は childFlowId を null 化して取り込み自体は成功させ、warnings に積む。
+      let childFlowId = n.childFlowId ?? null;
+      if (childFlowId) {
+        const owner = await tx.flowNode.findFirst({
+          where: { childFlowId, NOT: { flowId } },
+          select: { id: true },
+        });
+        if (owner) {
+          warnings.push(
+            `node "${n.label ?? n.localId}": childFlowId ${childFlowId} は別フローのノードが保持済みのため、リンクを外して取り込みました（重複した親→子リンクは作れません）。`,
+          );
+          childFlowId = null;
+        }
+      }
       await tx.flowNode.create({
         data: {
           id: newId,
@@ -457,8 +526,8 @@ export class EntityJsonService {
           order: n.order ?? 0,
           roleId,
           // ドリルダウン子フローの弱 FK を保持（親→子リンクの冪等性のため）。
-          // @unique 制約は同一トランザクション内で旧ノード削除済みのため衝突しない。
-          childFlowId: n.childFlowId ?? null,
+          // 同一フロー内の旧ノードは tx 内で削除済み。他フローの保持は上で null 化済み。
+          childFlowId,
           processingTime: n.processingTime ?? null,
           handledCount: n.handledCount ?? null,
           supplement: n.supplement ?? null,
@@ -568,6 +637,8 @@ export class EntityJsonService {
     }
 
     // ---- laneHeights（roleName→roleId 解決して保存）----
+    // laneHeights が明示提供されている場合は常に上書き保存する（空 {} で全消去できる）。
+    // undefined のとき（キー自体が無い）は触らない。
     const lh = bundle.flow?.laneHeights;
     if (lh && typeof lh === 'object') {
       const resolved: Record<string, number> = {};
@@ -580,13 +651,13 @@ export class EntityJsonService {
         );
         if (roleId && typeof height === 'number') resolved[roleId] = height;
       }
-      if (Object.keys(resolved).length > 0) {
-        await tx.businessFlow.update({
-          where: { id: flowId },
-          data: { laneHeights: resolved },
-        });
-      }
+      await tx.businessFlow.update({
+        where: { id: flowId },
+        data: { laneHeights: resolved },
+      });
     }
+
+    return warnings;
   }
 
   /** laneHeights（roleId→height）を roleName→height に変換（get 用）。 */
@@ -635,6 +706,11 @@ export class EntityJsonService {
     });
 
     // get-or-create（空の図）。title は flow 名があれば流用。
+    // find-then-create は READ COMMITTED 下で原子的でなく、並行リクエストで P2002 を踏む。
+    //  - L2（flowId 指定）: 複合 @@unique([projectId, flowId]) 上の upsert で原子化。
+    //  - L1（flowId=null）: Postgres は NULL を distinct 扱いするため複合 unique が効かない。
+    //    既存 DfdRepositoryImpl.findOrCreateL1Diagram と同じく partial unique index を冪等に
+    //    張り、create が P2002 で落ちたら勝者を読み直す方式に合わせる。
     const diagram =
       existing ??
       (await (async () => {
@@ -646,10 +722,58 @@ export class EntityJsonService {
           });
           title = flow?.name ?? null;
         }
-        const created = await this.prisma.dfdDiagram.create({
-          data: { id: randomUUID(), projectId, flowId: flowId ?? null, title },
-        });
-        return { ...created, nodes: [], flows: [] };
+
+        if (flowId) {
+          const created = await this.prisma.dfdDiagram.upsert({
+            where: { projectId_flowId: { projectId, flowId } },
+            create: { id: randomUUID(), projectId, flowId, title },
+            update: {},
+            include: {
+              nodes: {
+                orderBy: { createdAt: 'asc' },
+                include: { dataObject: { select: { name: true } } },
+              },
+              flows: {
+                orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+                include: { informationType: { select: { name: true } } },
+              },
+            },
+          });
+          return created;
+        }
+
+        // L1: partial unique index を冪等に張り、create を P2002 リトライで単一に絞る。
+        await this.prisma.$executeRawUnsafe(
+          `CREATE UNIQUE INDEX IF NOT EXISTS "dfd_diagrams_project_l1_unique" ` +
+            `ON "dfd_diagrams" ("project_id") WHERE "flow_id" IS NULL`,
+        );
+        try {
+          const created = await this.prisma.dfdDiagram.create({
+            data: { id: randomUUID(), projectId, flowId: null, title },
+          });
+          return { ...created, nodes: [], flows: [] };
+        } catch (e) {
+          if (
+            e instanceof Prisma.PrismaClientKnownRequestError &&
+            e.code === 'P2002'
+          ) {
+            const winner = await this.prisma.dfdDiagram.findFirst({
+              where: { projectId, flowId: null },
+              include: {
+                nodes: {
+                  orderBy: { createdAt: 'asc' },
+                  include: { dataObject: { select: { name: true } } },
+                },
+                flows: {
+                  orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+                  include: { informationType: { select: { name: true } } },
+                },
+              },
+            });
+            if (winner) return winner;
+          }
+          throw e;
+        }
       })());
 
     const dfdNodes = diagram.nodes as Array<{
@@ -1039,20 +1163,16 @@ export class EntityJsonService {
     const key = (name ?? '').trim();
     if (!key) return null;
     if (cache.has(key)) return cache.get(key)!;
-    const existing = await tx.role.findFirst({
-      where: { projectId, name: key },
+    // find-then-create は READ COMMITTED 下で原子的でなく、並行取り込みで P2002 →
+    // 全 tx ロールバック。複合 @@unique([projectId, name]) 上の upsert で原子化する。
+    const row = await tx.role.upsert({
+      where: { projectId_name: { projectId, name: key } },
+      create: { id: randomUUID(), projectId, name: key },
+      update: {},
       select: { id: true },
     });
-    if (existing) {
-      cache.set(key, existing.id);
-      return existing.id;
-    }
-    const created = await tx.role.create({
-      data: { id: randomUUID(), projectId, name: key },
-      select: { id: true },
-    });
-    cache.set(key, created.id);
-    return created.id;
+    cache.set(key, row.id);
+    return row.id;
   }
 
   private async resolveInformationTypeIdByName(
@@ -1064,6 +1184,9 @@ export class EntityJsonService {
     const key = (name ?? '').trim();
     if (!key) return null;
     if (cache.has(key)) return cache.get(key)!;
+    // InformationType は @@unique([projectId, name]) を持たない（Role/DataObject と異なる）。
+    // 複合 unique が無いため upsert できず、また P2002 競合も起きない（最悪でも重複行＝既存挙動）。
+    // よって find-then-create を維持する（クラッシュは無いので race-fix の対象外）。
     const existing = await tx.informationType.findFirst({
       where: { projectId, name: key },
       select: { id: true },
@@ -1089,31 +1212,76 @@ export class EntityJsonService {
     const key = (name ?? '').trim();
     if (!key) return null;
     if (cache.has(key)) return cache.get(key)!;
-    const existing = await tx.dataObject.findFirst({
-      where: { projectId, name: key },
-      select: { id: true },
-    });
-    if (existing) {
-      cache.set(key, existing.id);
-      return existing.id;
-    }
-    // order は既存最大 +1
+    // order は既存最大 +1（create 分岐でのみ使用。新規採番を維持）。
     const last = await tx.dataObject.findFirst({
       where: { projectId },
       orderBy: { order: 'desc' },
       select: { order: true },
     });
-    const created = await tx.dataObject.create({
-      data: {
+    // 複合 @@unique([projectId, name]) 上の upsert で find-then-create の P2002 競合を排除。
+    const row = await tx.dataObject.upsert({
+      where: { projectId_name: { projectId, name: key } },
+      create: {
         id: randomUUID(),
         projectId,
         name: key,
         order: (last?.order ?? -1) + 1,
       },
+      update: {},
       select: { id: true },
     });
-    cache.set(key, created.id);
-    return created.id;
+    cache.set(key, row.id);
+    return row.id;
+  }
+
+  /**
+   * SubProject を名前で解決（プロジェクトスコープ）。SubProject は name の @@unique を
+   * 持たない（同名サブ領域があり得る）ため get-or-create はせず、名前一致の既存を返すのみ。
+   * 見つからない / 空名のときは null（未設定）として扱う。同名複数時は最初の 1 件。
+   */
+  private async resolveSubProjectIdByName(
+    tx: PrismaTx,
+    projectId: string,
+    name: string | null,
+  ): Promise<string | null> {
+    const key = (name ?? '').trim();
+    if (!key) return null;
+    const existing = await tx.subProject.findFirst({
+      where: { projectId, name: key },
+      orderBy: { order: 'asc' },
+      select: { id: true },
+    });
+    return existing?.id ?? null;
+  }
+
+  /**
+   * FlowFolder を実 DB id で解決（round-trip 保持）。フォルダは名前一意性が無く実 id を
+   * そのまま往復させる。プロジェクト不一致 / 存在しない id は null（未設定）に倒す。
+   */
+  private async resolveFolderId(
+    tx: PrismaTx,
+    projectId: string,
+    folderId: string | null,
+  ): Promise<string | null> {
+    const id = (folderId ?? '').trim();
+    if (!id) return null;
+    const existing = await tx.flowFolder.findFirst({
+      where: { id, projectId },
+      select: { id: true },
+    });
+    return existing?.id ?? null;
+  }
+
+  /** 取り込み中の警告をログに残す（取り込み自体は成功させる方針）。 */
+  private logBundleWarnings(
+    op: string,
+    id: string,
+    warnings: string[],
+  ): void {
+    if (warnings && warnings.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(`[${op}] ${id}: ${warnings.length} warning(s)`, warnings);
+    }
   }
 
   // =========================================================================
@@ -1160,9 +1328,20 @@ export class EntityJsonService {
             description: nullableString,
             kind: { type: 'string', enum: ['ASIS', 'TOBE'] },
             confidence: { type: 'string', enum: ['HYPOTHESIS', 'CONFIRMED'] },
+            subProjectName: {
+              ...nullableString,
+              description:
+                'Owning sub-project (領域) by name. Resolved to an existing same-named sub-project (not auto-created; null/absent = unset). Round-trip the value from GET to preserve grouping.',
+            },
+            folderId: {
+              ...nullableString,
+              description:
+                'Owning folder DB id. Round-trip the value from GET unchanged to preserve grouping; ids not belonging to this project are reset to null.',
+            },
             laneHeights: {
               type: 'object',
-              description: 'Map of roleName -> lane height (number).',
+              description:
+                'Map of roleName -> lane height (number). When present (even as {}), it OVERWRITES stored lane heights; pass {} to clear all. Omit the key to leave them untouched.',
               additionalProperties: { type: 'number' },
             },
           },
@@ -1200,7 +1379,7 @@ export class EntityJsonService {
               childFlowId: {
                 ...nullableString,
                 description:
-                  'Drill-down child BusinessFlow id (unique weak FK). Keep the value from GET unchanged to preserve the parent->child link; do not invent or reassign.',
+                  'Drill-down child BusinessFlow id (GLOBALLY unique weak FK). Keep the value from GET unchanged to preserve the parent->child link; do not invent or reassign. On write into a DIFFERENT flow, if another flow node already owns this childFlowId the link is dropped (set to null) and a warning is logged so the import still succeeds.',
               },
               positionX: { type: 'number' },
               positionY: { type: 'number' },

@@ -36,6 +36,7 @@ import * as pm from './tools/pm.mjs';
 import * as rbac from './tools/rbac.mjs';
 import * as jobs from './tools/jobs.mjs';
 import * as entityJson from './tools/entity_json.mjs';
+import * as knowledge from './tools/knowledge.mjs';
 
 const API_URL = (process.env.AIDATAFLOW_API_URL || 'http://localhost:5021').replace(/\/$/, '');
 const API_KEY = process.env.AIDATAFLOW_API_KEY;
@@ -68,6 +69,7 @@ const modules = [
   rbac,
   jobs,
   entityJson,
+  knowledge,
 ];
 
 for (const mod of modules) {

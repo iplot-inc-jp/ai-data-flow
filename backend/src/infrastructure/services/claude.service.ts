@@ -126,6 +126,12 @@ export interface GeneratedKpiItem {
 export interface KnowledgeExtraction {
   /** 3行以内の要約 */
   summary: string;
+  /**
+   * 文書本文の全文プレーンテキスト（PDF/画像など、前処理でテキスト層を取れない
+   * 入力で AI が読み取った本文）。検索/RAG の土台として KnowledgeDocument.contentText に保持する。
+   * テキスト系入力（前処理で全文を持っている）では空でよい。
+   */
+  fullText?: string;
   /** 主題タグ（簡潔な名詞句） */
   tags: string[];
   /** 固有物（実体） */
@@ -502,6 +508,13 @@ ${mermaid}`,
       // 過大なテキストはトークン保護のため上限でクリップ
       content.push({ type: 'text', text: input.text.slice(0, 200_000) });
     }
+    // PDF/画像は前処理でテキスト層が取れないため、本文全文（fullText）も AI に書き起こさせる
+    // （KnowledgeDocument.contentText の土台。テキスト系入力では呼び出し側が抽出済みなので不要）。
+    const needsFullText = !!input.pdfBase64 || (input.images?.length ?? 0) > 0;
+    const fullTextField = needsFullText
+      ? `,
+  "fullText": "文書本文の全文をできるだけ忠実にプレーンテキストで書き起こす（レイアウトは無視可）"`
+      : '';
     content.push({
       type: 'text',
       text: `上記は「${input.filename}」の内容です。日本語で、次のJSONのみを返してください（説明文・コードフェンス以外の文章は不要）：
@@ -513,14 +526,18 @@ ${mermaid}`,
   ],
   "relations": [
     { "from": "ラベル", "to": "ラベル", "label": "関係（例: 承認する/依存）" }
-  ]
+  ]${fullTextField}
 }`,
     });
 
     const systemPrompt = `あなたは文書からナレッジグラフ要素を抽出する専門家です。出力は指定されたJSONのみ。
 - tags / entities の label は簡潔な名詞句にする。
 - relations の from / to は必ず tags か entities に現れる label を使う。
-- 該当が無い配列は空配列で返す。
+- 該当が無い配列は空配列で返す。${
+      needsFullText
+        ? '\n- fullText には文書本文をできるだけ忠実に全文書き起こす（要約しない）。'
+        : ''
+    }
 - 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。`;
 
     const response = await client.messages.create({
@@ -545,7 +562,9 @@ ${mermaid}`,
           (e: unknown): e is { label: string; kind: string; description?: string } =>
             !!e &&
             typeof e === 'object' &&
-            typeof (e as { label?: unknown }).label === 'string',
+            typeof (e as { label?: unknown }).label === 'string' &&
+            // relations と対称に、kind も string であることを検証する（kind 欠落の混入防止）。
+            typeof (e as { kind?: unknown }).kind === 'string',
         )
       : [];
     const relations = Array.isArray(parsed?.relations)
@@ -559,6 +578,10 @@ ${mermaid}`,
       : [];
     return {
       summary: typeof parsed?.summary === 'string' ? parsed.summary : '',
+      fullText:
+        typeof parsed?.fullText === 'string' && parsed.fullText.trim()
+          ? parsed.fullText
+          : undefined,
       tags,
       entities,
       relations,

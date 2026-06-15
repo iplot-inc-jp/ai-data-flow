@@ -2013,7 +2013,7 @@ function IssueTreeMindMap() {
             size="sm"
             canEdit={canEdit}
             withModeChoice={false}
-            importHint="選択した JSON でこのイシューツリーのノードを丸ごと置き換えます。"
+            importHint="選択した JSON でこのイシューツリーのノードを丸ごと置き換えます。既存ノードは全削除され、localId 参照で作り直されます（depth は親子関係から自動再計算）。注意: 他ツリーの確定ノードを指す根本原因リンク（rootCauseLocalId に他ツリーの DB id を入れたもの）は原値のまま保持されますが、このツリー内 localId は新しい id に振り直されます。get→PUT のラウンドトリップ以外でノードを差し替えると、このツリーを参照していた外部リンクが切れることがあります。"
             getExport={() => entityJsonIo.exportIssueTree(treeId)}
             onImport={(parsed) =>
               entityJsonIo.importIssueTree(treeId, parsed as EntityBundle)

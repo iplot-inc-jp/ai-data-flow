@@ -1,12 +1,14 @@
 'use client'
 
 // 新規取り込みバッチ ダイアログ。
-//   ① ソース選択（アップロード（ZIP可・複数） / 既存添付から選択）
+//   ① ソース選択（アップロード（ZIP可・複数） / 既存添付から選択 / Google Drive）
 //   ② ファイル一覧プレビュー
 //   ③ 抽出オプション（プロジェクト設定を初期値に AI抽出/OCR ON/OFF・モデルをバッチ上書き）
 //   ④ 開始（POST ingestion-batches）
 //
-// Drive ソースは Phase 3。本ダイアログは UPLOAD / ATTACHMENT のみ扱う。
+// Drive タブ（Phase 3）: 未接続なら getAuthUrl→新規ウィンドウで認証、接続済なら
+// listFiles でファイル一覧→選択。Drive 機能が未設定/未許可（401/未設定）なら
+// 「未設定」表示にして、他タブ（アップロード/既存添付）は使えるままにする。
 
 import { useState, useEffect, useCallback } from 'react'
 import {
@@ -34,20 +36,39 @@ import {
   X,
   FileArchive,
   FileText,
+  Folder,
   Paperclip,
+  RefreshCw,
+  ChevronRight,
+  HardDrive,
   Upload as UploadIcon,
 } from 'lucide-react'
 import {
   ingestionApi,
   listSelectableAttachments,
+  driveApi,
   formatBytes,
   isArchiveFile,
+  DriveNotConfiguredError,
   type IngestionBatchSource,
   type IngestionBatchOptions,
   type IngestionUploadResult,
   type SelectableAttachment,
   type ProjectKnowledgeSettings,
+  type DriveFile,
 } from '@/lib/knowledge'
+
+/** Drive のフォルダ（mimeType でも isFolder でも判定）。 */
+const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
+function isDriveFolder(f: DriveFile): boolean {
+  return f.isFolder === true || f.mimeType === DRIVE_FOLDER_MIME
+}
+
+/** パンくず 1 要素（root は id=null）。 */
+interface DriveCrumb {
+  id: string | null
+  name: string
+}
 
 /** アップロード済みで取り込み対象に確定したファイル。 */
 type StagedUpload = IngestionUploadResult
@@ -81,6 +102,21 @@ export function NewBatchDialog({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Google Drive タブ
+  const [driveEnabled, setDriveEnabled] = useState(true) // 401/未設定なら false
+  const [driveConnected, setDriveConnected] = useState(false)
+  const [driveEmail, setDriveEmail] = useState<string | null>(null)
+  const [driveFiles, setDriveFiles] = useState<DriveFile[]>([])
+  const [driveLoading, setDriveLoading] = useState(false)
+  const [driveAuthing, setDriveAuthing] = useState(false)
+  const [driveCrumbs, setDriveCrumbs] = useState<DriveCrumb[]>([
+    { id: null, name: 'マイドライブ' },
+  ])
+  // 選択した Drive ファイル（id→メタ）。フォルダ間移動でも保持するため Map で持つ。
+  const [selectedDrive, setSelectedDrive] = useState<Map<string, DriveFile>>(
+    new Map(),
+  )
+
   // オプション（プロジェクト設定を初期値に、バッチ単位で上書き）
   const [aiExtractionEnabled, setAiExtractionEnabled] = useState(true)
   const [ocrEnabled, setOcrEnabled] = useState(true)
@@ -96,6 +132,13 @@ export function NewBatchDialog({
     setAiExtractionEnabled(settings?.aiExtractionEnabled ?? true)
     setOcrEnabled(settings?.ocrEnabled ?? true)
     setModel(settings?.defaultModel ?? '')
+    // Drive
+    setDriveEnabled(true)
+    setDriveConnected(false)
+    setDriveEmail(null)
+    setDriveFiles([])
+    setDriveCrumbs([{ id: null, name: 'マイドライブ' }])
+    setSelectedDrive(new Map())
   }, [open, settings])
 
   const loadAttachments = useCallback(async () => {
@@ -113,6 +156,125 @@ export function NewBatchDialog({
   useEffect(() => {
     if (open) loadAttachments()
   }, [open, loadAttachments])
+
+  // Drive: 指定フォルダ（既定 root）の一覧を取得。401/未設定なら driveEnabled=false。
+  const loadDriveFiles = useCallback(
+    async (folderId: string | null) => {
+      setDriveLoading(true)
+      setError(null)
+      try {
+        const res = await driveApi.listFiles(projectId, folderId ?? undefined)
+        setDriveEnabled(true)
+        setDriveConnected(res.connected)
+        setDriveEmail(res.email ?? null)
+        setDriveFiles(res.connected ? res.files : [])
+      } catch (e) {
+        if (e instanceof DriveNotConfiguredError) {
+          // 機能未設定: タブは「未設定」表示。他タブは使えるまま。
+          setDriveEnabled(false)
+          setDriveConnected(false)
+          setDriveFiles([])
+        } else {
+          setError(e instanceof Error ? e.message : 'Drive の取得に失敗しました')
+        }
+      } finally {
+        setDriveLoading(false)
+      }
+    },
+    [projectId],
+  )
+
+  // 開いた時に Drive 接続状態を一度だけ確認（root を引いて connected を判定）。
+  useEffect(() => {
+    if (open) loadDriveFiles(null)
+  }, [open, loadDriveFiles])
+
+  // 未接続→認証 URL を新規ウィンドウで開く。閉じたら一覧を再取得して接続反映。
+  const connectDrive = useCallback(async () => {
+    setDriveAuthing(true)
+    setError(null)
+    try {
+      const { authUrl } = await driveApi.getAuthUrl(projectId)
+      const popup = window.open(
+        authUrl,
+        'drive-oauth',
+        'width=520,height=640,menubar=no,toolbar=no',
+      )
+      if (!popup) {
+        setError(
+          'ポップアップがブロックされました。ブラウザの設定で許可してください。',
+        )
+        setDriveAuthing(false)
+        return
+      }
+      // ポップアップが閉じたら接続状態を再取得（callback は別ウィンドウで完結）。
+      const timer = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(timer)
+          setDriveAuthing(false)
+          // root から取り直して接続を反映
+          setDriveCrumbs([{ id: null, name: 'マイドライブ' }])
+          loadDriveFiles(null)
+        }
+      }, 800)
+    } catch (e) {
+      if (e instanceof DriveNotConfiguredError) {
+        setDriveEnabled(false)
+      } else {
+        setError(e instanceof Error ? e.message : 'Drive 認証に失敗しました')
+      }
+      setDriveAuthing(false)
+    }
+  }, [projectId, loadDriveFiles])
+
+  // フォルダを開く（パンくず追加して一覧取得）。
+  const openDriveFolder = useCallback(
+    (folder: DriveFile) => {
+      setDriveCrumbs((prev) => [...prev, { id: folder.id, name: folder.name }])
+      loadDriveFiles(folder.id)
+    },
+    [loadDriveFiles],
+  )
+
+  // パンくずクリックでそこまで戻る。
+  const goToCrumb = useCallback(
+    (index: number) => {
+      setDriveCrumbs((prev) => {
+        const next = prev.slice(0, index + 1)
+        const target = next[next.length - 1]
+        loadDriveFiles(target.id)
+        return next
+      })
+    },
+    [loadDriveFiles],
+  )
+
+  // Drive ファイル選択トグル（フォルダは選択不可）。
+  const toggleDriveFile = useCallback((f: DriveFile) => {
+    setSelectedDrive((prev) => {
+      const next = new Map(prev)
+      if (next.has(f.id)) next.delete(f.id)
+      else next.set(f.id, f)
+      return next
+    })
+  }, [])
+
+  const disconnectDrive = useCallback(async () => {
+    setError(null)
+    try {
+      await driveApi.deleteConnection(projectId)
+    } catch (e) {
+      if (!(e instanceof DriveNotConfiguredError)) {
+        setError(e instanceof Error ? e.message : 'Drive 接続の解除に失敗しました')
+      }
+    } finally {
+      setDriveConnected(false)
+      setDriveEmail(null)
+      setDriveFiles([])
+      setDriveCrumbs([{ id: null, name: 'マイドライブ' }])
+      setSelectedDrive(new Map())
+    }
+  }, [projectId])
 
   const handleFiles = useCallback(
     async (files: File[]) => {
@@ -144,7 +306,7 @@ export function NewBatchDialog({
     })
   }
 
-  const totalSelected = uploads.length + selectedAttIds.size
+  const totalSelected = uploads.length + selectedAttIds.size + selectedDrive.size
 
   const handleSubmit = async () => {
     if (totalSelected === 0) {
@@ -174,6 +336,16 @@ export function NewBatchDialog({
           filename: att.displayName || att.filename,
           ...(att.mimeType ? { mimeType: att.mimeType } : {}),
           ...(att.size != null ? { size: att.size } : {}),
+        })
+      }
+      // Drive 選択分（既存の files 配列に統合）。sourceRef = driveFileId。
+      for (const f of Array.from(selectedDrive.values())) {
+        files.push({
+          sourceType: 'DRIVE',
+          sourceRef: f.id,
+          filename: f.name,
+          ...(f.mimeType ? { mimeType: f.mimeType } : {}),
+          ...(f.size != null ? { size: f.size } : {}),
         })
       }
       const options: IngestionBatchOptions = {
@@ -228,6 +400,10 @@ export function NewBatchDialog({
               <TabsTrigger value="attachment">
                 <Paperclip className="h-3.5 w-3.5 mr-1.5" />
                 既存添付から選択
+              </TabsTrigger>
+              <TabsTrigger value="drive">
+                <HardDrive className="h-3.5 w-3.5 mr-1.5" />
+                Google Drive
               </TabsTrigger>
             </TabsList>
 
@@ -318,6 +494,153 @@ export function NewBatchDialog({
                     )
                   })}
                 </ul>
+              )}
+            </TabsContent>
+
+            {/* Google Drive */}
+            <TabsContent value="drive" className="space-y-2 pt-2">
+              {!driveEnabled ? (
+                <div className="text-sm text-muted-foreground py-6 text-center space-y-1">
+                  <HardDrive className="h-6 w-6 mx-auto opacity-50" />
+                  <div>Google Drive 連携は未設定です。</div>
+                  <div className="text-xs">
+                    アップロード／既存添付タブはそのまま利用できます。
+                  </div>
+                </div>
+              ) : driveLoading && !driveConnected ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  読み込み中…
+                </div>
+              ) : !driveConnected ? (
+                <div className="text-sm text-muted-foreground py-6 text-center space-y-3">
+                  <div>Google Drive と接続するとファイルを取り込めます。</div>
+                  <Button
+                    type="button"
+                    onClick={connectDrive}
+                    disabled={driveAuthing}
+                  >
+                    {driveAuthing ? (
+                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    ) : (
+                      <HardDrive className="h-4 w-4 mr-1.5" />
+                    )}
+                    Google Drive に接続
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {/* 接続情報＋操作 */}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="truncate flex-1">
+                      接続中{driveEmail ? `: ${driveEmail}` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        loadDriveFiles(
+                          driveCrumbs[driveCrumbs.length - 1]?.id ?? null,
+                        )
+                      }
+                      className="inline-flex items-center gap-1 hover:text-foreground"
+                    >
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${driveLoading ? 'animate-spin' : ''}`}
+                      />
+                      再読込
+                    </button>
+                    <button
+                      type="button"
+                      onClick={disconnectDrive}
+                      className="hover:text-destructive"
+                    >
+                      接続解除
+                    </button>
+                  </div>
+
+                  {/* パンくず */}
+                  <div className="flex items-center flex-wrap gap-0.5 text-xs">
+                    {driveCrumbs.map((c, i) => (
+                      <span key={`${c.id ?? 'root'}-${i}`} className="flex items-center">
+                        {i > 0 && (
+                          <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => goToCrumb(i)}
+                          disabled={i === driveCrumbs.length - 1}
+                          className={
+                            i === driveCrumbs.length - 1
+                              ? 'font-medium text-foreground'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }
+                        >
+                          {c.name}
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* ファイル一覧 */}
+                  {driveLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      読み込み中…
+                    </div>
+                  ) : driveFiles.length === 0 ? (
+                    <div className="text-sm text-muted-foreground py-6 text-center">
+                      このフォルダにファイルはありません。
+                    </div>
+                  ) : (
+                    <ul className="space-y-1 max-h-56 overflow-y-auto">
+                      {driveFiles.map((f) => {
+                        if (isDriveFolder(f)) {
+                          return (
+                            <li key={f.id}>
+                              <button
+                                type="button"
+                                onClick={() => openDriveFolder(f)}
+                                className="w-full flex items-center gap-2 text-sm rounded-md border border-border px-2 py-1.5 hover:bg-secondary text-left"
+                              >
+                                <Folder className="h-4 w-4 flex-shrink-0 text-sky-500" />
+                                <span className="truncate flex-1">{f.name}</span>
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              </button>
+                            </li>
+                          )
+                        }
+                        const checked = selectedDrive.has(f.id)
+                        return (
+                          <li key={f.id}>
+                            <label className="flex items-center gap-2 text-sm rounded-md border border-border px-2 py-1.5 cursor-pointer hover:bg-secondary">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleDriveFile(f)}
+                                className="h-4 w-4"
+                              />
+                              {isArchiveFile(f.name, f.mimeType ?? undefined) ? (
+                                <FileArchive className="h-4 w-4 flex-shrink-0 text-amber-500" />
+                              ) : (
+                                <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                              )}
+                              <span className="truncate flex-1">{f.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {formatBytes(f.size)}
+                              </span>
+                            </label>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+
+                  {selectedDrive.size > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Drive 選択: {selectedDrive.size} 件
+                    </div>
+                  )}
+                </div>
               )}
             </TabsContent>
           </Tabs>

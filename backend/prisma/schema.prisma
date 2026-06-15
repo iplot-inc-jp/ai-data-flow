@@ -278,6 +278,7 @@ model Project {
   knowledgeDocuments      KnowledgeDocument[]
   knowledgeNodes          KnowledgeNode[]
   knowledgeRelations      KnowledgeRelation[]
+  driveConnections        DriveConnection[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -2662,4 +2663,22 @@ model ProjectKnowledgeSettings {
   maxFilesPerBatch    Int      @default(200)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+}
+
+// Google Drive 接続（バッチ取り込みの DRIVE ソース）。
+// refresh token は AES-256-GCM（既存 CryptoService / TOKEN_ENC_KEY）で暗号化保存。レスポンスでは返さない。
+model DriveConnection {
+  id              String   @id @default(cuid())
+  projectId       String
+  email           String?
+  refreshTokenEnc String   @db.Text // AES-256-GCM 暗号化 refresh token
+  scope           String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId])
+  @@index([projectId])
 }

@@ -169,6 +169,25 @@ async function main() {
   const g2 = await api('GET', `/projects/${pid}/knowledge/graph`, undefined, token);
   ok(g2.documents.length === docCountBefore, `retry 後も文書数不変（冪等）: ${docCountBefore} → ${g2.documents.length}`);
 
+  // 8b) Phase3 Drive: ローカルは Google creds 無 → 503 degrade（フロントは未設定表示にフォールバック）
+  const driveRes = await fetch(`${API}/projects/${pid}/drive/files`, { headers: { Authorization: `Bearer ${token}` } });
+  ok(driveRes.status === 503, `Drive 未設定で 503 degrade: ${driveRes.status}`);
+
+  // 8c) Phase4 ProjectBundle export に KG セクション（entities.knowledge）が含まれる（round-trip 基盤）
+  const bundle = await api('GET', `/projects/${pid}/export`, undefined, token);
+  const ents = bundle.entities || bundle;
+  const kg = ents.knowledge;
+  ok(Array.isArray(kg) && kg.length > 0, `bundle export に knowledge セクション含む（${Array.isArray(kg) ? kg.length + '件' : '無し'}）`);
+
+  // 8d) セキュリティ: client 由来の不正 blobUrl（SSRF/LFI）はバッチ作成で拒否される
+  let blockedSsrf = false;
+  try {
+    await api('POST', `/projects/${pid}/ingestion-batches`, { name: 'evil', files: [{ sourceType: 'UPLOAD', filename: 'p', blobUrl: 'file:///etc/passwd' }] }, token);
+  } catch (e) {
+    blockedSsrf = /400|不正|保存先/.test(e.message);
+  }
+  ok(blockedSsrf, '不正 blobUrl（file:///etc/passwd）をバッチ作成で拒否（SSRF/LFI 防御）');
+
   // 9) （任意）AI ON で 1ファイル → タグ/実体が付く
   if (process.env.KG_AI === '1') {
     console.log('--- AI ON テスト（Claude 実呼び出し・少額課金）---');

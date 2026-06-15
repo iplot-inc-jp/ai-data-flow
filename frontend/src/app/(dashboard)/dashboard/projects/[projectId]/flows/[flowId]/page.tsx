@@ -2379,7 +2379,7 @@ export default function ProjectFlowDetailPage() {
             size="sm"
             canEdit={canEdit}
             withModeChoice={false}
-            importHint="選択した JSON でこの業務フローの中身（ノード・矢印・業務定義・注釈・情報リンク）を丸ごと置き換えます。"
+            importHint="選択した JSON でこの業務フローの中身（ノード・矢印・業務定義・注釈・情報リンク）を丸ごと置き換えます。注意: このバンドルに含まれない、矢印やノードに紐づくデータは巻き添えで消えます — 具体的にはインターフェース定義（IF定義）とその列、矢印⇔API連携リンク、クロスフロー入出力リンク（FlowNodeLink）。また CRUD マッピング・GAP の asis/tobe ノード参照・第2レベルDFDの FUNCTION ノード参照は NULL 化されます。childFlowId（業務ブロックの子フローへのリンク）は保持されますが、その子フローが別フローのノードに既に紐づいている場合はリンクを外して取り込みます。小さな編集のつもりで、これらの紐づけがあるフローへの get→PUT は避け、ノード/矢印単位のツールを使ってください。"
             getExport={() => entityJsonIo.exportFlow(flowData.id)}
             onImport={(parsed) =>
               entityJsonIo.importFlow(flowData.id, parsed as EntityBundle)

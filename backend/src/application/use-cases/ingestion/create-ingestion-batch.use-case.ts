@@ -13,6 +13,7 @@ import {
 } from '../../../domain';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { JobService } from '../../../infrastructure/services/job.service';
+import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
 import {
   IngestionBatchDetailOutput,
   toIngestionBatchOutput,
@@ -73,7 +74,67 @@ export class CreateIngestionBatchUseCase {
     private readonly settingsRepository: IProjectKnowledgeSettingsRepository,
     private readonly projectAccess: ProjectAccessService,
     private readonly jobService: JobService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * client 由来の files[] を検証する（SSRF/LFI・クロスプロジェクト流出の入口防御）。
+   *   - UPLOAD: blobUrl は `ingestion/<projectId>/` を含む形のみ許可
+   *     （`file:///etc/passwd` や内部 URL を弾く。実体の read 側でも二重に防御）。
+   *   - ATTACHMENT: sourceRef(attachmentId) が当該 projectId に属すかを検証
+   *     （他プロジェクトの添付を sourceRef に詰める横取りを弾く）。
+   */
+  private async validateFileSources(
+    projectId: string,
+    files: CreateIngestionFileSpec[],
+  ): Promise<void> {
+    // UPLOAD: blobUrl が当該プロジェクトの取り込み領域を指すことを要求する。
+    //   - Vercel Blob / segment 維持: `ingestion/<projectId>/` を含む
+    //   - ディスク fallback（BlobStorage が区切りを `_` に潰す）: `ingestion_<projectId>_` を含む
+    // どちらでもなければ `file:///etc/passwd` や内部 URL・他プロジェクト領域とみなして拒否。
+    const segmentForm = `ingestion/${projectId}/`;
+    const flattenedForm = `ingestion_${projectId}_`;
+    for (const spec of files) {
+      if (spec.sourceType === 'UPLOAD') {
+        const url = spec.blobUrl ?? '';
+        if (!url || (!url.includes(segmentForm) && !url.includes(flattenedForm))) {
+          throw new ValidationError(
+            `アップロードファイルの保存先が不正です（${spec.filename}）`,
+          );
+        }
+      }
+    }
+
+    // ATTACHMENT: sourceRef がこのプロジェクトの添付か検証（横取り防止）。
+    const attachmentIds = Array.from(
+      new Set(
+        files
+          .filter((f) => f.sourceType === 'ATTACHMENT')
+          .map((f) => f.sourceRef)
+          .filter((ref): ref is string => !!ref),
+      ),
+    );
+    // sourceRef 未設定の ATTACHMENT は不正。
+    const hasAttachmentWithoutRef = files.some(
+      (f) => f.sourceType === 'ATTACHMENT' && !f.sourceRef,
+    );
+    if (hasAttachmentWithoutRef) {
+      throw new ValidationError('添付の参照（attachmentId）が指定されていません');
+    }
+    if (attachmentIds.length > 0) {
+      const found = await this.prisma.attachment.findMany({
+        where: { id: { in: attachmentIds }, projectId },
+        select: { id: true },
+      });
+      const foundIds = new Set(found.map((a) => a.id));
+      const missing = attachmentIds.filter((id) => !foundIds.has(id));
+      if (missing.length > 0) {
+        throw new ValidationError(
+          `指定された添付がこのプロジェクトに存在しません（${missing.length}件）`,
+        );
+      }
+    }
+  }
 
   async execute(
     input: CreateIngestionBatchInput,
@@ -100,6 +161,9 @@ export class CreateIngestionBatchUseCase {
         `1バッチあたりのファイル数の上限（${maxFiles}件）を超えています（指定: ${input.files.length}件）`,
       );
     }
+
+    // client 由来ソースの検証（SSRF/LFI・クロスプロジェクト流出の入口防御）。
+    await this.validateFileSources(input.projectId, input.files);
 
     // バッチ名: 未指定なら「取り込み <件数>件」を補完。
     const name =

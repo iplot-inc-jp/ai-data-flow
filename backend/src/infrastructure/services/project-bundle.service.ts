@@ -700,6 +700,53 @@ const SECTIONS: SectionSpec[] = [
       },
     ],
   },
+  {
+    // ナレッジグラフ（バッチ取り込みで自動生成された KG）。
+    // IngestionBatch / IngestionFile / DriveConnection は実行ログ・秘匿情報のため export 対象外。
+    // よって KnowledgeDocument.ingestionFileId は optional FK として宣言し、
+    // 取り込み先に対応 IngestionFile が無い前提で常に null へ落とす（FK 違反を防ぐ）。
+    // セクション内依存順: document / node（projectId のみ）→ mention（document+node）→ relation（node×2＋任意 document）。
+    key: 'knowledge',
+    models: [
+      {
+        model: 'knowledgeDocument',
+        includeProjectId: true,
+        // ingestionFileId は IngestionFile を指すが、それは export 対象外。
+        // optional FK として idMap 不在時に null へ落とす（@unique 衝突も回避）。
+        fks: [{ field: 'ingestionFileId', required: false }],
+      },
+      {
+        model: 'knowledgeNode',
+        includeProjectId: true,
+        // [projectId, type, normalizedLabel] @unique。merge 再取り込みで名寄せ流用。
+        uniqueBy: ['type', 'normalizedLabel'],
+      },
+      {
+        model: 'knowledgeMention',
+        includeProjectId: true,
+        fks: [
+          { field: 'documentId', required: true },
+          // nodeId は KnowledgeNode を指す（FK_TARGET_OVERRIDE で補正）。
+          { field: 'nodeId', required: true },
+        ],
+        // [documentId, nodeId] @unique。両 FK は idMap 解決後の新 id で照合する。
+        uniqueBy: ['documentId', 'nodeId'],
+      },
+      {
+        model: 'knowledgeRelation',
+        includeProjectId: true,
+        fks: [
+          { field: 'fromNodeId', required: true },
+          { field: 'toNodeId', required: true },
+          // sourceDocumentId は provenance（任意）。解決不可なら null（DB も SetNull）。
+          { field: 'sourceDocumentId', required: false },
+        ],
+        // [projectId, fromNodeId, toNodeId, label, sourceDocumentId] @unique。
+        // label/sourceDocumentId は NULL を含みうるため get-or-create には載せず、
+        // 衝突は create の catch（skip 警告）に倒す。
+      },
+    ],
+  },
 ];
 
 /**
@@ -782,6 +829,13 @@ const FK_TARGET_MODEL: Record<string, string> = {
   sourceObjectId: 'dataObject',
   targetObjectId: 'dataObject',
   taskId: 'task',
+  // ナレッジグラフ（KG セクション）
+  documentId: 'knowledgeDocument',
+  fromNodeId: 'knowledgeNode',
+  toNodeId: 'knowledgeNode',
+  sourceDocumentId: 'knowledgeDocument',
+  // KnowledgeMention.nodeId は knowledgeNode を指す（flowNode を指す既定の nodeId とは別物）。
+  // 既定の nodeId='flowNode' を上書きするため FK_TARGET_OVERRIDE 側で補正する。
 };
 
 /**
@@ -790,6 +844,8 @@ const FK_TARGET_MODEL: Record<string, string> = {
  */
 const FK_TARGET_OVERRIDE: Record<string, Record<string, string>> = {
   dfdFlow: { sourceNodeId: 'dfdNode', targetNodeId: 'dfdNode' },
+  // KnowledgeMention.nodeId は KnowledgeNode を指す（既定の nodeId='flowNode' を上書き）。
+  knowledgeMention: { nodeId: 'knowledgeNode' },
 };
 
 /**

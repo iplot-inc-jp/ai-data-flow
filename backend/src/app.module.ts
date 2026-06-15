@@ -443,6 +443,9 @@ import {
   KnowledgeDocumentController,
 } from './presentation/controllers/knowledge.controller';
 import { KnowledgeSettingsController } from './presentation/controllers/knowledge-settings.controller';
+// ナレッジグラフ Google Drive ソースアダプタ（Phase 3）
+import { DriveService } from './infrastructure/knowledge/drive.service';
+import { DriveController } from './presentation/controllers/drive.controller';
 
 @Module({
   imports: [
@@ -565,6 +568,8 @@ import { KnowledgeSettingsController } from './presentation/controllers/knowledg
     KnowledgeNodeController,
     KnowledgeDocumentController,
     KnowledgeSettingsController,
+    // Google Drive ソースアダプタ（Phase 3）
+    DriveController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -970,6 +975,8 @@ import { KnowledgeSettingsController } from './presentation/controllers/knowledg
     BlobStorageService,
     FileExtractionService,
     KnowledgeIngestionService,
+    // Google Drive ソースアダプタ（Phase 3）
+    DriveService,
 
     // ========== Global Guards ==========
     {
