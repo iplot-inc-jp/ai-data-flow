@@ -36,7 +36,7 @@ import { ObjectDetailPanel } from './_components/ObjectDetailPanel';
 import { ObjectListTable } from './_components/ObjectListTable';
 import { RelationListTable } from './_components/RelationListTable';
 import { ObjectScopeLinkPanel } from './_components/ObjectScopeLinkPanel';
-import { DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from './_components/object-map-shared';
+import { CARD_W, CARD_H, DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from './_components/object-map-shared';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
@@ -574,6 +574,56 @@ export default function ObjectMapPage() {
     [refresh, showError],
   );
 
+  // ===== 囲い(SCOPE=領域) への編入＋はみ出し追従リサイズ =====
+  // オブジェクト移動確定時に、領域付き囲みの中心内に入ったら領域へ編入し、
+  // カードが囲みからはみ出したら囲みを拡大して内包する（手動サイズは保持・縮小しない）。
+  // 中心が囲みの外に出たオブジェクトは（その囲みの）追従対象外＝暴走拡大を防ぐ。
+  const applyScopeMembershipOnMove = useCallback(
+    (id: string, x: number, y: number) => {
+      const obj = graph?.objects.find((o) => o.id === id);
+      const cx = x + CARD_W / 2;
+      const cy = y + CARD_H / 2;
+      const scope = annotations.find((a) => {
+        if (a.kind !== 'SCOPE' || !a.subProjectId) return false;
+        const w = a.width ?? 320;
+        const h = a.height ?? 200;
+        return (
+          cx >= a.positionX &&
+          cx <= a.positionX + w &&
+          cy >= a.positionY &&
+          cy <= a.positionY + h
+        );
+      });
+      if (!scope || !scope.subProjectId) return;
+      // ① 領域編入（未所属/別領域なら）
+      if (obj && obj.subProjectId !== scope.subProjectId) {
+        void handleLinkObjectToSubProject(id, scope.subProjectId);
+      }
+      // ② はみ出し拡大（カード矩形を内包するよう成長。縮小はしない）
+      const PAD = 16;
+      const w = scope.width ?? 320;
+      const h = scope.height ?? 200;
+      const minX = Math.min(scope.positionX, x - PAD);
+      const minY = Math.min(scope.positionY, y - PAD);
+      const maxX = Math.max(scope.positionX + w, x + CARD_W + PAD);
+      const maxY = Math.max(scope.positionY + h, y + CARD_H + PAD);
+      if (
+        minX < scope.positionX ||
+        minY < scope.positionY ||
+        maxX > scope.positionX + w ||
+        maxY > scope.positionY + h
+      ) {
+        handleScopeGeometryChanged(scope.id, {
+          positionX: Math.round(minX),
+          positionY: Math.round(minY),
+          width: Math.round(maxX - minX),
+          height: Math.round(maxY - minY),
+        });
+      }
+    },
+    [graph, annotations, handleLinkObjectToSubProject, handleScopeGeometryChanged],
+  );
+
   // ===== テーブル紐づけ =====
   const handleLinkTable = useCallback(
     async (tableId: string, dataObjectId: string | null) => {
@@ -706,7 +756,10 @@ export default function ObjectMapPage() {
                 subProjects={subProjects}
                 selectedObjectId={selectedObjectId}
                 onSelectObject={setSelectedObjectId}
-                onObjectMoved={handleObjectMoved}
+                onObjectMoved={(id, x, y) => {
+                  handleObjectMoved(id, x, y);
+                  applyScopeMembershipOnMove(id, x, y);
+                }}
                 onCreateRelation={(s, t, sh, th) =>
                   handleCreateRelation(s, t, undefined, undefined, sh, th)
                 }
