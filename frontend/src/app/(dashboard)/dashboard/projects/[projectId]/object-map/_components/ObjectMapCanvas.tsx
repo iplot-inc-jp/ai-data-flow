@@ -207,8 +207,18 @@ export interface ObjectMapCanvasProps {
   subProjects: SubProjectMaster[];
   selectedObjectId: string | null;
   onSelectObject: (id: string | null) => void;
+  /** フォーカス要求対象のオブジェクトID（一覧パネルからのジャンプ用） */
+  focusObjectId?: string | null;
+  /** focusObjectId へビューを中央寄せするトリガ（インクリメントで発火） */
+  focusNonce?: number;
   /** ノードドラッグ終了時（親側で楽観更新＋デバウンス保存する） */
   onObjectMoved: (id: string, x: number, y: number) => void;
+  /**
+   * 囲い move に追従して内包オブジェクトを一緒に動かす際の「位置のみ」確定。
+   * 領域編入/はみ出し拡大の再計算を伴わない（囲い側の geometry 変更で別途行われるため）。
+   * 省略時は onObjectMoved にフォールバック。
+   */
+  onObjectMovedSilent?: (id: string, x: number, y: number) => void;
   /** sourceHandle/targetHandle は辺ノブで指定された場合のみ非null（null=自動アンカー） */
   onCreateRelation: (
     sourceObjectId: string,
@@ -270,7 +280,10 @@ export function ObjectMapCanvas({
   subProjects,
   selectedObjectId,
   onSelectObject,
+  focusObjectId,
+  focusNonce,
   onObjectMoved: onObjectMovedRaw,
+  onObjectMovedSilent: onObjectMovedSilentRaw,
   onCreateRelation: onCreateRelationRaw,
   onUpdateRelation: onUpdateRelationRaw,
   onDeleteRelation: onDeleteRelationRaw,
@@ -291,6 +304,7 @@ export function ObjectMapCanvas({
   // 閲覧専用時は編集系コールバックを no-op に差し替える（ドラッグ確定・接続・編集・削除を無効化）。
   const noop = useCallback(() => {}, []);
   const onObjectMoved = readOnly ? noop : onObjectMovedRaw;
+  const onObjectMovedSilent = readOnly ? noop : onObjectMovedSilentRaw ?? onObjectMovedRaw;
   const onCreateRelation = readOnly ? (async () => {}) : onCreateRelationRaw;
   const onUpdateRelation = readOnly ? (async () => {}) : onUpdateRelationRaw;
   const onDeleteRelation = readOnly ? (async () => {}) : onDeleteRelationRaw;
@@ -368,6 +382,8 @@ export function ObjectMapCanvas({
       }
     | null
   >(null);
+  // 囲い move 時に一緒に動かす内包オブジェクト（pointerdown 時にスナップショット）
+  const scopeMembersRef = useRef<Array<{ id: string; baseX: number; baseY: number }>>([]);
 
   // ===== Mermaidから生成ダイアログ =====
   const [showMermaidImport, setShowMermaidImport] = useState(false);
@@ -405,6 +421,26 @@ export function ObjectMapCanvas({
     (a: DataObjectAnnotationDto): Point => dragPos[a.id] ?? { x: a.positionX, y: a.positionY },
     [dragPos],
   );
+
+  // 一覧パネルからのフォーカス要求（focusNonce のインクリメントで発火）。
+  // 対象オブジェクトの中心がビューポート中央に来るよう view を平行移動する。
+  // 依存は focusNonce のみ（通常のカード選択ではフォーカスしない）。
+  useEffect(() => {
+    if (focusNonce === undefined || !focusObjectId) return;
+    const obj = objectById.get(focusObjectId);
+    const svg = svgRef.current;
+    if (!obj || !svg) return;
+    const rect = svg.getBoundingClientRect();
+    const p = posOf(obj);
+    const worldCx = p.x + CARD_W / 2;
+    const worldCy = p.y + CARD_H / 2;
+    setView((v) => ({
+      ...v,
+      x: Math.round(rect.width / 2 - worldCx * v.k),
+      y: Math.round(rect.height / 2 - worldCy * v.k),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce]);
 
   const screenToWorld = useCallback((clientX: number, clientY: number): Point => {
     const el = svgRef.current;
@@ -501,23 +537,28 @@ export function ObjectMapCanvas({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // ===== Backspace / Delete で選択中の矢印（関係）を削除 =====
-  // 矢印クリックで開く編集ウィンドウが canvas からはみ出て削除ボタンを押せない時の代替手段。
-  // テキスト入力中（input/textarea/contentEditable）は誤爆しないよう無視する。readOnly 時は no-op。
+  // ===== Backspace / Delete で選択中の矢印（関係）/ 囲い(SCOPE) を削除 =====
+  // 編集ウィンドウが canvas からはみ出て削除ボタンを押せない時の代替手段。
+  // 優先: 矢印(edgeEdit) → 囲い(selectedScopeId)。テキスト入力中は無視。readOnly 時は no-op。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Backspace' && e.key !== 'Delete') return;
-      if (!edgeEdit) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
-      e.preventDefault();
-      void onDeleteRelation(edgeEdit.id);
-      setEdgeEdit(null);
+      if (edgeEdit) {
+        e.preventDefault();
+        void onDeleteRelation(edgeEdit.id);
+        setEdgeEdit(null);
+      } else if (selectedScopeId) {
+        e.preventDefault();
+        void onDeleteScope(selectedScopeId);
+        setSelectedScopeId(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [edgeEdit, onDeleteRelation]);
+  }, [edgeEdit, selectedScopeId, onDeleteRelation, onDeleteScope]);
 
   // ===== ノードドラッグ =====
   const handleNodePointerDown = useCallback(
@@ -805,6 +846,25 @@ export function ObjectMapCanvas({
         moved: false,
         last: { x: base.x, y: base.y, w: base.w, h: base.h },
       };
+      // ① 囲い move 時：中心が囲み矩形内のオブジェクトを「内包メンバー」としてスナップショットし、
+      //    ドラッグ中は囲いと同じ delta で一緒に動かす（resize は動かさない）。
+      if (mode === 'move') {
+        scopeMembersRef.current = objects
+          .map((o) => {
+            const p = posOf(o);
+            return { id: o.id, baseX: p.x, baseY: p.y, cx: p.x + CARD_W / 2, cy: p.y + CARD_H / 2 };
+          })
+          .filter(
+            (m) =>
+              m.cx >= base.x &&
+              m.cx <= base.x + base.w &&
+              m.cy >= base.y &&
+              m.cy <= base.y + base.h,
+          )
+          .map(({ id, baseX, baseY }) => ({ id, baseX, baseY }));
+      } else {
+        scopeMembersRef.current = [];
+      }
       setSelectedScopeId(a.id);
 
       const onMove = (ev: PointerEvent) => {
@@ -825,12 +885,22 @@ export function ObjectMapCanvas({
               };
         d.last = next; // 確定用に最新値を ref に保持（state は非同期のため）
         setScopeDraft({ [d.id]: next });
+        // 内包メンバーを同じ delta で一緒に移動（move のみ）
+        if (d.mode === 'move' && scopeMembersRef.current.length > 0) {
+          const memberPos: Record<string, Point> = {};
+          for (const m of scopeMembersRef.current) {
+            memberPos[m.id] = { x: Math.round(m.baseX + dx), y: Math.round(m.baseY + dy) };
+          }
+          setDragPos(memberPos);
+        }
       };
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         const d = scopeDragRef.current;
         scopeDragRef.current = null;
+        const members = scopeMembersRef.current;
+        scopeMembersRef.current = [];
         if (!d) return;
         if (d.moved) {
           onScopeGeometryChanged(d.id, {
@@ -839,13 +909,24 @@ export function ObjectMapCanvas({
             width: d.last.w,
             height: d.last.h,
           });
+          // 内包メンバーの新位置を確定（囲いと同じ delta）。
+          // 位置のみ確定（領域編入/はみ出し拡大の再計算なし）。それは囲い側の
+          // geometry 変更（onScopeGeometryChanged→applyScopeLinks）で正しい新位置基準に行われる。
+          if (d.mode === 'move' && members.length > 0) {
+            const ddx = d.last.x - d.baseX;
+            const ddy = d.last.y - d.baseY;
+            for (const m of members) {
+              onObjectMovedSilent(m.id, Math.round(m.baseX + ddx), Math.round(m.baseY + ddy));
+            }
+          }
         }
         setScopeDraft({});
+        if (members.length > 0) setDragPos({});
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
-    [screenToWorld, scopeRect, onScopeGeometryChanged],
+    [screenToWorld, scopeRect, onScopeGeometryChanged, objects, posOf, onObjectMovedSilent],
   );
 
   // ===== Mermaidから生成 =====

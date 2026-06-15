@@ -418,10 +418,13 @@ export const dataObjectAnnotationApi = {
    * SCOPE 注釈の矩形に中心が入る DataObject を、注釈の領域（subProjectId）へ一括紐付け。
    * subProjectId 未設定の注釈では何もしない。POST /api/data-object-annotations/:id/apply-scope-links
    */
-  async applyScopeLinks(annotationId: string): Promise<void> {
+  async applyScopeLinks(
+    annotationId: string,
+  ): Promise<{ subProjectId: string; updated: number; objectIds: string[] }> {
     const res = await fetch(`${API_URL}/api/data-object-annotations/${annotationId}/apply-scope-links`, {
       method: 'POST', headers: headers(),
     });
     if (!res.ok) throw new Error('囲み内オブジェクトの領域紐付けに失敗しました');
+    return res.json();
   },
 };

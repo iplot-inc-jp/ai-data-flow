@@ -36,6 +36,7 @@ import { ObjectDetailPanel } from './_components/ObjectDetailPanel';
 import { ObjectListTable } from './_components/ObjectListTable';
 import { RelationListTable } from './_components/RelationListTable';
 import { ObjectScopeLinkPanel } from './_components/ObjectScopeLinkPanel';
+import { ScopeMembersPanel } from './_components/ScopeMembersPanel';
 import { CARD_W, CARD_H, DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from './_components/object-map-shared';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
@@ -65,6 +66,8 @@ export default function ObjectMapPage() {
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  // 領域一覧パネルからのフォーカス要求トリガ（インクリメントでキャンバスが中央寄せ）
+  const [focusNonce, setFocusNonce] = useState(0);
   // 領域紐付けパネルで保存中のオブジェクトID（ピッカーを一時無効化）
   const [savingScopeObjectId, setSavingScopeObjectId] = useState<string | null>(null);
   // バックグラウンド処理一覧（ジョブ起票後に refresh する）
@@ -192,12 +195,24 @@ export default function ObjectMapPage() {
 
   const handleDeleteObject = useCallback(
     async (id: string) => {
+      if (selectedObjectId === id) setSelectedObjectId(null);
+      // 楽観: 該当オブジェクト＋それに接続する関係を即除去（全体 refresh しない＝即反映）
+      setGraph((g) =>
+        g
+          ? {
+              ...g,
+              objects: g.objects.filter((o) => o.id !== id),
+              relations: g.relations.filter(
+                (r) => r.sourceObjectId !== id && r.targetObjectId !== id,
+              ),
+            }
+          : g,
+      );
       try {
         await dataObjectApi.deleteObject(id);
-        if (selectedObjectId === id) setSelectedObjectId(null);
-        await refresh();
       } catch (err) {
         showError(err, 'オブジェクトの削除に失敗しました');
+        await refresh(); // 失敗時のみ巻き戻し
       }
     },
     [selectedObjectId, refresh, showError],
@@ -281,11 +296,15 @@ export default function ObjectMapPage() {
 
   const handleDeleteRelation = useCallback(
     async (id: string) => {
+      // 楽観: 該当関係を即除去（全体 refresh しない＝即反映）
+      setGraph((g) =>
+        g ? { ...g, relations: g.relations.filter((r) => r.id !== id) } : g,
+      );
       try {
         await dataObjectApi.deleteRelation(id);
-        await refresh();
       } catch (err) {
         showError(err, '関係線の削除に失敗しました');
+        await refresh(); // 失敗時のみ巻き戻し
       }
     },
     [refresh, showError],
@@ -444,16 +463,34 @@ export default function ObjectMapPage() {
                 }),
               ),
             );
-            // 領域が設定済みの囲みは内側オブジェクトを自動紐付け
+            // 領域が設定済みの囲みは内側オブジェクトを自動紐付け。
+            // 結果(objectIds/subProjectId)で**ローカル楽観更新**し、全体 refresh はしない（即反映）。
             const withArea = entries.filter(([scopeId]) => {
               const sc = annotations.find((a) => a.id === scopeId);
               return sc?.subProjectId;
             });
             if (withArea.length > 0) {
-              await Promise.all(
+              const results = await Promise.all(
                 withArea.map(([scopeId]) => dataObjectAnnotationApi.applyScopeLinks(scopeId)),
               );
-              await refresh(); // 紐付け結果をグラフへ反映
+              const linked = new Map<string, string>(); // objectId -> subProjectId
+              for (const r of results) {
+                for (const oid of r.objectIds) linked.set(oid, r.subProjectId);
+              }
+              if (linked.size > 0) {
+                setGraph((g) =>
+                  g
+                    ? {
+                        ...g,
+                        objects: g.objects.map((o) =>
+                          linked.has(o.id)
+                            ? { ...o, subProjectId: linked.get(o.id)! }
+                            : o,
+                        ),
+                      }
+                    : g,
+                );
+              }
             }
           } catch (err) {
             showError(err, 'スコープ囲みの保存に失敗しました');
@@ -485,8 +522,21 @@ export default function ObjectMapPage() {
         // クリア（subProjectId=null/空）時は applyScopeLinks が 400 を返すためスキップする
         // （既存オブジェクトの紐付けは別途解除しない現仕様に合致）。
         if (patch.subProjectId) {
-          await dataObjectAnnotationApi.applyScopeLinks(id);
-          await refresh();
+          // 結果(objectIds)でローカル楽観更新し、全体 refresh はしない（即反映）。
+          const r = await dataObjectAnnotationApi.applyScopeLinks(id);
+          if (r.objectIds.length > 0) {
+            const ids = new Set(r.objectIds);
+            setGraph((g) =>
+              g
+                ? {
+                    ...g,
+                    objects: g.objects.map((o) =>
+                      ids.has(o.id) ? { ...o, subProjectId: r.subProjectId } : o,
+                    ),
+                  }
+                : g,
+            );
+          }
         }
       } catch (err) {
         showError(err, 'スコープ囲みの更新に失敗しました');
@@ -498,14 +548,16 @@ export default function ObjectMapPage() {
 
   const handleDeleteScope = useCallback(
     async (id: string) => {
+      // 楽観: 即除去（保存は裏で）
+      setAnnotations((list) => list.filter((a) => a.id !== id));
       try {
         await dataObjectAnnotationApi.remove(id);
-        setAnnotations((list) => list.filter((a) => a.id !== id));
       } catch (err) {
         showError(err, 'スコープ囲みの削除に失敗しました');
+        await refresh(); // 失敗時のみ巻き戻し
       }
     },
-    [showError],
+    [refresh, showError],
   );
 
   // ===== Mermaidから生成（バックグラウンドジョブ経由） =====
@@ -746,8 +798,17 @@ export default function ObjectMapPage() {
         </Card>
       ) : (
         <>
-          {/* ===== キャンバス＋右サイドパネル ===== */}
+          {/* ===== 領域一覧パネル＋キャンバス＋右サイドパネル ===== */}
           <div className="flex h-[calc(100vh-340px)] min-h-[420px] gap-3">
+            <ScopeMembersPanel
+              objects={objects}
+              subProjects={subProjects}
+              selectedObjectId={selectedObjectId}
+              onFocusObject={(id) => {
+                setSelectedObjectId(id);
+                setFocusNonce((n) => n + 1);
+              }}
+            />
             <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-gray-200">
               <ObjectMapCanvas
                 objects={objects}
@@ -756,10 +817,13 @@ export default function ObjectMapPage() {
                 subProjects={subProjects}
                 selectedObjectId={selectedObjectId}
                 onSelectObject={setSelectedObjectId}
+                focusObjectId={selectedObjectId}
+                focusNonce={focusNonce}
                 onObjectMoved={(id, x, y) => {
                   handleObjectMoved(id, x, y);
                   applyScopeMembershipOnMove(id, x, y);
                 }}
+                onObjectMovedSilent={handleObjectMoved}
                 onCreateRelation={(s, t, sh, th) =>
                   handleCreateRelation(s, t, undefined, undefined, sh, th)
                 }
