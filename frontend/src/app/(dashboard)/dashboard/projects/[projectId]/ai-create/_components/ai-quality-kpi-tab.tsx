@@ -1,129 +1,37 @@
 'use client';
 
 /**
- * タブ「AI精度KPI」。
+ * タブ「AI精度指標」（AI下書きページ）。
  *
- * 対象システム（システムマスタ）を選び、精度指標プリセット（AI不要・ワンクリック）で
- * 下書きKPIを追加するか、「AIでKPIを作成」(category=AI_QUALITY) で生成する。
+ * 対象システム（システムマスタ）を選び、「AIでKPIを作成」(category=AI_QUALITY) で
+ * 精度指標（認識精度・自動化率など）の下書きKPIを生成する。
  * 任意で対象フロー・測定対象の INPUT/OUTPUT も選択できる。
+ *
+ * プリセット追加（AI不要のワンクリック追加）は「AI精度指標」ページ(/ai-accuracy)へ移設済み。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Server,
-  GitBranch,
-  Loader2,
-  Sparkles,
-  Plus,
-  CheckCircle2,
-  TrendingUp,
-  TrendingDown,
-} from 'lucide-react';
+import { Server, GitBranch, Loader2, Sparkles, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { SystemMaster } from '@/lib/masters';
-import {
-  kpiApi,
-  type IoSummaryItemDto,
-  type KpiDirection,
-  type KpiDto,
-} from '@/lib/kpis';
+import { kpiApi, type IoSummaryItemDto, type KpiDto } from '@/lib/kpis';
 import type { BusinessFlowItem } from './types';
 import { FlowSelect } from './flow-select';
 import { IoSummaryTable } from './io-summary-table';
-
-/** 精度指標プリセット。definition / unit / direction を定義済みで、AIを使わず下書き追加する。 */
-const AI_QUALITY_PRESETS: ReadonlyArray<{
-  name: string;
-  unit: string | null;
-  direction: KpiDirection;
-  definition: string;
-  description: string;
-}> = [
-  {
-    name: '認識精度',
-    unit: '%',
-    direction: 'INCREASE',
-    definition: '認識精度 = 正しく認識できた件数 ÷ 全処理件数 × 100',
-    description: 'OCR・画像認識などで、AIの出力がどれだけ正しいか',
-  },
-  {
-    name: '適合率',
-    unit: '%',
-    direction: 'INCREASE',
-    definition: '適合率 = 正しく検出した件数(TP) ÷ 検出した全件数(TP+FP) × 100',
-    description: 'AIが「該当」と判断したもののうち、本当に該当だった割合',
-  },
-  {
-    name: '再現率',
-    unit: '%',
-    direction: 'INCREASE',
-    definition: '再現率 = 正しく検出した件数(TP) ÷ 検出すべき全件数(TP+FN) × 100',
-    description: '本当に該当するもののうち、AIが拾えた割合（見逃しの少なさ）',
-  },
-  {
-    name: 'F1スコア',
-    unit: null,
-    direction: 'INCREASE',
-    definition: 'F1 = 2 × (適合率 × 再現率) ÷ (適合率 + 再現率)',
-    description: '適合率と再現率のバランスを1つの値で評価する指標（0〜1）',
-  },
-  {
-    name: '誤り率',
-    unit: '%',
-    direction: 'DECREASE',
-    definition: '誤り率 = 誤った出力の件数 ÷ 全処理件数 × 100',
-    description: 'AIの出力のうち誤りだった割合（低いほど良い）',
-  },
-  {
-    name: '自動化率',
-    unit: '%',
-    direction: 'INCREASE',
-    definition: '自動化率 = 人手を介さず完了した件数 ÷ 全処理件数 × 100',
-    description: '人の確認・修正なしで処理が完了した割合',
-  },
-  {
-    name: '人手修正率',
-    unit: '%',
-    direction: 'DECREASE',
-    definition: '人手修正率 = 人手修正が発生した件数 ÷ AI処理件数 × 100',
-    description: 'AIの出力に対して人が修正を加えた割合（低いほど良い）',
-  },
-  {
-    name: 'AI提案採用率',
-    unit: '%',
-    direction: 'INCREASE',
-    definition: 'AI提案採用率 = 採用されたAI提案件数 ÷ AI提案総数 × 100',
-    description: 'AIの提案（発注案・回答案など）が実際に採用された割合',
-  },
-  {
-    name: '平均処理時間',
-    unit: '秒',
-    direction: 'DECREASE',
-    definition: '平均処理時間 = 処理時間の合計 ÷ 処理件数',
-    description: '1件あたりの処理にかかる時間（低いほど良い）',
-  },
-  {
-    name: '需要予測MAPE',
-    unit: '%',
-    direction: 'DECREASE',
-    definition: 'MAPE = Σ(|実績 − 予測| ÷ 実績) ÷ 件数 × 100',
-    description: '需要予測の平均絶対誤差率（低いほど予測が正確）',
-  },
-];
 
 export function AiQualityKpiTab({
   projectId,
   flows,
   systems,
-  onCreated,
+  onGenerated,
   onJobEnqueued,
 }: {
   projectId: string;
   flows: BusinessFlowItem[];
   systems: SystemMaster[];
-  /** 追加・生成された下書きKPI（一覧でハイライトするため親へ通知） */
-  onCreated: (created: KpiDto[]) => void;
+  /** 生成された下書きKPI（親へ通知） */
+  onGenerated: (created: KpiDto[]) => void;
   /** AIジョブ起票直後の通知（バックグラウンド処理一覧の更新トリガー用） */
   onJobEnqueued?: () => void;
 }) {
@@ -134,10 +42,6 @@ export function AiQualityKpiTab({
   const [ioLoading, setIoLoading] = useState(false);
   const [ioError, setIoError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // プリセット追加中の指標名（ボタンごとのスピナー用）
-  const [addingPreset, setAddingPreset] = useState<string | null>(null);
-  const [presetError, setPresetError] = useState<string | null>(null);
 
   const [instructions, setInstructions] = useState('');
   const [count, setCount] = useState(5);
@@ -187,40 +91,6 @@ export function AiQualityKpiTab({
     });
   }, []);
 
-  /** プリセットをワンクリックで下書きKPIとして追加する（AI不要）。 */
-  const handleAddPreset = useCallback(
-    async (preset: (typeof AI_QUALITY_PRESETS)[number]) => {
-      if (!systemId) return;
-      setAddingPreset(preset.name);
-      setPresetError(null);
-      setSuccessMessage(null);
-      try {
-        let kpi = await kpiApi.create(projectId, {
-          name: preset.name,
-          category: 'AI_QUALITY',
-          systemId,
-          flowId: flowId || null,
-          definition: preset.definition,
-          description: preset.description,
-          unit: preset.unit,
-          direction: preset.direction,
-          frequency: 'MONTHLY',
-          status: 'DRAFT',
-        });
-        if (selectedIds.size > 0) {
-          kpi = await kpiApi.setInformationTypes(kpi.id, Array.from(selectedIds));
-        }
-        onCreated([kpi]);
-        setSuccessMessage(`「${preset.name}」を下書きKPIとして追加しました。`);
-      } catch (err) {
-        setPresetError(err instanceof Error ? err.message : 'KPIの作成に失敗しました');
-      } finally {
-        setAddingPreset(null);
-      }
-    },
-    [projectId, systemId, flowId, selectedIds, onCreated],
-  );
-
   const handleGenerate = useCallback(async () => {
     if (!systemId) return;
     // 既存ポーリングがあれば中断してから新規開始。
@@ -245,9 +115,9 @@ export function AiQualityKpiTab({
         { signal: controller.signal },
       );
       if (controller.signal.aborted) return;
-      onCreated(created);
+      onGenerated(created);
       setSuccessMessage(
-        `${created.length}件の下書きKPIを作成しました。下のKPI一覧（ハイライト表示）で内容を確認し、採用してください。`,
+        `${created.length}件の下書きを生成しました。「AI精度指標」ページで内容を確認し、採用してください。`,
       );
     } catch (err) {
       // アンマウント等で中断された場合は無視（解放後 setState を避ける）。
@@ -258,7 +128,7 @@ export function AiQualityKpiTab({
     } finally {
       if (!controller.signal.aborted) setGenerating(false);
     }
-  }, [projectId, systemId, flowId, selectedIds, instructions, count, onCreated, onJobEnqueued]);
+  }, [projectId, systemId, flowId, selectedIds, instructions, count, onGenerated, onJobEnqueued]);
 
   return (
     <div className="space-y-4">
@@ -311,7 +181,7 @@ export function AiQualityKpiTab({
           <Server className="mx-auto mb-2 h-6 w-6 text-indigo-300" />
           <p className="text-sm font-medium text-gray-600">対象システムを選択してください</p>
           <p className="mt-1 text-xs text-gray-400">
-            AI・システムの精度を測るKPI（認識精度・自動化率など）をプリセットまたはAIで追加できます。
+            AI・システムの精度を測るKPI（認識精度・自動化率など）をAIで生成できます。
           </p>
         </div>
       ) : (
@@ -335,41 +205,6 @@ export function AiQualityKpiTab({
               )}
             </div>
           )}
-
-          {/* 精度指標プリセット */}
-          <div className="space-y-2 rounded border border-indigo-100 bg-indigo-50/40 p-3">
-            <div className="flex items-center gap-1.5">
-              <Plus className="h-3.5 w-3.5 text-indigo-600" />
-              <span className="text-xs font-medium text-gray-700">
-                精度指標プリセット（ワンクリックで下書き追加・AI不要）
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
-              {AI_QUALITY_PRESETS.map((preset) => (
-                <button
-                  key={preset.name}
-                  type="button"
-                  onClick={() => void handleAddPreset(preset)}
-                  disabled={addingPreset !== null}
-                  title={`${preset.definition}\n${preset.description}`}
-                  className="flex items-center justify-between gap-1 rounded border border-indigo-200 bg-white px-2 py-1.5 text-left text-xs text-gray-700 hover:border-indigo-400 hover:bg-indigo-50 disabled:opacity-50"
-                >
-                  <span className="truncate">
-                    {preset.name}
-                    {preset.unit ? `(${preset.unit})` : ''}
-                  </span>
-                  {addingPreset === preset.name ? (
-                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-indigo-500" />
-                  ) : preset.direction === 'INCREASE' ? (
-                    <TrendingUp className="h-3 w-3 shrink-0 text-emerald-500" />
-                  ) : (
-                    <TrendingDown className="h-3 w-3 shrink-0 text-blue-500" />
-                  )}
-                </button>
-              ))}
-            </div>
-            {presetError && <p className="text-xs text-red-600">{presetError}</p>}
-          </div>
 
           {/* AI生成フォーム */}
           <div className="space-y-2 rounded border border-violet-100 bg-violet-50/40 p-3">

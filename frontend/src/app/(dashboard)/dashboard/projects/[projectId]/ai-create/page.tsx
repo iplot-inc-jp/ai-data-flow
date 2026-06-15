@@ -1,65 +1,48 @@
 'use client';
 
 /**
- * AI作成（KPI）ページ。
+ * AI下書きページ（KPIのAI生成専用）。
  *
- * - タブ「業務KPI」: 業務フローの INPUT/OUTPUT・帳票から AI で業務KPIを下書き生成
- * - タブ「AI精度KPI」: 対象システムに対する精度指標（認識精度・自動化率など）を
- *   プリセットのワンクリック追加 or AI生成
- * - ページ下部: KPI一覧（タブ共通）。下書きの採用・編集・アーカイブ・削除
+ * - タブ「業務KPI」: 業務フローの INPUT/OUTPUT・帳票から AI で業務KPI（category=BUSINESS）を下書き生成
+ * - タブ「AI精度指標」: 対象システムに対する精度指標（category=AI_QUALITY）を AI で下書き生成
  *
- * KPI の取得・作成・更新・削除・生成はすべて @/lib/kpis の kpiApi 経由。
+ * 生成された下書き（status=DRAFT）は、種別に応じて
+ *   業務KPI → /business-kpi、AI精度指標 → /ai-accuracy
+ * の各ページに自動的に並ぶ。生成成功時はそのページへの導線をトーストで案内する。
+ * このページ自体には KPI 一覧は表示しない（採用・編集は各ページで行う）。
+ *
+ * KPI の生成は @/lib/kpis の kpiApi.generateViaJob（AI_KPI ジョブ）経由。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { BarChart3, Cpu } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { toast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
-import { kpiApi, type KpiDto } from '@/lib/kpis';
-import { informationTypeApi, type InformationType } from '@/lib/dfd';
-import { systemApi, type SystemMaster } from '@/lib/masters';
-import type { BusinessFlowItem, RoleItem } from './_components/types';
+import type { KpiCategory, KpiDto } from '@/lib/kpis';
 import { BusinessKpiTab } from './_components/business-kpi-tab';
 import { AiQualityKpiTab } from './_components/ai-quality-kpi-tab';
-import { KpiList } from './_components/kpi-list';
+import { useKpiMasters } from './_components/use-kpi-masters';
 import { EditGate } from '@/components/edit-gate';
 import {
   BackgroundJobsPanel,
   type BackgroundJobsPanelHandle,
 } from '@/components/background-jobs-panel';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
-
-function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  return headers;
-}
-
 export default function AiCreatePage() {
   const params = useParams();
   const projectId = params.projectId as string;
   const { canEdit } = useReadOnly();
 
-  // 参照マスタ（フロー / システム / ロール / INPUT-OUTPUT）
-  const [flows, setFlows] = useState<BusinessFlowItem[]>([]);
-  const [systems, setSystems] = useState<SystemMaster[]>([]);
-  const [roles, setRoles] = useState<RoleItem[]>([]);
-  const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
-
-  // KPI一覧
-  const [kpis, setKpis] = useState<KpiDto[]>([]);
-  const [kpisLoading, setKpisLoading] = useState(true);
-  const [kpisError, setKpisError] = useState<string | null>(null);
-
-  // 直前に生成/追加されたKPI（一覧でハイライト）
-  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+  // 参照マスタ（フロー / システム / ロール / INPUT-OUTPUT）— 共有フックに集約
+  const { flows, systems } = useKpiMasters(projectId);
 
   // バックグラウンド処理一覧（KPI生成ジョブ起票後に refresh する）
   const jobsPanelRef = useRef<BackgroundJobsPanelHandle | null>(null);
@@ -67,62 +50,42 @@ export default function AiCreatePage() {
     jobsPanelRef.current?.refresh();
   }, []);
 
-  const loadKpis = useCallback(async () => {
-    setKpisError(null);
-    try {
-      setKpis(await kpiApi.list(projectId));
-    } catch (err) {
-      setKpisError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setKpisLoading(false);
-    }
-  }, [projectId]);
-
-  // 参照マスタの取得。フロー/ロールは専用 lib クライアントが無いため、
-  // ASIS・ロールページと同じ生 fetch（accessToken ヘッダ）を踏襲する。
-  const loadMasters = useCallback(async () => {
-    const [flowRes, roleRes, systemsData, ioData] = await Promise.all([
-      fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, {
-        headers: authHeaders(),
-      }).catch(() => null),
-      fetch(`${API_URL}/api/roles/project/${projectId}`, { headers: authHeaders() }).catch(
-        () => null,
-      ),
-      systemApi.list(projectId).catch(() => [] as SystemMaster[]),
-      informationTypeApi.list(projectId).catch(() => [] as InformationType[]),
-    ]);
-    if (flowRes?.ok) {
-      const data = await flowRes.json().catch(() => []);
-      setFlows(Array.isArray(data) ? data : []);
-    }
-    if (roleRes?.ok) {
-      const data = await roleRes.json().catch(() => []);
-      setRoles(Array.isArray(data) ? data : []);
-    }
-    setSystems(systemsData);
-    setInformationTypes(ioData);
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadKpis();
-    void loadMasters();
-  }, [loadKpis, loadMasters]);
-
-  /** AI生成・プリセット追加されたKPIをハイライトしつつ一覧を更新する。 */
-  const handleCreated = useCallback(
-    (created: KpiDto[]) => {
-      setHighlightIds(new Set(created.map((k) => k.id)));
-      void loadKpis();
+  /** 生成成功トースト。種別に応じた確認・採用ページへの導線を出す。 */
+  const notifyGenerated = useCallback(
+    (created: KpiDto[], category: KpiCategory) => {
+      const label = category === 'BUSINESS' ? '業務KPI' : 'AI精度指標';
+      const href =
+        category === 'BUSINESS'
+          ? `/dashboard/projects/${projectId}/business-kpi`
+          : `/dashboard/projects/${projectId}/ai-accuracy`;
+      toast({
+        title: `${created.length}件の下書きを生成しました`,
+        description: `生成した下書きは「${label}」ページで確認・採用してください。`,
+        action: (
+          <ToastAction altText={`${label}ページを開く`} asChild>
+            <Link href={href}>{label}を開く</Link>
+          </ToastAction>
+        ),
+      });
     },
-    [loadKpis],
+    [projectId],
+  );
+
+  const handleBusinessGenerated = useCallback(
+    (created: KpiDto[]) => notifyGenerated(created, 'BUSINESS'),
+    [notifyGenerated],
+  );
+  const handleAiQualityGenerated = useCallback(
+    (created: KpiDto[]) => notifyGenerated(created, 'AI_QUALITY'),
+    [notifyGenerated],
   );
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="AI作成"
-        description="業務フローの INPUT/OUTPUT やシステムから、業務KPI・AI精度KPI を AI で下書き作成します。"
-        help="タブで「業務KPI」「AI精度KPI」を切り替えて下書きを作り、下のKPI一覧で内容を確認・採用します。"
+        title="AI下書き"
+        description="業務フローの INPUT/OUTPUT やシステムから、業務KPI・AI精度指標 を AI で下書き生成します。"
+        help="タブで「業務KPI」「AI精度指標」を切り替えて AI に下書きを生成させます。生成した下書きは各専用ページ（業務KPI / AI精度指標）で確認・採用してください。"
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
@@ -130,9 +93,9 @@ export default function AiCreatePage() {
             <HowToPanel
               steps={[
                 '「業務KPI」タブで対象の業務フローを選ぶと、フロー上の INPUT/OUTPUT・帳票が種別ごと（帳票/データ/物体）に表示されます。',
-                '測りたい INPUT/OUTPUT にチェックを入れ、追加指示を添えて「AIでKPIを作成」を押すと下書きKPIが生成されます。',
-                '「AI精度KPI」タブでは対象システムを選び、精度指標プリセット（認識精度・自動化率など）をワンクリックで追加するか、AIで生成します。',
-                '下のKPI一覧で内容を確認し、下書きは「採用」で運用中にします。カードをクリックすると全項目（SMART採点・IO紐づけ含む）を編集できます。',
+                '測りたい INPUT/OUTPUT にチェックを入れ、追加指示を添えて「AIでKPIを作成」を押すと業務KPIの下書きが生成されます。',
+                '「AI精度指標」タブでは対象システムを選び、追加指示を添えて精度指標（認識精度・自動化率など）の下書きをAIで生成します。',
+                '生成された下書きは DRAFT として保存されます。確認・採用は「業務KPI」「AI精度指標」ページで行ってください。',
               ]}
             />
             <FeatureSectionIo
@@ -140,13 +103,12 @@ export default function AiCreatePage() {
               sectionKey="kpis"
               label="KPI"
               canEdit={canEdit}
-              onDone={() => void loadKpis()}
             />
           </>
         }
       />
 
-      {/* タブ（業務KPI / AI精度KPI） */}
+      {/* タブ（業務KPI / AI精度指標）— AI生成入力UI */}
       <Card className="bg-white">
         <div className="p-4">
           <Tabs defaultValue="business">
@@ -157,7 +119,7 @@ export default function AiCreatePage() {
               </TabsTrigger>
               <TabsTrigger value="ai-quality" className="gap-1.5">
                 <Cpu className="h-3.5 w-3.5" />
-                AI精度KPI
+                AI精度指標
               </TabsTrigger>
             </TabsList>
             <TabsContent value="business" className="mt-4">
@@ -165,7 +127,7 @@ export default function AiCreatePage() {
                 <BusinessKpiTab
                   projectId={projectId}
                   flows={flows}
-                  onGenerated={handleCreated}
+                  onGenerated={handleBusinessGenerated}
                   onJobEnqueued={handleJobEnqueued}
                 />
               </EditGate>
@@ -176,7 +138,7 @@ export default function AiCreatePage() {
                   projectId={projectId}
                   flows={flows}
                   systems={systems}
-                  onCreated={handleCreated}
+                  onGenerated={handleAiQualityGenerated}
                   onJobEnqueued={handleJobEnqueued}
                 />
               </EditGate>
@@ -184,21 +146,6 @@ export default function AiCreatePage() {
           </Tabs>
         </div>
       </Card>
-
-      {/* KPI一覧（タブ共通） */}
-      <EditGate dim={false}>
-        <KpiList
-          kpis={kpis}
-          loading={kpisLoading}
-          error={kpisError}
-          highlightIds={highlightIds}
-          flows={flows}
-          systems={systems}
-          roles={roles}
-          informationTypes={informationTypes}
-          onChanged={loadKpis}
-        />
-      </EditGate>
 
       {/* ===== バックグラウンド処理一覧（KPI生成などのAIジョブ） ===== */}
       <BackgroundJobsPanel ref={jobsPanelRef} projectId={projectId} />
