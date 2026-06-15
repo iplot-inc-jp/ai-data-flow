@@ -220,8 +220,11 @@ export class MyIngestionBatchController {
   @Get('ingestion-batches')
   @ApiOperation({ summary: '取り込みバッチ横断一覧（自分が閲覧可能な全プロジェクト）' })
   async listAll(
-    @CurrentUser() user: CurrentUserPayload,
+    @CurrentUser() user: CurrentUserPayload & { apiKeyId?: string },
   ): Promise<IngestionBatchWithProjectOutput[]> {
-    return this.getAllAccessibleIngestionBatchesUseCase.execute({ userId: user.id });
+    return this.getAllAccessibleIngestionBatchesUseCase.execute({
+      userId: user.id,
+      apiKeyId: user.apiKeyId,
+    });
   }
 }

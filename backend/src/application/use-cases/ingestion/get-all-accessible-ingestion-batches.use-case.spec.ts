@@ -1,3 +1,4 @@
+import { ForbiddenError } from '../../../domain';
 import { GetAllAccessibleIngestionBatchesUseCase } from './get-all-accessible-ingestion-batches.use-case';
 
 function batch(id: string, projectId: string, createdAtIso: string) {
@@ -74,5 +75,18 @@ describe('GetAllAccessibleIngestionBatchesUseCase', () => {
   it('returns empty when the user is in no orgs', async () => {
     const d = makeDeps({ orgs: [], projectsByOrg: {}, accessByProject: {}, batchesByProject: {} });
     expect(await makeUseCase(d).execute({ userId: 'u1' })).toEqual([]);
+  });
+
+  it('rejects API-key callers (cross-project aggregate is browser-only)', async () => {
+    const d = makeDeps({
+      orgs: [{ id: 'o1' }],
+      projectsByOrg: { o1: [{ id: 'pA', name: 'A' }] },
+      accessByProject: { pA: 'VIEW' },
+      batchesByProject: { pA: [batch('1', 'pA', '2026-06-10T00:00:00Z')] },
+    });
+    await expect(
+      makeUseCase(d).execute({ userId: 'u1', apiKeyId: 'k1' }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(d.orgRepo.findByUserId).not.toHaveBeenCalled();
   });
 });

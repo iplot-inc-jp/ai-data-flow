@@ -3,6 +3,7 @@ import {
   OrganizationRepository, ORGANIZATION_REPOSITORY,
   ProjectRepository, PROJECT_REPOSITORY,
   IIngestionBatchRepository, INGESTION_BATCH_REPOSITORY,
+  ForbiddenError,
 } from '../../../domain';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import {
@@ -14,6 +15,8 @@ const MAX_BATCHES = 200;
 
 export interface GetAllAccessibleIngestionBatchesInput {
   userId: string;
+  /** API キー認証時のみ非 null。横断一覧は対話的ブラウザ専用なので拒否する。 */
+  apiKeyId?: string;
 }
 
 @Injectable()
@@ -31,6 +34,11 @@ export class GetAllAccessibleIngestionBatchesUseCase {
   async execute(
     input: GetAllAccessibleIngestionBatchesInput,
   ): Promise<IngestionBatchWithProjectOutput[]> {
+    // プロジェクト単位 API キーに横断集約を返すと鍵のスコープ閉じ込めを破るため拒否。
+    // （プレゼンス用トークン発行と同じく「本人スコープ」系は対話的ブラウザ専用）。
+    if (input.apiKeyId) {
+      throw new ForbiddenError('API キーでは横断一覧を利用できません');
+    }
     const orgs = await this.orgRepo.findByUserId(input.userId);
     const projectLists = await Promise.all(
       orgs.map((o) => this.projectRepo.findByOrganizationId(o.id)),
