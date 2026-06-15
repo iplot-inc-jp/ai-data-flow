@@ -39,6 +39,7 @@ import { ObjectScopeLinkPanel } from './_components/ObjectScopeLinkPanel';
 import { DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from './_components/object-map-shared';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
   BackgroundJobsPanel,
   type BackgroundJobsPanelHandle,
@@ -624,6 +625,13 @@ export default function ObjectMapPage() {
               ]}
             />
             <ManualButton feature="object-map" />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="dataObjects"
+              label="データオブジェクト"
+              canEdit={canEdit}
+              onDone={() => void load(true)}
+            />
           </>
         }
       />

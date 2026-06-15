@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select';
 import { Users, Plus, User, Server, HelpCircle, Pencil, Trash2, Loader2, ChevronLeft } from 'lucide-react';
 import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
@@ -265,6 +266,13 @@ export default function ProjectRolesPage() {
               ]}
             />
           </span>
+          <FeatureSectionIo
+            projectId={projectId}
+            sectionKey="roles"
+            label="ロール"
+            canEdit={canEdit}
+            onDone={() => void fetchRoles()}
+          />
         {canEdit && (
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>

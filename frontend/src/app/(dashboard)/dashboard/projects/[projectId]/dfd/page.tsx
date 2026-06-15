@@ -25,6 +25,8 @@ import {
 import { dataObjectApi, type DataObjectDto } from '@/lib/data-objects';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
+import { ExportImportButton } from '@/components/io/ExportImportButton';
+import { entityJsonIo, type EntityBundle } from '@/lib/io';
 
 /**
  * 第1レベルDFD（プロジェクト全体）。
@@ -342,6 +344,19 @@ export default function ProjectDfdPage() {
               ]}
             />
             <ManualButton feature="dfd" />
+            <ExportImportButton
+              label="DFD（第1レベル）"
+              fileBaseName="dfd-level1"
+              size="sm"
+              canEdit={canEdit}
+              withModeChoice={false}
+              importHint="選択した JSON でこの第1レベルDFDの中身（ノード・データフロー・注釈）を丸ごと置き換えます。"
+              getExport={() => entityJsonIo.exportProjectDfd(projectId)}
+              onImport={(parsed) =>
+                entityJsonIo.importProjectDfd(projectId, parsed as EntityBundle)
+              }
+              onDone={() => void load()}
+            />
           </>
         }
       />

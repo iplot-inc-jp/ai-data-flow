@@ -29,6 +29,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { BacklogImportDialog } from '@/components/backlog-import-dialog';
 import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
   DragDropContext,
   Droppable,
@@ -576,6 +577,13 @@ export default function TasksPage() {
               ]}
             />
             <ManualButton feature="tasks" />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="tasks"
+              label="タスク"
+              canEdit={canEdit}
+              onDone={() => void fetchAll()}
+            />
             {/* 表示切替：一覧 / ボード */}
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
               <button

@@ -33,6 +33,8 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { Card, CardContent } from '@/components/ui/card';
 import { useTableSort } from '@/lib/use-table-sort';
 import { SortableTh } from '@/components/ui/sortable-th';
@@ -171,6 +173,7 @@ function draftToInput(d: Draft): MeetingInput {
 export default function MeetingsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
@@ -388,15 +391,24 @@ export default function MeetingsPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              '「会議体を追加」から新しい会議体を作成します。',
-              '行をクリックすると全項目（目的・頻度・形式・主催・対象ステークホルダー等）を編集できます。',
-              'ステータス列のトグルで開催中／休止を切り替えられます。',
-              '主催・対象ステークホルダーはステークホルダーマスタから選択します（ステークホルダーマネジメントと連動）。',
-              'ゴミ箱アイコンで削除できます。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                '「会議体を追加」から新しい会議体を作成します。',
+                '行をクリックすると全項目（目的・頻度・形式・主催・対象ステークホルダー等）を編集できます。',
+                'ステータス列のトグルで開催中／休止を切り替えられます。',
+                '主催・対象ステークホルダーはステークホルダーマスタから選択します（ステークホルダーマネジメントと連動）。',
+                'ゴミ箱アイコンで削除できます。',
+              ]}
+            />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="meetings"
+              label="会議"
+              canEdit={canEdit}
+              onDone={() => void reload()}
+            />
+          </>
         }
       />
 

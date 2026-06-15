@@ -28,6 +28,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
+import { ProjectBundleIo } from '@/components/io/ProjectBundleIo';
 import { Card, CardContent } from '@/components/ui/card';
 import { FileDropZone } from '@/components/ui/file-drop-zone';
 import {
@@ -192,6 +193,13 @@ export default function BackgroundPage() {
               ]}
             />
             <ManualButton feature="charter" />
+            <ProjectBundleIo
+              projectId={projectId}
+              canEdit={canEdit}
+              onDone={() => {
+                if (typeof window !== 'undefined') window.location.reload();
+              }}
+            />
           </div>
         }
       />

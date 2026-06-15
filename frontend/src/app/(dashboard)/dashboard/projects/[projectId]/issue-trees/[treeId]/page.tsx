@@ -97,6 +97,8 @@ import {
 import { AiSuggestDialog } from '@/components/issue-trees/ai-suggest-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useReadOnly } from '@/components/read-only-context';
+import { ExportImportButton } from '@/components/io/ExportImportButton';
+import { entityJsonIo, type EntityBundle } from '@/lib/io';
 import { IdeationAssistDialog } from '@/components/issue-trees/ideation-assist-dialog';
 import {
   tasksApi,
@@ -2005,6 +2007,19 @@ function IssueTreeMindMap() {
             />
           </div>
           <ManualButton feature="issue-trees" />
+          <ExportImportButton
+            label="イシューツリー"
+            fileBaseName={`issue-tree-${name || treeId}`}
+            size="sm"
+            canEdit={canEdit}
+            withModeChoice={false}
+            importHint="選択した JSON でこのイシューツリーのノードを丸ごと置き換えます。"
+            getExport={() => entityJsonIo.exportIssueTree(treeId)}
+            onImport={(parsed) =>
+              entityJsonIo.importIssueTree(treeId, parsed as EntityBundle)
+            }
+            onDone={() => void fetchTree()}
+          />
           <Button variant="outline" size="sm" onClick={fetchTree} className="text-gray-600">
             <RefreshCw className="mr-1 h-4 w-4" />
             再読込

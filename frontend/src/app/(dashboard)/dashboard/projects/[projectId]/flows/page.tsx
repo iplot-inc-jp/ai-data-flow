@@ -39,6 +39,7 @@ import {
   X,
   GitFork,
   Settings2,
+  FolderTree,
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
@@ -482,6 +483,13 @@ export default function ProjectFlowsPage() {
             />
           </div>
           <ManualButton feature="flows" />
+          {/* フォルダ階層で整理（クリックで潜れるフォルダ画面） */}
+          <Link href={`/dashboard/projects/${projectId}/flows/folders`}>
+            <Button variant="outline" className="border-gray-300 text-gray-700">
+              <FolderTree className="h-4 w-4 mr-2" />
+              フォルダ
+            </Button>
+          </Link>
           {/* Parent-child hierarchy map */}
           <Link href={`/dashboard/projects/${projectId}/flows/hierarchy`}>
             <Button variant="outline" className="border-gray-300 text-gray-700">

@@ -17,6 +17,8 @@ import { MeetingReportBoard } from './_components/meeting-report-board';
 import { InterestMatrixBoard } from './_components/interest-matrix-board';
 import { AdoptionBoard } from './_components/adoption-board';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 
 /**
  * ステークホルダーマネジメント ワークスペース。
@@ -34,10 +36,24 @@ const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
   { key: 'adoption', label: '導入状況', icon: Rocket },
 ];
 
+// アクティブタブ -> feature-io の section / 表示名。
+// stakeholderTracking セクションは「導入状況＋報告連絡カレンダー＋関心ごと」の3モデルを束ねる。
+// 関心ごと/導入状況の両タブが同一セクションを指すため、replace 取込が相互にデータを消し得る。
+// ラベルで「3つ一括」であることを明示し、誤って片方のつもりで全消ししないようにする。
+const TRACKING_IO_LABEL = '追跡データ（導入状況・報告・関心ごと 一括）';
+const TAB_IO: Record<TabKey, { sectionKey: string; label: string }> = {
+  stakeholders: { sectionKey: 'stakeholders', label: 'ステークホルダー' },
+  interests: { sectionKey: 'stakeholderTracking', label: TRACKING_IO_LABEL },
+  meetings: { sectionKey: 'meetings', label: '会議・報告' },
+  adoption: { sectionKey: 'stakeholderTracking', label: TRACKING_IO_LABEL },
+};
+
 export default function StakeholderManagementPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
   const [active, setActive] = useState<TabKey>('stakeholders');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   return (
     <div className="space-y-6">
@@ -60,6 +76,13 @@ export default function StakeholderManagementPage() {
               ]}
             />
             <ManualButton feature="stakeholder-management" />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey={TAB_IO[active].sectionKey}
+              label={TAB_IO[active].label}
+              canEdit={canEdit}
+              onDone={() => setRefreshKey((k) => k + 1)}
+            />
           </>
         }
       />
@@ -90,22 +113,22 @@ export default function StakeholderManagementPage() {
       <EditGate dim={false}>
         {/* ステークホルダー（テーブル + マトリクス + 役割と責任） */}
         <div className={active === 'stakeholders' ? '' : 'hidden'}>
-          <StakeholderTableBoard projectId={projectId} />
+          <StakeholderTableBoard key={refreshKey} projectId={projectId} />
         </div>
 
         {/* 関心ごと（InterestMatrixRow テーブル：フェーズ×視点） */}
         <div className={active === 'interests' ? '' : 'hidden'}>
-          <InterestMatrixBoard projectId={projectId} />
+          <InterestMatrixBoard key={refreshKey} projectId={projectId} />
         </div>
 
         {/* 会議・報告（Meeting テーブル + 報告連絡カレンダー テーブル） */}
         <div className={active === 'meetings' ? '' : 'hidden'}>
-          <MeetingReportBoard projectId={projectId} />
+          <MeetingReportBoard key={refreshKey} projectId={projectId} />
         </div>
 
         {/* 導入状況（AdoptionStatus テーブル：人 × システム の定着度） */}
         <div className={active === 'adoption' ? '' : 'hidden'}>
-          <AdoptionBoard projectId={projectId} />
+          <AdoptionBoard key={refreshKey} projectId={projectId} />
         </div>
       </EditGate>
     </div>

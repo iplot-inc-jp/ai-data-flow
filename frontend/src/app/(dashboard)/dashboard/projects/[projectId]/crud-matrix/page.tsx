@@ -18,6 +18,7 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useReadOnly } from '@/components/read-only-context';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import {
   Dialog,
@@ -543,6 +544,17 @@ export default function CrudMatrixPage() {
             />
           </span>
           <ManualButton feature="crud-matrix" />
+          <FeatureSectionIo
+            projectId={projectId}
+            sectionKey="cruoa"
+            label="CRUD表（CRUOA）"
+            canEdit={canEdit}
+            onDone={() => {
+              void fetchData();
+              void fetchApiEndpoints();
+              void fetchStatusTables();
+            }}
+          />
         </div>
       </div>
 

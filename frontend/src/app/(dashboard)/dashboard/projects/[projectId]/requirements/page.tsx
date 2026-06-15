@@ -40,6 +40,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { EditGate } from '@/components/edit-gate';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
@@ -394,6 +395,13 @@ export default function RequirementsPage() {
             />
           </span>
           <ManualButton feature="requirements" />
+          <FeatureSectionIo
+            projectId={projectId}
+            sectionKey="requirements"
+            label="要求定義"
+            canEdit={canEdit}
+            onDone={() => void fetchRequirements()}
+          />
           {canEdit && (
             <>
               <Button

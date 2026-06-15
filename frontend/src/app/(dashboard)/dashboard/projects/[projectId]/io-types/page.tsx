@@ -26,6 +26,8 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
   informationTypeApi,
   INFORMATION_CATEGORY_LABELS,
@@ -57,6 +59,7 @@ function CategoryBadge({ category }: { category: InformationCategory }) {
 export default function IoTypesPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [ioTypes, setIoTypes] = useState<InformationType[]>([]);
   const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
@@ -161,16 +164,25 @@ export default function IoTypesPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              '下の追加フォームに名前を入力し、分類（情報／物体／帳票）を選んで「追加」します。',
-              '各行はクリックではなくフォーカスを外す（onBlur）と自動保存されます。名前・説明・分類・領域を編集できます。',
-              '行末のゴミ箱で削除します（紐づく具体帳票も削除されます）。',
-              '「紐づくカタログ表」は読み取り表示です。紐付けは「データカタログ」ページの各表で設定します。',
-              '行頭の「>」（📎件数）をクリックすると展開し、具体データ（PDF・画像）をアップロード・閲覧・削除できます。',
-              '具体データはフォルダごとに整理できます。鉛筆アイコンで表示名を編集、select でフォルダ移動（「＋ 新しいフォルダ…」で新規作成）、アップロード時も振り分け先フォルダを指定できます。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                '下の追加フォームに名前を入力し、分類（情報／物体／帳票）を選んで「追加」します。',
+                '各行はクリックではなくフォーカスを外す（onBlur）と自動保存されます。名前・説明・分類・領域を編集できます。',
+                '行末のゴミ箱で削除します（紐づく具体帳票も削除されます）。',
+                '「紐づくカタログ表」は読み取り表示です。紐付けは「データカタログ」ページの各表で設定します。',
+                '行頭の「>」（📎件数）をクリックすると展開し、具体データ（PDF・画像）をアップロード・閲覧・削除できます。',
+                '具体データはフォルダごとに整理できます。鉛筆アイコンで表示名を編集、select でフォルダ移動（「＋ 新しいフォルダ…」で新規作成）、アップロード時も振り分け先フォルダを指定できます。',
+              ]}
+            />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="informationTypes"
+              label="情報種別"
+              canEdit={canEdit}
+              onDone={() => void load()}
+            />
+          </>
         }
       />
 

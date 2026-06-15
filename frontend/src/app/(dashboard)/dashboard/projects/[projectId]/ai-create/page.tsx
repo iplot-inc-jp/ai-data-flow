@@ -18,6 +18,8 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { kpiApi, type KpiDto } from '@/lib/kpis';
 import { informationTypeApi, type InformationType } from '@/lib/dfd';
 import { systemApi, type SystemMaster } from '@/lib/masters';
@@ -43,6 +45,7 @@ function authHeaders(): Record<string, string> {
 export default function AiCreatePage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   // 参照マスタ（フロー / システム / ロール / INPUT-OUTPUT）
   const [flows, setFlows] = useState<BusinessFlowItem[]>([]);
@@ -123,14 +126,23 @@ export default function AiCreatePage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              '「業務KPI」タブで対象の業務フローを選ぶと、フロー上の INPUT/OUTPUT・帳票が種別ごと（帳票/データ/物体）に表示されます。',
-              '測りたい INPUT/OUTPUT にチェックを入れ、追加指示を添えて「AIでKPIを作成」を押すと下書きKPIが生成されます。',
-              '「AI精度KPI」タブでは対象システムを選び、精度指標プリセット（認識精度・自動化率など）をワンクリックで追加するか、AIで生成します。',
-              '下のKPI一覧で内容を確認し、下書きは「採用」で運用中にします。カードをクリックすると全項目（SMART採点・IO紐づけ含む）を編集できます。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                '「業務KPI」タブで対象の業務フローを選ぶと、フロー上の INPUT/OUTPUT・帳票が種別ごと（帳票/データ/物体）に表示されます。',
+                '測りたい INPUT/OUTPUT にチェックを入れ、追加指示を添えて「AIでKPIを作成」を押すと下書きKPIが生成されます。',
+                '「AI精度KPI」タブでは対象システムを選び、精度指標プリセット（認識精度・自動化率など）をワンクリックで追加するか、AIで生成します。',
+                '下のKPI一覧で内容を確認し、下書きは「採用」で運用中にします。カードをクリックすると全項目（SMART採点・IO紐づけ含む）を編集できます。',
+              ]}
+            />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="kpis"
+              label="KPI"
+              canEdit={canEdit}
+              onDone={() => void loadKpis()}
+            />
+          </>
         }
       />
 

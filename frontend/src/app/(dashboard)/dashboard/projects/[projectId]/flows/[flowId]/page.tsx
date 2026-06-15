@@ -76,6 +76,8 @@ import {
 } from '@/lib/flow-definition';
 import mermaid from 'mermaid';
 import { useReadOnly } from '@/components/read-only-context';
+import { ExportImportButton } from '@/components/io/ExportImportButton';
+import { entityJsonIo, type EntityBundle } from '@/lib/io';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -2370,6 +2372,20 @@ export default function ProjectFlowDetailPage() {
             />
           </div>
           <ManualButton feature="flows" />
+          {/* この業務フロー単体の JSON 入出力（entity-json：nodes/edges/定義/注釈/infoリンク丸ごと） */}
+          <ExportImportButton
+            label="業務フロー"
+            fileBaseName={`flow-${flowData.name ?? flowData.id}`}
+            size="sm"
+            canEdit={canEdit}
+            withModeChoice={false}
+            importHint="選択した JSON でこの業務フローの中身（ノード・矢印・業務定義・注釈・情報リンク）を丸ごと置き換えます。"
+            getExport={() => entityJsonIo.exportFlow(flowData.id)}
+            onImport={(parsed) =>
+              entityJsonIo.importFlow(flowData.id, parsed as EntityBundle)
+            }
+            onDone={() => fetchFlowData(flowData.id)}
+          />
           {/* フロー図タブのときだけ表示するツールバー */}
           {activeTab === 'flow' && (
           <>

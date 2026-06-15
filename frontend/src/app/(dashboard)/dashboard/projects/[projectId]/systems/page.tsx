@@ -20,6 +20,8 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
   systemApi,
   subProjectApi,
@@ -69,6 +71,7 @@ function KindIcon({ kind }: { kind: SystemKind }) {
 export default function SystemsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [systems, setSystems] = useState<SystemMaster[]>([]);
   const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
@@ -148,14 +151,23 @@ export default function SystemsPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              '上のフォームに名前を入れ、種別（対象／周辺）を選んで追加します。',
-              '各行の名前・説明をクリックして編集し、フォーカスを外すと保存されます。',
-              '種別や所属領域は行内の select で切り替えるとすぐ保存されます。',
-              'ゴミ箱アイコンで削除できます。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                '上のフォームに名前を入れ、種別（対象／周辺）を選んで追加します。',
+                '各行の名前・説明をクリックして編集し、フォーカスを外すと保存されます。',
+                '種別や所属領域は行内の select で切り替えるとすぐ保存されます。',
+                'ゴミ箱アイコンで削除できます。',
+              ]}
+            />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="systems"
+              label="システム"
+              canEdit={canEdit}
+              onDone={() => void load()}
+            />
+          </>
         }
       />
 
