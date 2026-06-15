@@ -8,11 +8,14 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:secrets": "if grep -rEn '(LIVEBLOCKS_SECRET|sk_(dev|prod|test|staging|live)_[A-Za-z0-9])' src; then echo 'ERROR: Liveblocks secret reference found in frontend/src' && exit 1; else echo 'OK: no Liveblocks secret in frontend/src'; fi"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
     "@hookform/resolvers": "^3.3.4",
+    "@liveblocks/client": "^2.24.4",
+    "@liveblocks/react": "^2.24.4",
     "@radix-ui/react-alert-dialog": "^1.0.5",
     "@radix-ui/react-avatar": "^1.0.4",
     "@radix-ui/react-dialog": "^1.0.5",

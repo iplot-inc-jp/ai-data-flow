@@ -6,3 +6,4 @@ export * from './resume-batch.use-case';
 export * from './cancel-batch.use-case';
 export * from './retry-file.use-case';
 export * from './skip-file.use-case';
+export * from './get-all-accessible-ingestion-batches.use-case';

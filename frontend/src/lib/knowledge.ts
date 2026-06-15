@@ -88,6 +88,11 @@ export interface IngestionBatch {
   finishedAt: string | null;
 }
 
+/** 横断一覧の1行（プロジェクト名付き）。GET /api/my/ingestion-batches */
+export interface IngestionBatchWithProject extends IngestionBatch {
+  projectName: string;
+}
+
 /** 取り込みファイル（子。バッチ詳細の files として返る）。 */
 export interface IngestionFile {
   id: string;
@@ -383,6 +388,12 @@ export const ingestionApi = {
     return ok<IngestionBatch[]>(res, 'バッチ一覧の取得に失敗しました');
   },
 
+  /** 横断一覧。GET /api/my/ingestion-batches */
+  async listAllBatches(): Promise<IngestionBatchWithProject[]> {
+    const res = await fetch(`${API_URL}/api/my/ingestion-batches`, { headers: headers() });
+    return ok<IngestionBatchWithProject[]>(res, 'バッチ横断一覧の取得に失敗しました');
+  },
+
   /** バッチ作成＆ジョブ投入。POST /api/projects/:id/ingestion-batches */
   async createBatch(
     projectId: string,
@@ -671,6 +682,26 @@ export function isBatchTerminal(status: IngestionBatchStatus): boolean {
     status === 'PARTIAL' ||
     status === 'CANCELLED'
   );
+}
+
+/** バッチ状態 → バッジ配色（プロジェクト別/横断の両ページで共有）。 */
+export const BATCH_STATUS_STYLE: Record<IngestionBatchStatus, string> = {
+  PENDING: 'bg-gray-100 text-gray-600',
+  EXPANDING: 'bg-blue-100 text-blue-700',
+  RUNNING: 'bg-indigo-100 text-indigo-700',
+  PARTIAL: 'bg-amber-100 text-amber-700',
+  SUCCEEDED: 'bg-emerald-100 text-emerald-700',
+  FAILED: 'bg-red-100 text-red-700',
+  CANCELLED: 'bg-gray-100 text-gray-500',
+};
+
+/** ISO文字列 → ja-JP の日時表記。不正値はそのまま返す。 */
+export function formatBatchDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('ja-JP', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
 }
 
 /** バイト数を人間可読に（B/KB/MB）。 */
