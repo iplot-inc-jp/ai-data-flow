@@ -114,6 +114,8 @@ model IssueTrackerConnection {
   email         String?
   // Backlog: APIキー / Jira: APIトークン。AES-256-GCM 暗号化保存。レスポンスでは返さない
   credentialEnc String               @map("credential_enc")
+  // webhook 受信用の秘密トークン（AES-256-GCM 暗号化）。null=webhook 無効。URL に埋め込み timing-safe 照合。
+  webhookSecretEnc String?           @map("webhook_secret_enc")
   // 取り込み対象のプロジェクトキー（Backlog projectKey / Jira project key）
   projectKey    String?              @map("project_key")
   lastSyncedAt  DateTime?            @map("last_synced_at")
