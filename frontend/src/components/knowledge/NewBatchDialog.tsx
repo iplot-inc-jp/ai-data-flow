@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { FileDropZone } from '@/components/ui/file-drop-zone'
+import { HelpTooltip } from '@/components/ui/help-tooltip'
 import {
   Loader2,
   X,
@@ -49,6 +50,7 @@ import {
   driveApi,
   formatBytes,
   isArchiveFile,
+  CLAUDE_MODEL_OPTIONS,
   DriveNotConfiguredError,
   type IngestionBatchSource,
   type IngestionBatchOptions,
@@ -383,7 +385,7 @@ export function NewBatchDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="w-[80vw] max-w-[80vw] sm:max-w-[80vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>新規取り込みバッチ</DialogTitle>
           <DialogDescription>
@@ -419,6 +421,12 @@ export function NewBatchDialog({
                 Google Drive
               </TabsTrigger>
             </TabsList>
+
+            {/* 取り込み元（ソース）の説明 */}
+            <p className="flex items-center gap-1 pt-2 text-xs text-muted-foreground">
+              取り込む素材（ファイル）の集め方を選びます。
+              <HelpTooltip text="アップロード=PC上のファイルを新規アップロード（ZIPは自動展開）。既存添付から選択=このプロジェクトに既にある添付ファイルを再利用。Google Drive=連携済みなら Drive のファイルを取り込み。どれを選んでも AI でナレッジグラフ化されます。" />
+            </p>
 
             {/* アップロード（ZIP 可・複数） */}
             <TabsContent value="upload" className="space-y-3 pt-2">
@@ -469,14 +477,22 @@ export function NewBatchDialog({
 
             {/* 既存添付から選択 */}
             <TabsContent value="attachment" className="space-y-2 pt-2">
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                このプロジェクトに既にある添付ファイルから選びます。
+                <HelpTooltip text="「既存添付」= このプロジェクトのどこかに既にアップロード済みのファイル（背景・目的ページの関連資料、タスクの添付、業務フローの添付、情報種別の具体データ など）。アップロードし直さずに、そのままナレッジ取り込みの素材にできます。" />
+              </p>
               {loadingAtt ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   読み込み中…
                 </div>
               ) : attachments.length === 0 ? (
-                <div className="text-sm text-muted-foreground py-6 text-center">
-                  選択できる添付ファイルがありません。
+                <div className="text-sm text-muted-foreground py-6 text-center space-y-1">
+                  <div>選択できる添付ファイルがありません。</div>
+                  <div className="text-xs">
+                    このプロジェクトにはまだ添付がありません。「アップロード」タブから追加するか、
+                    背景・目的ページなどで資料を添付してください。
+                  </div>
                 </div>
               ) : (
                 <ul className="space-y-1 max-h-56 overflow-y-auto">
@@ -660,8 +676,9 @@ export function NewBatchDialog({
 
           {/* 抽出オプション（料金ガード。プロジェクト設定を初期値にバッチ上書き） */}
           <div className="rounded-md border border-border p-3 space-y-2.5">
-            <div className="text-xs font-semibold text-muted-foreground">
+            <div className="flex items-center gap-1 text-xs font-semibold text-muted-foreground">
               抽出オプション（このバッチのみ上書き）
+              <HelpTooltip text="プロジェクトの既定設定（設定 > AI使用量、またはナレッジ設定）を初期値とし、このバッチだけ一時的に上書きします。次回以降の既定は変わりません。" />
             </div>
             <label className="flex items-start gap-2 text-sm cursor-pointer">
               <input
@@ -692,8 +709,9 @@ export function NewBatchDialog({
               </span>
             </label>
             <div className="space-y-1.5">
-              <Label htmlFor="batch-model" className="text-xs">
+              <Label htmlFor="batch-model" className="flex items-center gap-1 text-xs">
                 モデル（任意・空欄でサーバ既定）
+                <HelpTooltip text="抽出に使う Claude モデル。下に行くほど高品質・高単価です。空欄（サーバ既定）はサーバの環境変数 EXTRACTION_MODEL（既定 claude-sonnet-4-6）を使います。高品質が必要な文書だけ opus / fable を選ぶのがおすすめ。" />
               </Label>
               <Select
                 value={model || '__default__'}
@@ -703,13 +721,14 @@ export function NewBatchDialog({
                   <SelectValue placeholder="サーバ既定" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__default__">サーバ既定</SelectItem>
-                  <SelectItem value="claude-sonnet-4-6">
-                    claude-sonnet-4-6（標準）
+                  <SelectItem value="__default__">
+                    サーバ既定（EXTRACTION_MODEL / 既定 claude-sonnet-4-6）
                   </SelectItem>
-                  <SelectItem value="claude-opus-4-6">
-                    claude-opus-4-6（高品質・高単価）
-                  </SelectItem>
+                  {CLAUDE_MODEL_OPTIONS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

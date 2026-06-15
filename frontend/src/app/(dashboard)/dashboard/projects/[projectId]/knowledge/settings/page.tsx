@@ -22,6 +22,7 @@ import { useReadOnly } from '@/components/read-only-context'
 import { Brain, Loader2, AlertTriangle, Save } from 'lucide-react'
 import {
   knowledgeSettingsApi,
+  CLAUDE_MODEL_OPTIONS,
   type ProjectKnowledgeSettings,
   type UpdateSettingsInput,
 } from '@/lib/knowledge'
@@ -198,12 +199,11 @@ export default function KnowledgeSettingsPage() {
                   <SelectItem value="__default__">
                     サーバ既定（EXTRACTION_MODEL）
                   </SelectItem>
-                  <SelectItem value="claude-sonnet-4-6">
-                    claude-sonnet-4-6（標準）
-                  </SelectItem>
-                  <SelectItem value="claude-opus-4-6">
-                    claude-opus-4-6（高品質・高単価）
-                  </SelectItem>
+                  {CLAUDE_MODEL_OPTIONS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
