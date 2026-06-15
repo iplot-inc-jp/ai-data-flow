@@ -369,7 +369,9 @@ export default function ProjectDfdPage() {
         </p>
       </div>
 
-      {loading ? (
+      {loading && !diagram ? (
+        // スピナーは初回ロード（diagram 未取得）のみ。リフェッチ(loading=true でも diagram あり)
+        // では DfdCanvas をアンマウントしない＝再マウント時の fitView で拡大率が戻るのを防ぐ。
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
         </div>
