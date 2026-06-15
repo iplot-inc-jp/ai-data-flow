@@ -114,6 +114,8 @@ model IssueTrackerConnection {
   email         String?
   // Backlog: APIキー / Jira: APIトークン。AES-256-GCM 暗号化保存。レスポンスでは返さない
   credentialEnc String               @map("credential_enc")
+  // webhook 受信用の秘密トークン（AES-256-GCM 暗号化）。null=webhook 無効。URL に埋め込み timing-safe 照合。
+  webhookSecretEnc String?           @map("webhook_secret_enc")
   // 取り込み対象のプロジェクトキー（Backlog projectKey / Jira project key）
   projectKey    String?              @map("project_key")
   lastSyncedAt  DateTime?            @map("last_synced_at")
@@ -274,6 +276,11 @@ model Project {
   backgroundJobs          BackgroundJob[]
   webhooks                Webhook[]
   trackerConnections      IssueTrackerConnection[]
+  ingestionBatches        IngestionBatch[]
+  knowledgeDocuments      KnowledgeDocument[]
+  knowledgeNodes          KnowledgeNode[]
+  knowledgeRelations      KnowledgeRelation[]
+  driveConnections        DriveConnection[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1478,6 +1485,15 @@ enum TaskPriority {
   LOW
 }
 
+enum TaskIssueType {
+  EPIC
+  STORY
+  TASK
+  SUBTASK
+  BUG
+  OTHER
+}
+
 model Task {
   id             String       @id @default(uuid())
   projectId      String       @map("project_id")
@@ -1491,6 +1507,14 @@ model Task {
   description    String?      @db.Text
   status         TaskStatus   @default(OPEN)
   priority       TaskPriority @default(MEDIUM)
+  // アジャイル拡張: イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）
+  issueType      TaskIssueType @default(TASK) @map("issue_type")
+  // issueType=EPIC の Task を指す自己FK（親子サブタスクの parentId とは別系統）
+  epicId         String?      @map("epic_id")
+  // ストーリーポイント（見積もり）
+  storyPoints    Float?       @map("story_points")
+  // スプリント識別子（任意の文字列）
+  sprint         String?
   assigneeName   String?      @map("assignee_name")
   assigneeRoleId String?      @map("assignee_role_id")
   // イシューツリーのノードへの紐付け（ISSUE/CAUSE/COUNTERMEASURE）。任意。
@@ -1511,6 +1535,9 @@ model Task {
   project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parent       Task?            @relation("TaskHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children     Task[]           @relation("TaskHierarchy")
+  // アジャイル拡張: epic への自己FK（TaskHierarchy とは別名 TaskEpic で衝突回避）
+  epic         Task?            @relation("TaskEpic", fields: [epicId], references: [id], onDelete: SetNull)
+  epicChildren Task[]           @relation("TaskEpic")
   assigneeRole Role?            @relation("RoleAssignedTasks", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
   issueNode    IssueNode?       @relation(fields: [issueNodeId], references: [id], onDelete: SetNull)
   risk         Risk?            @relation(fields: [riskId], references: [id], onDelete: SetNull)
@@ -2455,4 +2482,225 @@ model AdoptionStatus {
   // インデックス (project_id, stakeholder_id) WHERE system_id IS NULL を追加予定。
   @@unique([projectId, stakeholderId, systemId])
   @@map("adoption_statuses")
+}
+
+// ===========================================
+// ナレッジグラフ取り込み（バッチ文書 → 抽出 → グラフ）
+// 設計: docs/superpowers/specs/2026-06-15-knowledge-graph-batch-ingestion-design.md §4
+// ===========================================
+
+// 取り込みバッチ（親）の状態
+enum IngestionBatchStatus {
+  PENDING
+  EXPANDING
+  RUNNING
+  PARTIAL
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+// 取り込みファイル（子）の細かい状態
+enum IngestionFileStatus {
+  PENDING
+  FETCHING
+  EXPANDING
+  PREPROCESSING
+  EXTRACTING
+  MERGING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+// 取り込み元の種別
+enum IngestionSourceType {
+  UPLOAD
+  ATTACHMENT
+  DRIVE
+}
+
+// ナレッジノードの種別（自動タグ / 実体）
+enum KnowledgeNodeType {
+  TAG
+  ENTITY
+}
+
+// 取り込みバッチ（親）。1バッチ = 複数 IngestionFile の2階層ステータス管理。
+model IngestionBatch {
+  id             String               @id @default(cuid())
+  projectId      String
+  name           String
+  status         IngestionBatchStatus @default(PENDING)
+  totalFiles     Int                  @default(0)
+  succeededFiles Int                  @default(0)
+  failedFiles    Int                  @default(0)
+  pendingFiles   Int                  @default(0)
+  options        Json? // {extractTags, extractEntities, extractRelations, imagingMode, model}
+  createdById    String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  files   IngestionFile[]
+
+  @@index([projectId])
+}
+
+// 取り込みファイル（子）。業務的な細かいステータスを保持（BackgroundJob は実行の器）。
+model IngestionFile {
+  id                  String              @id @default(cuid())
+  batchId             String
+  projectId           String
+  sourceType          IngestionSourceType
+  sourceRef           String? // attachmentId / driveFileId（UPLOAD は null）
+  filename            String
+  displayName         String?
+  mimeType            String?
+  size                Int?
+  blobUrl             String? // 原本の保管先（Vercel Blob）
+  isArchive           Boolean             @default(false) // ZIP 等のコンテナ（展開専用、グラフには載らない）
+  parentFileId        String? // どのアーカイブから展開されたか（ZIP 内エントリ）
+  status              IngestionFileStatus @default(PENDING)
+  step                String? // 現在ステップの人間可読ラベル
+  progress            Int                 @default(0)
+  attempts            Int                 @default(0)
+  maxAttempts         Int                 @default(4)
+  error               String?             @db.Text
+  extractedText       String?             @db.Text // 前処理で得たテキスト（監査/再抽出用）
+  pageImageUrls       Json? // 画像化した場合の Blob URL 群
+  extractionResult    Json? // Claude の生レスポンス（マージ前）
+  jobId               String? // → BackgroundJob.id
+  knowledgeDocumentId String? // 生成された KnowledgeDocument
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  startedAt           DateTime?
+  finishedAt          DateTime?
+
+  batch IngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([projectId])
+  @@index([status])
+}
+
+// 文書ノード（1ファイル = 1文書ノード。再実行で置換）。
+model KnowledgeDocument {
+  id              String              @id @default(cuid())
+  projectId       String
+  ingestionFileId String?             @unique // 1ファイル=1文書ノード（再実行で置換）
+  title           String
+  summary         String?             @db.Text // Claude 生成の要約
+  contentText     String?             @db.Text // 抽出全文（将来の検索/RAG 土台）
+  sourceType      IngestionSourceType
+  sourceRef       String?
+  blobUrl         String? // 原本リンク
+  mimeType        String?
+  positionX       Float?
+  positionY       Float?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mentions  KnowledgeMention[]
+  relations KnowledgeRelation[] @relation("RelationSourceDoc")
+
+  @@index([projectId])
+}
+
+// ナレッジノード（タグ / 実体）。文書横断で名寄せマージ。
+model KnowledgeNode {
+  id              String            @id @default(cuid())
+  projectId       String
+  type            KnowledgeNodeType
+  entityKind      String? // PERSON/SYSTEM/ORG/CONCEPT/PRODUCT/EVENT/LOCATION/TERM/OTHER
+  label           String
+  normalizedLabel String // 小文字化/trim/全半角正規化 → 名寄せキー
+  description     String?           @db.Text
+  color           String?
+  mentionCount    Int               @default(0)
+  positionX       Float?
+  positionY       Float?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  project      Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mentions     KnowledgeMention[]
+  outRelations KnowledgeRelation[] @relation("RelationFrom")
+  inRelations  KnowledgeRelation[] @relation("RelationTo")
+
+  @@unique([projectId, type, normalizedLabel]) // 文書横断マージ
+  @@index([projectId])
+}
+
+// 文書 ↔ ノード（メンション）。出現箇所の根拠付き。
+model KnowledgeMention {
+  id         String   @id @default(cuid())
+  projectId  String
+  documentId String
+  nodeId     String
+  relevance  Float? // 0..1（任意）
+  snippet    String?  @db.Text // 出現箇所の根拠
+  createdAt  DateTime @default(now())
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  node     KnowledgeNode     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, nodeId])
+  @@index([projectId])
+  @@index([nodeId])
+}
+
+// ノード ↔ ノード（関係）。出所（provenance）付き。
+model KnowledgeRelation {
+  id               String   @id @default(cuid())
+  projectId        String
+  fromNodeId       String
+  toNodeId         String
+  label            String? // 「承認する」「依存」等
+  type             String?
+  confidence       Float?
+  sourceDocumentId String? // どの文書が主張したか（provenance）
+  createdAt        DateTime @default(now())
+
+  project        Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromNode       KnowledgeNode      @relation("RelationFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode         KnowledgeNode      @relation("RelationTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+  sourceDocument KnowledgeDocument? @relation("RelationSourceDoc", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, fromNodeId, toNodeId, label, sourceDocumentId])
+  @@index([projectId])
+}
+
+// プロジェクト単位の課金ガード設定（AI抽出 / OCR の ON/OFF・モデル・上限）。
+model ProjectKnowledgeSettings {
+  id                  String   @id @default(cuid())
+  projectId           String   @unique
+  aiExtractionEnabled Boolean  @default(true) // Claude による 実体/タグ/関係/要約 抽出（$）
+  ocrEnabled          Boolean  @default(true) // 画像/スキャンPDF を vision/document で読む（$$, 画像トークン）
+  defaultModel        String? // 未設定なら EXTRACTION_MODEL
+  imagingMode         String   @default("auto") // auto | always | never（Office→画像化の方針）
+  maxFilesPerBatch    Int      @default(200)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Google Drive 接続（バッチ取り込みの DRIVE ソース）。
+// refresh token は AES-256-GCM（既存 CryptoService / TOKEN_ENC_KEY）で暗号化保存。レスポンスでは返さない。
+model DriveConnection {
+  id              String   @id @default(cuid())
+  projectId       String
+  email           String?
+  refreshTokenEnc String   @db.Text // AES-256-GCM 暗号化 refresh token
+  scope           String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId])
+  @@index([projectId])
 }

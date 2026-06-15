@@ -37,6 +37,21 @@ export interface NormalizedIssue {
   actualHours: number | null;
   /** 親課題キー（subtask の親 / Backlog の親課題）。無ければ null。 */
   parentExternalKey: string | null;
+  /**
+   * 課題種別の原文（例: "Epic" / "Story" / "Sub-task" / "Bug" / "Task" / Backlog の「子課題」等）。
+   * TaskIssueType への写像は取り込み側で行う。検出できなければ null。
+   */
+  issueType?: string | null;
+  /**
+   * Epic Link（このストーリー/タスクが属する Epic の外部キー）。
+   * subtask の親（parentExternalKey）とは別系統で、2 パスで epicId に解決する。
+   * 検出できなければ null。
+   */
+  epicExternalKey?: string | null;
+  /** ストーリーポイント（見積もり）。検出できなければ null。 */
+  storyPoints?: number | null;
+  /** スプリント名（active / 最後のもの）。検出できなければ null。 */
+  sprint?: string | null;
   /** コメント（取得した場合のみ。未取得は undefined）。 */
   comments?: NormalizedComment[];
 }

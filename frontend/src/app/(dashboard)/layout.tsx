@@ -43,6 +43,8 @@ import {
   Boxes,
   Table2,
   Sparkles,
+  Brain,
+  FileStack,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -585,12 +587,12 @@ export default function DashboardLayout({
   const { subProjects, flows } = useFlowTree(projectId)
   const { isSuperAdmin } = useCurrentUser()
 
-  // ガイド（全体マニュアル＋背景・目的）。プロジェクト選択時のみ・サイドメニュー最上部に表示
+  // ガイド（全体マニュアル）。プロジェクト選択時のみ・サイドメニュー最上部に表示。
+  // 背景・目的は独立したサブカテゴリ（projectGroups 先頭）へ移動した。
   const guideNav = useMemo(() => {
     if (!projectId) return []
     return [
       { name: 'ガイド', href: `/dashboard/projects/${projectId}/guide`, icon: Compass },
-      { name: '背景・目的', href: `/dashboard/projects/${projectId}/background`, icon: Landmark },
     ]
   }, [projectId])
 
@@ -614,6 +616,12 @@ export default function DashboardLayout({
     if (!projectId) return []
     const base = `/dashboard/projects/${projectId}`
     return [
+      {
+        label: '背景・目的',
+        items: [
+          { name: '背景・目的', href: `${base}/background`, icon: Landmark },
+        ],
+      },
       {
         label: '共通マスタ',
         items: [
@@ -643,6 +651,15 @@ export default function DashboardLayout({
         ],
       },
       {
+        label: 'ナレッジ',
+        items: [
+          { name: '取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
+          { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
+          { name: '一覧編集', href: `${base}/knowledge/list`, icon: ListTodo },
+          { name: '設定', href: `${base}/knowledge/settings`, icon: Settings },
+        ],
+      },
+      {
         label: '設計',
         items: [
           { name: 'TOBE管理', href: `${base}/tobe`, icon: Target },
@@ -665,6 +682,7 @@ export default function DashboardLayout({
           { name: 'ステークホルダーマネジメント', href: `${base}/stakeholder-management`, icon: Users },
           { name: 'リスクマネジメント', href: `${base}/risk-management`, icon: ShieldAlert },
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
+          { name: 'アジャイル', href: `${base}/tasks/agile`, icon: Layers },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
           { name: '変更履歴', href: `${base}/history`, icon: History },
         ],

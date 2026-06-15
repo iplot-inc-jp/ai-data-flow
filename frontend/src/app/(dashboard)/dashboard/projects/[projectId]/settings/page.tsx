@@ -15,6 +15,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
 import { useReadOnly } from '@/components/read-only-context'
 import { EditGate } from '@/components/edit-gate'
+import { ProjectBundleIo } from '@/components/io/ProjectBundleIo'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -206,20 +207,31 @@ export default function ProjectSettingsPage() {
             <p className="text-gray-500 mt-1">{project.name} の設定を管理</p>
           </div>
         </div>
-        <span id="howto-trigger-settings" className="contents">
-          <HowToPanel
-            steps={[
-              '「基本設定」タブでプロジェクト名・スラッグ・説明を編集し、「保存」を押します。',
-              '「ロール」タブでは登録済みロールの一覧を確認できます（追加・編集はロール管理ページへ）。',
-              '不要になったプロジェクトは「危険ゾーン」から削除できます（テーブル・フロー・ロールも全削除）。',
-              '入力中でも ⌘/Ctrl+S で保存できます。',
-            ]}
-            shortcuts={[
-              { keys: '⌘/Ctrl+S', desc: '基本設定を保存' },
-              { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
-            ]}
+        <div className="flex flex-wrap items-center gap-2">
+          <ProjectBundleIo
+            projectId={projectId}
+            projectName={project.name}
+            canEdit={canEdit}
+            onDone={() => {
+              if (typeof window !== 'undefined') window.location.reload();
+            }}
           />
-        </span>
+          <span id="howto-trigger-settings" className="contents">
+            <HowToPanel
+              steps={[
+                '「基本設定」タブでプロジェクト名・スラッグ・説明を編集し、「保存」を押します。',
+                '「ロール」タブでは登録済みロールの一覧を確認できます（追加・編集はロール管理ページへ）。',
+                '不要になったプロジェクトは「危険ゾーン」から削除できます（テーブル・フロー・ロールも全削除）。',
+                '「プロジェクト全体をエクスポート/インポート」で、プロジェクト全体を1つのJSONとして保存・取り込みできます。',
+                '入力中でも ⌘/Ctrl+S で保存できます。',
+              ]}
+              shortcuts={[
+                { keys: '⌘/Ctrl+S', desc: '基本設定を保存' },
+                { keys: 'Shift+/（?）', desc: 'この操作方法を開く' },
+              ]}
+            />
+          </span>
+        </div>
       </div>
 
       {/* メッセージ表示 */}

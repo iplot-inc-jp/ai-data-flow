@@ -30,6 +30,8 @@ import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { EditableMemoBoard } from '@/components/records/editable-memo-board';
 import {
   tobeVisionApi,
@@ -172,6 +174,7 @@ export default function TobeManagementPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [flows, setFlows] = useState<BusinessFlow[]>([]);
   const [subProjects, setSubProjects] = useState<SubProject[]>([]);
@@ -378,15 +381,24 @@ export default function TobeManagementPage() {
         description="あるべき姿（TOBE）の業務フロー・打ち手・段階設計を管理"
         help="このページであるべき姿（TOBE）の業務フローを選んで開き、打ち手・段階設計（3ヶ月/1年/3年）を一箇所で管理します。"
         actions={
-          <HowToPanel
-            title="TOBE管理の使い方"
-            steps={[
-              'TOBE業務フローのカードをクリックすると、そのフローを開いて編集できます。',
-              '「あるべき姿を追加」で領域（ASISと共通）を選んで新しいあるべき姿フローを作成し、そのまま編集画面に移動します。',
-              'あるべき姿・打ち手の表に、領域ごとのあるべき姿と打ち手・期待効果を書き留めます。',
-              '段階設計の表で、打ち手を 3ヶ月/1年/3年 に割り当て、ROI・コスト・回収期間・スコープ判断を整理します。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              title="TOBE管理の使い方"
+              steps={[
+                'TOBE業務フローのカードをクリックすると、そのフローを開いて編集できます。',
+                '「あるべき姿を追加」で領域（ASISと共通）を選んで新しいあるべき姿フローを作成し、そのまま編集画面に移動します。',
+                'あるべき姿・打ち手の表に、領域ごとのあるべき姿と打ち手・期待効果を書き留めます。',
+                '段階設計の表で、打ち手を 3ヶ月/1年/3年 に割り当て、ROI・コスト・回収期間・スコープ判断を整理します。',
+              ]}
+            />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="tobe"
+              label="TOBE（あるべき姿・打ち手）"
+              canEdit={canEdit}
+              onDone={() => void fetchAll()}
+            />
+          </>
         }
       />
 

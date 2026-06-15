@@ -4,6 +4,7 @@ import {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskIssueType,
 } from '../../../domain/entities/task.entity';
 import { IssueNodeKind } from '../../../domain/entities/issue-node.entity';
 import {
@@ -30,6 +31,10 @@ export class TaskRepositoryImpl implements ITaskRepository {
     description: string | null;
     status: string;
     priority: string;
+    issueType: string;
+    epicId: string | null;
+    storyPoints: number | null;
+    sprint: string | null;
     assigneeName: string | null;
     assigneeRoleId: string | null;
     issueNodeId: string | null;
@@ -55,6 +60,10 @@ export class TaskRepositoryImpl implements ITaskRepository {
       description: record.description,
       status: record.status as TaskStatus,
       priority: record.priority as TaskPriority,
+      issueType: record.issueType as TaskIssueType,
+      epicId: record.epicId,
+      storyPoints: record.storyPoints,
+      sprint: record.sprint,
       assigneeName: record.assigneeName,
       assigneeRoleId: record.assigneeRoleId,
       issueNodeId: record.issueNodeId,
@@ -133,6 +142,10 @@ export class TaskRepositoryImpl implements ITaskRepository {
       description: task.description,
       status: task.status as TaskStatus,
       priority: task.priority as TaskPriority,
+      issueType: task.issueType as TaskIssueType,
+      epicId: task.epicId,
+      storyPoints: task.storyPoints,
+      sprint: task.sprint,
       assigneeName: task.assigneeName,
       assigneeRoleId: task.assigneeRoleId,
       issueNodeId: task.issueNodeId,

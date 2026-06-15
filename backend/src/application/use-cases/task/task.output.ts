@@ -1,4 +1,10 @@
-import { Task, TaskStatus, TaskPriority, IssueNodeKind } from '../../../domain';
+import {
+  Task,
+  TaskStatus,
+  TaskPriority,
+  TaskIssueType,
+  IssueNodeKind,
+} from '../../../domain';
 import { TaskDependencyRecord } from '../../../domain';
 
 export interface TaskOutput {
@@ -9,6 +15,14 @@ export interface TaskOutput {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  /** イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）。 */
+  issueType: TaskIssueType;
+  /** 所属 Epic の TaskId。未紐付けは null。 */
+  epicId: string | null;
+  /** ストーリーポイント（見積もり）。未設定は null。 */
+  storyPoints: number | null;
+  /** スプリント識別子。未設定は null。 */
+  sprint: string | null;
   assigneeName: string | null;
   assigneeRoleId: string | null;
   /** 紐付くイシューノードID（ISSUE/CAUSE/COUNTERMEASURE）。未紐付けは null。 */
@@ -66,6 +80,10 @@ export function toTaskOutput(task: Task): TaskOutput {
     description: task.description,
     status: task.status,
     priority: task.priority,
+    issueType: task.issueType,
+    epicId: task.epicId,
+    storyPoints: task.storyPoints,
+    sprint: task.sprint,
     assigneeName: task.assigneeName,
     assigneeRoleId: task.assigneeRoleId,
     issueNodeId: task.issueNodeId,

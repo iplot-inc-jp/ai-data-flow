@@ -23,6 +23,7 @@ import { initOpenApi } from './lib/openapi.mjs';
 import * as generic from './tools/generic.mjs';
 import * as projects from './tools/projects.mjs';
 import * as projectBundle from './tools/project_bundle.mjs';
+import * as featureIo from './tools/feature_io.mjs';
 import * as flows from './tools/flows.mjs';
 import * as issuesGaps from './tools/issues_gaps.mjs';
 import * as tobeRequirements from './tools/tobe_requirements.mjs';
@@ -34,6 +35,8 @@ import * as catalog from './tools/catalog.mjs';
 import * as pm from './tools/pm.mjs';
 import * as rbac from './tools/rbac.mjs';
 import * as jobs from './tools/jobs.mjs';
+import * as entityJson from './tools/entity_json.mjs';
+import * as knowledge from './tools/knowledge.mjs';
 
 const API_URL = (process.env.AIDATAFLOW_API_URL || 'http://localhost:5021').replace(/\/$/, '');
 const API_KEY = process.env.AIDATAFLOW_API_KEY;
@@ -53,6 +56,7 @@ const modules = [
   generic,
   projects,
   projectBundle,
+  featureIo,
   flows,
   issuesGaps,
   tobeRequirements,
@@ -64,6 +68,8 @@ const modules = [
   pm,
   rbac,
   jobs,
+  entityJson,
+  knowledge,
 ];
 
 for (const mod of modules) {

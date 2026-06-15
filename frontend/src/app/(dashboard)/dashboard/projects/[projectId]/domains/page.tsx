@@ -30,6 +30,8 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import {
   listStakeholders,
@@ -105,6 +107,7 @@ function toTreeOrder(rows: SubProjectMaster[]): { row: SubProjectMaster; depth: 
 export default function DomainsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [items, setItems] = useState<SubProjectMaster[]>([]);
   // 各領域配下に表示する業務フロー（取得失敗時は空配列のまま＝領域一覧は動く）
@@ -283,14 +286,23 @@ export default function DomainsPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              '「領域を追加」フォームに名前を入れて追加します（最上位の分類軸）。',
-              '「サブ領域を追加」で名前を入れ、親領域を選んで追加します（領域の下に入れ子表示）。',
-              '各行の名前をクリックして編集し、フォーカスを外すと保存されます。',
-              'ゴミ箱アイコンで削除できます（サブ領域を持つ領域は先にサブ領域を削除してください）。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                '「領域を追加」フォームに名前を入れて追加します（最上位の分類軸）。',
+                '「サブ領域を追加」で名前を入れ、親領域を選んで追加します（領域の下に入れ子表示）。',
+                '各行の名前をクリックして編集し、フォーカスを外すと保存されます。',
+                'ゴミ箱アイコンで削除できます（サブ領域を持つ領域は先にサブ領域を削除してください）。',
+              ]}
+            />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="domains"
+              label="領域"
+              canEdit={canEdit}
+              onDone={() => void load()}
+            />
+          </>
         }
       />
 

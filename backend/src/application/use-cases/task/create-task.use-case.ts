@@ -3,6 +3,7 @@ import {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskIssueType,
   ITaskRepository,
   TASK_REPOSITORY,
   ProjectRepository,
@@ -29,6 +30,14 @@ export interface CreateTaskInput {
   description?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
+  /** イシュー種別（省略時は 'TASK'）。 */
+  issueType?: TaskIssueType;
+  /** 所属 Epic の TaskId（任意）。null は未紐付け。 */
+  epicId?: string | null;
+  /** ストーリーポイント（任意）。null は未設定。 */
+  storyPoints?: number | null;
+  /** スプリント識別子（任意）。null は未設定。 */
+  sprint?: string | null;
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
@@ -107,6 +116,10 @@ export class CreateTaskUseCase {
         description: input.description,
         status: input.status,
         priority: input.priority,
+        issueType: input.issueType,
+        epicId: input.epicId,
+        storyPoints: input.storyPoints,
+        sprint: input.sprint,
         assigneeName: input.assigneeName,
         assigneeRoleId: input.assigneeRoleId,
         issueNodeId: input.issueNodeId,

@@ -28,7 +28,9 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { BacklogImportDialog } from '@/components/backlog-import-dialog';
+import { JiraImportDialog } from '@/components/jira-import-dialog';
 import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
   DragDropContext,
   Droppable,
@@ -60,17 +62,23 @@ import {
   buildTaskTree,
   computeWbsNumbers,
   flattenTaskTree,
+  formatSp,
   sortTaskTree,
   collectDescendantIds,
   taskStatusLabels,
   taskPriorityLabels,
+  taskIssueTypeLabels,
+  taskIssueTypeMeta,
+  taskIssueTypeOf,
   issueNodeKindMeta,
   issueNodeKindOptionLabel,
   TASK_STATUSES,
   TASK_PRIORITIES,
+  TASK_ISSUE_TYPES,
   type Task,
   type TaskStatus,
   type TaskPriority,
+  type TaskIssueType,
   type TaskDependency,
   type TaskRole,
   type TaskTreeNode,
@@ -84,6 +92,10 @@ type FormState = {
   description: string;
   status: TaskStatus;
   priority: TaskPriority;
+  issueType: TaskIssueType;
+  epicId: string;
+  storyPoints: string;
+  sprint: string;
   parentId: string;
   assigneeName: string;
   assigneeRoleId: string;
@@ -103,6 +115,10 @@ const emptyForm: FormState = {
   description: '',
   status: 'OPEN',
   priority: 'MEDIUM',
+  issueType: 'TASK',
+  epicId: '',
+  storyPoints: '',
+  sprint: '',
   parentId: '',
   assigneeName: '',
   assigneeRoleId: '',
@@ -139,6 +155,8 @@ export default function TasksPage() {
   const [filterAssignee, setFilterAssignee] = useState<string>('ALL');
   const [filterMilestone, setFilterMilestone] = useState<string>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
+  const [filterIssueType, setFilterIssueType] = useState<string>('ALL');
+  const [filterSprint, setFilterSprint] = useState<string>('ALL');
   const [query, setQuery] = useState('');
   // 一覧のカラムソート（null = 手動順 order のまま）
   const [sortKey, setSortKey] = useState<TaskSortKey | null>(null);
@@ -148,6 +166,7 @@ export default function TasksPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Backlog CSV 取込ダイアログ
   const [importOpen, setImportOpen] = useState(false);
+  const [jiraImportOpen, setJiraImportOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +235,32 @@ export default function TasksPage() {
     return m;
   }, [tasks]);
 
+  // エピック（issueType=EPIC）一覧と id→タイトル（一覧の「エピック」列・フォームの選択肢用）
+  const epicTasks = useMemo(
+    () =>
+      tasks
+        .filter((t) => taskIssueTypeOf(t) === 'EPIC')
+        .sort(
+          (a, b) => a.order - b.order || a.title.localeCompare(b.title, 'ja')
+        ),
+    [tasks]
+  );
+
+  const epicTitleById = useMemo(() => {
+    const m = new Map<string, string>();
+    epicTasks.forEach((t) => m.set(t.id, t.title));
+    return m;
+  }, [epicTasks]);
+
+  // スプリント候補（空でないものを昇順）
+  const sprintOptions = useMemo(() => {
+    const set = new Set<string>();
+    tasks.forEach((t) => {
+      if (t.sprint) set.add(t.sprint);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ja'));
+  }, [tasks]);
+
   const issueNodeById = useMemo(() => {
     const m = new Map<string, IssueNodeRef>();
     issueNodes.forEach((n) => m.set(n.id, n));
@@ -261,10 +306,14 @@ export default function TasksPage() {
       if (filterMilestone === 'NO' && t.milestone) return false;
       if (filterCategory !== 'ALL' && (t.category ?? '') !== filterCategory)
         return false;
+      if (filterIssueType !== 'ALL' && taskIssueTypeOf(t) !== filterIssueType)
+        return false;
+      if (filterSprint !== 'ALL' && (t.sprint ?? '') !== filterSprint)
+        return false;
       if (q) {
         const hay = `${t.title} ${t.description ?? ''} ${
           t.assigneeName ?? ''
-        } ${t.category ?? ''}`.toLowerCase();
+        } ${t.category ?? ''} ${t.sprint ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -275,6 +324,8 @@ export default function TasksPage() {
       filterAssignee !== 'ALL' ||
       filterMilestone !== 'ALL' ||
       filterCategory !== 'ALL' ||
+      filterIssueType !== 'ALL' ||
+      filterSprint !== 'ALL' ||
       q.length > 0;
 
     if (!anyFilter) return null; // null = 全件表示
@@ -301,6 +352,8 @@ export default function TasksPage() {
     filterAssignee,
     filterMilestone,
     filterCategory,
+    filterIssueType,
+    filterSprint,
     query,
   ]);
 
@@ -330,6 +383,8 @@ export default function TasksPage() {
     filterAssignee !== 'ALL' ||
     filterMilestone !== 'ALL' ||
     filterCategory !== 'ALL' ||
+    filterIssueType !== 'ALL' ||
+    filterSprint !== 'ALL' ||
     query.trim().length > 0;
 
   const resetFilters = () => {
@@ -337,6 +392,8 @@ export default function TasksPage() {
     setFilterAssignee('ALL');
     setFilterMilestone('ALL');
     setFilterCategory('ALL');
+    setFilterIssueType('ALL');
+    setFilterSprint('ALL');
     setQuery('');
   };
 
@@ -361,6 +418,10 @@ export default function TasksPage() {
       description: task.description ?? '',
       status: task.status,
       priority: task.priority,
+      issueType: taskIssueTypeOf(task),
+      epicId: task.epicId ?? '',
+      storyPoints: task.storyPoints != null ? String(task.storyPoints) : '',
+      sprint: task.sprint ?? '',
       parentId: task.parentId ?? '',
       assigneeName: task.assigneeName ?? '',
       assigneeRoleId: task.assigneeRoleId ?? '',
@@ -393,6 +454,15 @@ export default function TasksPage() {
       .map((n) => ({ id: n.id, label: `${wbs.get(n.id) ?? ''} ${n.title}` }));
   }, [orderedNodes, editingId, tasks, wbs]);
 
+  // エピック選択肢：種別 EPIC のタスク。編集中タスク自身は除外（自己参照防止）。
+  const epicOptions = useMemo(
+    () =>
+      epicTasks
+        .filter((e) => e.id !== editingId)
+        .map((e) => ({ id: e.id, title: e.title })),
+    [epicTasks, editingId]
+  );
+
   // 先行タスク候補：自分自身・子孫を除外
   const predecessorOptions = useMemo(() => {
     const excluded = editingId
@@ -412,6 +482,11 @@ export default function TasksPage() {
     description: form.description.trim() || null,
     status: form.status,
     priority: form.priority,
+    issueType: form.issueType,
+    // 種別が EPIC のタスクはエピックに属さない（自己参照防止）
+    epicId: form.issueType === 'EPIC' ? null : form.epicId || null,
+    storyPoints: form.storyPoints === '' ? null : Number(form.storyPoints),
+    sprint: form.sprint.trim() || null,
     parentId: form.parentId || null,
     assigneeName: form.assigneeName.trim() || null,
     assigneeRoleId: form.assigneeRoleId || null,
@@ -568,14 +643,22 @@ export default function TasksPage() {
             <HowToPanel
               steps={[
                 '「タスクを追加」でタイトル・状態・優先度・担当・期限・進捗などを入力します。',
+                '種別（EPIC/STORY/TASK/SUBTASK/BUG）・エピック・SP（ストーリーポイント）・スプリントを設定すると、アジャイル（エピックボード）で集計されます。',
                 '親タスクを選ぶとサブタスクとして WBS 番号（例 1.2.3）付きでインデント表示されます。',
                 '先行タスクを指定すると依存関係が登録され、ガント／WBS 画面に反映されます。',
                 '各行の状態バッジから直接ステータスを変更でき、鉛筆で編集・ゴミ箱で削除できます。',
                 '上部の「一覧／ボード」で表示を切り替えられます。ボードではカードを別の列にドラッグして状態を変更できます。',
-                '上部のフィルタ（状態・担当・マイルストーン・カテゴリ・キーワード）で絞り込めます。',
+                '上部のフィルタ（状態・担当・マイルストーン・カテゴリ・種別・スプリント・キーワード）で絞り込めます。',
               ]}
             />
             <ManualButton feature="tasks" />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="tasks"
+              label="タスク"
+              canEdit={canEdit}
+              onDone={() => void fetchAll()}
+            />
             {/* 表示切替：一覧 / ボード */}
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
               <button
@@ -620,6 +703,17 @@ export default function TasksPage() {
               >
                 <FileSpreadsheet className="h-4 w-4" />
                 Backlogから取込
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                variant="outline"
+                onClick={() => setJiraImportOpen(true)}
+                className="gap-1.5"
+                title="Jira（Atlassian）の課題エクスポート CSV を取り込みます"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Jiraから取込
               </Button>
             )}
             {canEdit && (
@@ -694,6 +788,31 @@ export default function TasksPage() {
               options={[
                 { value: 'ALL', label: 'すべてのカテゴリ' },
                 ...categoryOptions.map((c) => ({ value: c, label: c })),
+              ]}
+            />
+
+            <FilterSelect
+              value={filterIssueType}
+              onChange={setFilterIssueType}
+              placeholder="種別"
+              width="w-[140px]"
+              options={[
+                { value: 'ALL', label: 'すべての種別' },
+                ...TASK_ISSUE_TYPES.map((it) => ({
+                  value: it,
+                  label: taskIssueTypeLabels[it].label,
+                })),
+              ]}
+            />
+
+            <FilterSelect
+              value={filterSprint}
+              onChange={setFilterSprint}
+              placeholder="スプリント"
+              width="w-[160px]"
+              options={[
+                { value: 'ALL', label: 'すべてのスプリント' },
+                ...sprintOptions.map((s) => ({ value: s, label: s })),
               ]}
             />
 
@@ -781,6 +900,10 @@ export default function TasksPage() {
                       </button>
                     </th>
                   ))}
+                  <th className="px-3 py-2 w-[90px]">種別</th>
+                  <th className="px-3 py-2 w-[140px]">エピック</th>
+                  <th className="px-3 py-2 w-[60px] text-right">SP</th>
+                  <th className="px-3 py-2 w-[120px]">スプリント</th>
                   <th className="px-3 py-2 w-[100px] text-right">操作</th>
                 </tr>
               </thead>
@@ -788,7 +911,7 @@ export default function TasksPage() {
                 {rows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={11}
                       className="px-3 py-8 text-center text-gray-400"
                     >
                       条件に一致するタスクがありません
@@ -928,6 +1051,55 @@ export default function TasksPage() {
                           </div>
                         </td>
 
+                        {/* 種別（issueType バッジ） */}
+                        <td className="px-3 py-2 align-top">
+                          {(() => {
+                            const it = taskIssueTypeOf(node);
+                            const meta = taskIssueTypeMeta(it);
+                            return (
+                              <span
+                                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium ${meta.color}`}
+                              >
+                                {meta.label}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* エピック名 */}
+                        <td className="px-3 py-2 align-top text-gray-600">
+                          {node.epicId && epicTitleById.get(node.epicId) ? (
+                            <span
+                              className="block max-w-[140px] truncate"
+                              title={epicTitleById.get(node.epicId)}
+                            >
+                              {epicTitleById.get(node.epicId)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
+                        </td>
+
+                        {/* SP（ストーリーポイント） */}
+                        <td className="px-3 py-2 align-top text-right text-gray-600 tabular-nums">
+                          {node.storyPoints != null ? (
+                            formatSp(node.storyPoints)
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
+                        </td>
+
+                        {/* スプリント */}
+                        <td className="px-3 py-2 align-top">
+                          {node.sprint ? (
+                            <span className="inline-block max-w-[120px] truncate rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] text-indigo-600 border border-indigo-200">
+                              {node.sprint}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
+                        </td>
+
                         {/* 操作 */}
                         <td className="px-3 py-2 align-top">
                           <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1042,6 +1214,98 @@ export default function TasksPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </Field>
+            </div>
+
+            {/* アジャイル: 種別 / エピック / SP / スプリント */}
+            <div className="grid grid-cols-2 gap-4">
+              <Field
+                label="種別"
+                help="EPIC（大きな塊）/ STORY / TASK / SUBTASK / BUG / OTHER。EPIC はエピックボードのグループになります。"
+              >
+                <Select
+                  value={form.issueType}
+                  onValueChange={(v) =>
+                    setForm({
+                      ...form,
+                      issueType: v as TaskIssueType,
+                      // EPIC を選んだら所属エピックはクリア（自己参照防止）
+                      epicId: v === 'EPIC' ? '' : form.epicId,
+                    })
+                  }
+                >
+                  <SelectTrigger className="bg-white border-gray-300">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    {TASK_ISSUE_TYPES.map((it) => (
+                      <SelectItem key={it} value={it}>
+                        {taskIssueTypeLabels[it].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field
+                label="エピック"
+                help="このタスクが属するエピック（種別 EPIC のタスク）を選びます。種別が EPIC のときは選べません。"
+              >
+                <Select
+                  value={form.epicId || NONE}
+                  onValueChange={(v) =>
+                    setForm({ ...form, epicId: v === NONE ? '' : v })
+                  }
+                  disabled={form.issueType === 'EPIC'}
+                >
+                  <SelectTrigger className="bg-white border-gray-300">
+                    <SelectValue placeholder="（エピック未割当）" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value={NONE}>（エピック未割当）</SelectItem>
+                    {epicOptions.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Field
+                label="ストーリーポイント（SP）"
+                help="見積もりの相対値。エピックボードでエピックごとに合計されます。"
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  placeholder="例：3"
+                  value={form.storyPoints}
+                  onChange={(e) =>
+                    setForm({ ...form, storyPoints: e.target.value })
+                  }
+                  className="bg-white border-gray-300"
+                />
+              </Field>
+              <Field
+                label="スプリント"
+                help="スプリント識別子（任意の文字列）。例：Sprint 1 / 2026-S1。"
+              >
+                <Input
+                  placeholder="例：Sprint 1"
+                  value={form.sprint}
+                  onChange={(e) => setForm({ ...form, sprint: e.target.value })}
+                  className="bg-white border-gray-300"
+                  list="task-sprint-options"
+                />
+                <datalist id="task-sprint-options">
+                  {sprintOptions.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
               </Field>
             </div>
 
@@ -1307,6 +1571,14 @@ export default function TasksPage() {
         projectId={projectId}
         onImported={fetchAll}
       />
+
+      {/* Jira CSV 取込ダイアログ（sourceKey 冪等 upsert・作成/更新/スキップ表示） */}
+      <JiraImportDialog
+        open={jiraImportOpen}
+        onOpenChange={setJiraImportOpen}
+        projectId={projectId}
+        onImported={fetchAll}
+      />
     </div>
   );
 }
@@ -1504,6 +1776,7 @@ function KanbanCard({
 }) {
   const { canEdit } = useReadOnly();
   const priority = taskPriorityLabels[node.priority];
+  const issueTypeMeta = taskIssueTypeMeta(taskIssueTypeOf(node));
   const assignee =
     node.assigneeName ||
     (node.assigneeRoleId ? roleNameById.get(node.assigneeRoleId) : '') ||
@@ -1524,15 +1797,20 @@ function KanbanCard({
               : 'border-gray-200 hover:border-gray-300 hover:shadow'
           }`}
         >
-          {/* 上段：優先度・WBS */}
-          <div className="mb-1.5 flex items-center justify-between gap-2">
+          {/* 上段：種別・優先度・WBS */}
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <span
+              className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${issueTypeMeta.color}`}
+            >
+              {issueTypeMeta.label}
+            </span>
             <span
               className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${priority.color}`}
             >
               優先度 {priority.label}
             </span>
             {wbsNo && (
-              <span className="font-mono text-[10px] tabular-nums text-gray-400">
+              <span className="ml-auto font-mono text-[10px] tabular-nums text-gray-400">
                 {wbsNo}
               </span>
             )}
@@ -1567,6 +1845,16 @@ function KanbanCard({
               <CalendarDays className="h-3 w-3 text-gray-400" />
               {node.dueDate ? node.dueDate.slice(0, 10) : '-'}
             </span>
+            {node.storyPoints != null && (
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 tabular-nums">
+                {formatSp(node.storyPoints)} SP
+              </span>
+            )}
+            {node.sprint && (
+              <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-600 border border-indigo-200">
+                {node.sprint}
+              </span>
+            )}
           </div>
 
           {/* 進捗 */}

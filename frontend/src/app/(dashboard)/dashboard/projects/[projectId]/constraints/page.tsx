@@ -18,6 +18,8 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { SortableTh } from '@/components/ui/sortable-th';
 import { useTableSort } from '@/lib/use-table-sort';
 import {
@@ -38,6 +40,7 @@ const CATEGORY_EXAMPLES = ['法令', '社内規定', '技術', '予算'];
 export default function ConstraintsPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
 
   const [constraints, setConstraints] = useState<ConstraintMaster[]>([]);
   const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
@@ -135,16 +138,25 @@ export default function ConstraintsPage() {
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
-          <HowToPanel
-            steps={[
-              '上のフォームに種別（制約/前提条件）・タイトル・カテゴリ（任意）を入力して「追加」します。',
-              '各行のタイトル・カテゴリ・説明はその場で編集でき、入力欄から離れると自動保存されます。',
-              '「種別」バッジをクリックすると、制約 ⇔ 前提条件 を切り替えられます。',
-              '上部のタブで「すべて／制約／前提条件」を切り替えて絞り込めます。',
-              '「領域」を選ぶと、その行を特定の領域（サブプロジェクト）に紐づけられます。',
-              '不要になった行はゴミ箱ボタンで削除します。',
-            ]}
-          />
+          <>
+            <HowToPanel
+              steps={[
+                '上のフォームに種別（制約/前提条件）・タイトル・カテゴリ（任意）を入力して「追加」します。',
+                '各行のタイトル・カテゴリ・説明はその場で編集でき、入力欄から離れると自動保存されます。',
+                '「種別」バッジをクリックすると、制約 ⇔ 前提条件 を切り替えられます。',
+                '上部のタブで「すべて／制約／前提条件」を切り替えて絞り込めます。',
+                '「領域」を選ぶと、その行を特定の領域（サブプロジェクト）に紐づけられます。',
+                '不要になった行はゴミ箱ボタンで削除します。',
+              ]}
+            />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="constraints"
+              label="制約・前提"
+              canEdit={canEdit}
+              onDone={() => void load()}
+            />
+          </>
         }
       />
 

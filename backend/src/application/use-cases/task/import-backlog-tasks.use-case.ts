@@ -3,6 +3,7 @@ import {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskIssueType,
   ITaskRepository,
   TASK_REPOSITORY,
   ProjectRepository,
@@ -130,11 +131,12 @@ export class ImportBacklogTasksUseCase {
     const keyToTaskId = new Map<string, string>();
     /** 重複が検出された課題キー（親解決対象から除外する）。 */
     const duplicateKeys = new Set<string>();
-    /** 各データ行の作成結果（親解決パスで使う）。スキップ行は null。 */
+    /** 各データ行の作成結果（親/Epic 解決パスで使う）。スキップ行は null。 */
     const created: Array<{
       rowNo: number;
       taskId: string;
       parentKey: string | null;
+      epicKey: string | null;
     } | null> = [];
 
     for (let i = 0; i < dataRows.length; i++) {
@@ -163,6 +165,9 @@ export class ImportBacklogTasksUseCase {
             description: optional(cell(fields, col.description)),
             status: mapStatus(cell(fields, col.status)),
             priority: mapPriority(cell(fields, col.priority)),
+            issueType: mapIssueType(cell(fields, col.issueType)),
+            storyPoints: parseStoryPoints(cell(fields, col.storyPoints)),
+            sprint: optional(cell(fields, col.sprint)),
             assigneeName: optional(cell(fields, col.assigneeName)),
             startDate: parseDate(cell(fields, col.startDate)),
             dueDate: parseDate(cell(fields, col.dueDate)),
@@ -191,7 +196,13 @@ export class ImportBacklogTasksUseCase {
           }
         }
         const parentKey = cell(fields, col.parentKey).trim();
-        created.push({ rowNo, taskId: id, parentKey: parentKey || null });
+        const epicKey = cell(fields, col.epicKey).trim();
+        created.push({
+          rowNo,
+          taskId: id,
+          parentKey: parentKey || null,
+          epicKey: epicKey || null,
+        });
       } catch (e) {
         errors.push({
           row: rowNo,
@@ -241,6 +252,32 @@ export class ImportBacklogTasksUseCase {
         errors.push({
           row: entry.rowNo,
           message: `親課題の紐付けに失敗しました: ${(e as Error)?.message ?? String(e)}`,
+        });
+      }
+    }
+
+    // ===== パス3: Epic Link キーを解決して epicId を設定 =====
+    // 親課題（parentId）とは別系統の自己FK。未知キー/重複キー/自己参照は安全側で無視。
+    for (const entry of created) {
+      if (!entry || !entry.epicKey) continue;
+      const epicId = keyToTaskId.get(entry.epicKey);
+      if (!epicId || epicId === entry.taskId) continue;
+      if (duplicateKeys.has(entry.epicKey)) {
+        errors.push({
+          row: entry.rowNo,
+          message: `Epic キー「${entry.epicKey}」が重複しており紐付け先が一意に定まらないため、Epic なしにしました`,
+        });
+        continue;
+      }
+      try {
+        const task = await this.taskRepository.findById(entry.taskId);
+        if (!task) continue;
+        task.update({ epicId });
+        await this.taskRepository.save(task);
+      } catch (e) {
+        errors.push({
+          row: entry.rowNo,
+          message: `Epic の紐付けに失敗しました: ${(e as Error)?.message ?? String(e)}`,
         });
       }
     }
@@ -368,6 +405,10 @@ interface ColumnIndex {
   description?: number;
   status?: number;
   priority?: number;
+  issueType?: number;
+  epicKey?: number;
+  storyPoints?: number;
+  sprint?: number;
   assigneeName?: number;
   startDate?: number;
   dueDate?: number;
@@ -400,6 +441,16 @@ function buildColumnIndex(header: string[]): ColumnIndex {
     description: find('詳細', '説明', 'Description'),
     status: find('状態', 'ステータス', 'Status'),
     priority: find('優先度', 'Priority'),
+    issueType: find('種別', '種別名', '課題種別', 'Issue Type', 'IssueType'),
+    epicKey: find('Epic Link', 'エピック', '親Epic', '親エピック', 'EpicLink'),
+    storyPoints: find(
+      'Story Points',
+      'ストーリーポイント',
+      '見積もりポイント',
+      '見積りポイント',
+      'StoryPoints',
+    ),
+    sprint: find('Sprint', 'スプリント'),
     assigneeName: find('担当者', '担当者名', 'Assignee'),
     startDate: find('開始日', 'Start Date', 'StartDate'),
     dueDate: find('期限日', '期限', '締切', 'Due Date', 'DueDate'),
@@ -475,6 +526,22 @@ export function mapPriority(raw: string): TaskPriority {
   }
 }
 
+/**
+ * 課題種別の原文 → TaskIssueType。Backlog（タスク/バグ/子課題 等）/ Jira 語彙双方を許容し、
+ * 未知値は安全な既定 'TASK' にフォールバックする。
+ */
+export function mapIssueType(raw: string): TaskIssueType {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (!v) return 'TASK';
+  if (/(epic|エピック)/.test(v)) return 'EPIC';
+  // Sub-task は Story / Task より先に判定（"sub-task" の "task" 誤判定を避ける）。
+  if (/(sub[-\s]?task|subtask|子課題|サブタスク)/.test(v)) return 'SUBTASK';
+  if (/(story|ストーリー)/.test(v)) return 'STORY';
+  if (/(bug|バグ|不具合|障害)/.test(v)) return 'BUG';
+  if (/(task|タスク)/.test(v)) return 'TASK';
+  return 'TASK';
+}
+
 // ========== 値パーサ ==========
 
 /**
@@ -493,6 +560,15 @@ function parseDate(raw: string): Date | null {
 
 /** 工数文字列を数値に変換。空や不正値は null。負値は 0 に丸めず null とする。 */
 function parseHours(raw: string): number | null {
+  const v = (raw ?? '').trim();
+  if (!v) return null;
+  const num = Number(v);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
+
+/** ストーリーポイント文字列を数値に変換。空や不正値・負値は null。 */
+function parseStoryPoints(raw: string): number | null {
   const v = (raw ?? '').trim();
   if (!v) return null;
   const num = Number(v);

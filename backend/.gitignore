@@ -2,3 +2,4 @@
 .env.neon
 .env.prod-pull
 .env.prod-secrets
+.env*.local

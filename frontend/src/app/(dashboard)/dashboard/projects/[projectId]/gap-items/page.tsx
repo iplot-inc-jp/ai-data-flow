@@ -49,6 +49,7 @@ import { AnalysisTab } from './_components/analysis-tab';
 import { LedgerTab } from './_components/ledger-tab';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -562,6 +563,13 @@ export default function GapItemsPage() {
             ]}
           />
           <ManualButton feature="gap-items" />
+          <FeatureSectionIo
+            projectId={projectId}
+            sectionKey="gaps"
+            label="GAP（課題）"
+            canEdit={canEdit}
+            onDone={() => void fetchItems()}
+          />
           {canEdit && (
             <Button onClick={() => setIsCreateOpen(true)} className="bg-blue-600 hover:bg-blue-700">
               <Plus className="h-4 w-4 mr-2" />

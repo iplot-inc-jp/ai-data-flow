@@ -3,6 +3,7 @@ import {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskIssueType,
   TaskComment,
   ITaskRepository,
   TASK_REPOSITORY,
@@ -12,8 +13,8 @@ import {
 import { PrismaService } from '../../persistence/prisma/prisma.service';
 import { CryptoService } from '../crypto.service';
 import { NormalizedComment, NormalizedIssue } from './types';
-import { backlogListIssues } from './backlog-api';
-import { jiraListIssues } from './jira-api';
+import { backlogGetIssue, backlogListIssues } from './backlog-api';
+import { jiraGetIssue, jiraListIssues } from './jira-api';
 
 /** TRACKER_IMPORT ジョブの結果サマリ（result に記録 / フロントが表示）。 */
 export interface TrackerImportResult {
@@ -117,79 +118,35 @@ export class TrackerImportService {
     // ===== 2. パス1: Task の upsert（sourceKey で冪等） =====
     // externalKey（プロバイダ内一意） → 作成/既存の TaskId。
     const keyToTaskId = new Map<string, string>();
-    // 親解決パス用に各課題の (taskId, parentExternalKey) を保持。
+    // 親/Epic 解決パス用に各課題の (taskId, parentExternalKey, epicExternalKey) を保持。
     const linkPlan: Array<{
       externalKey: string;
       taskId: string;
       parentExternalKey: string | null;
+      epicExternalKey: string | null;
     }> = [];
 
     const total = issues.length || 1;
     for (let i = 0; i < issues.length; i++) {
       const issue = issues[i];
-      const sourceKey = this.buildSourceKey(conn.provider, issue.externalKey);
       try {
-        const existing = await this.taskRepository.findByProjectIdAndSourceKey(
+        // 1 件の NormalizedIssue を Task に upsert（sourceKey 冪等。親/Epic は後段パス）。
+        const { taskId, created, commentsCreated } = await this.upsertIssue(
           conn.projectId,
-          sourceKey,
+          conn.provider,
+          issue,
         );
-
-        const status = mapStatus(issue.status, conn.provider);
-        const priority = mapPriority(issue.priority, conn.provider);
-
-        let taskId: string;
-        if (existing) {
-          // 既存タスクを更新（親は後段パスで設定するためここでは触らない）。
-          existing.update({
-            title: issue.title,
-            description: issue.description,
-            status,
-            priority,
-            assigneeName: issue.assigneeName,
-            startDate: parseDate(issue.startDate),
-            dueDate: parseDate(issue.dueDate),
-            estimatedHours: issue.estimatedHours,
-            actualHours: issue.actualHours,
-          });
-          await this.taskRepository.save(existing);
-          taskId = existing.id;
-          result.updated++;
-        } else {
-          taskId = this.taskRepository.generateId();
-          const task = Task.create(
-            {
-              projectId: conn.projectId,
-              sourceKey,
-              title: issue.title,
-              description: issue.description,
-              status,
-              priority,
-              assigneeName: issue.assigneeName,
-              startDate: parseDate(issue.startDate),
-              dueDate: parseDate(issue.dueDate),
-              estimatedHours: issue.estimatedHours,
-              actualHours: issue.actualHours,
-            },
-            taskId,
-          );
-          await this.taskRepository.save(task);
-          result.created++;
-        }
+        if (created) result.created++;
+        else result.updated++;
+        result.commentsCreated += commentsCreated;
 
         keyToTaskId.set(issue.externalKey, taskId);
         linkPlan.push({
           externalKey: issue.externalKey,
           taskId,
           parentExternalKey: issue.parentExternalKey,
+          epicExternalKey: issue.epicExternalKey ?? null,
         });
-
-        // コメント取込（重複を避けて追記）。
-        if (issue.comments && issue.comments.length > 0) {
-          result.commentsCreated += await this.upsertComments(
-            taskId,
-            issue.comments,
-          );
-        }
       } catch (e) {
         result.skipped++;
         result.errors.push(
@@ -212,10 +169,28 @@ export class TrackerImportService {
     // 既存リンクをシードに入れる（取込外のタスクとの循環も検知できるよう全件は引かないが、
     // 取込対象内の整合は十分担保できる）。
     for (const plan of linkPlan) {
-      if (!plan.parentExternalKey) continue;
-      const parentId = keyToTaskId.get(plan.parentExternalKey);
+      const parentId = plan.parentExternalKey
+        ? keyToTaskId.get(plan.parentExternalKey)
+        : undefined;
       // 取込集合に親が居ない（差分取込で親が範囲外 等）/ 自己参照は親なしのまま。
-      if (!parentId || parentId === plan.taskId) continue;
+      if (!parentId || parentId === plan.taskId) {
+        // full モードのみ: 外部側で親が外れた（externalKey が null）場合は parentId を明示クリアする。
+        // 差分モードは取込範囲外の親（externalKey 解決不能）を誤って外す恐れがあるため対象外。
+        if (mode === 'full' && !plan.parentExternalKey) {
+          try {
+            const task = await this.taskRepository.findById(plan.taskId);
+            if (task && task.parentId !== null) {
+              task.reparent(null);
+              await this.taskRepository.save(task);
+            }
+          } catch (e) {
+            result.errors.push(
+              `課題 ${plan.externalKey} の親解除に失敗: ${(e as Error)?.message ?? String(e)}`,
+            );
+          }
+        }
+        continue;
+      }
       if (wouldFormCycle(appliedParent, plan.taskId, parentId)) {
         result.errors.push(
           `課題 ${plan.externalKey} の親 ${plan.parentExternalKey} は循環になるため親なしにしました`,
@@ -237,6 +212,45 @@ export class TrackerImportService {
       }
     }
 
+    // ===== 3b. Epic 紐付け（epicExternalKey → epicId）を解決 =====
+    // parentId（subtask の親）とは別系統の自己FK。externalKey→taskId マップで解決する。
+    // 取込集合に Epic が居ない（差分取込で範囲外 等）/ 自己参照は epic なしのまま（安全側 null）。
+    for (const plan of linkPlan) {
+      const epicId = plan.epicExternalKey
+        ? keyToTaskId.get(plan.epicExternalKey)
+        : undefined;
+      if (!epicId || epicId === plan.taskId) {
+        // full モードのみ: 外部側で Epic Link が外れた場合は epicId を明示クリアする。
+        // 差分モードは Epic が取込範囲外のことがあり誤クリアの恐れがあるため対象外。
+        if (mode === 'full' && !plan.epicExternalKey) {
+          try {
+            const task = await this.taskRepository.findById(plan.taskId);
+            if (task && task.epicId !== null) {
+              task.update({ epicId: null });
+              await this.taskRepository.save(task);
+            }
+          } catch (e) {
+            result.errors.push(
+              `課題 ${plan.externalKey} の Epic 解除に失敗: ${(e as Error)?.message ?? String(e)}`,
+            );
+          }
+        }
+        continue;
+      }
+      try {
+        const task = await this.taskRepository.findById(plan.taskId);
+        if (!task) continue;
+        if (task.epicId !== epicId) {
+          task.update({ epicId });
+          await this.taskRepository.save(task);
+        }
+      } catch (e) {
+        result.errors.push(
+          `課題 ${plan.externalKey} の Epic 紐付けに失敗: ${(e as Error)?.message ?? String(e)}`,
+        );
+      }
+    }
+
     await onProgress?.(95);
 
     // ===== 4. lastSyncedAt を更新 =====
@@ -251,6 +265,177 @@ export class TrackerImportService {
   /** "BACKLOG:IPLOT-12" 形式の由来キー。 */
   private buildSourceKey(provider: string, externalKey: string): string {
     return `${provider}:${externalKey}`;
+  }
+
+  /**
+   * 1 件の NormalizedIssue を Task に upsert する（sourceKey で冪等）。
+   * 既存があれば update、無ければ create。親/Epic リンクはここでは触らず後段パス（run）/
+   * importSingleByKey 側で解決する。コメントは重複回避で追記する。
+   * @returns 作成/更新の別と、追記したコメント件数（taskId は親/Epic 解決に使う）。
+   */
+  private async upsertIssue(
+    projectId: string,
+    provider: string,
+    issue: NormalizedIssue,
+  ): Promise<{ taskId: string; created: boolean; commentsCreated: number }> {
+    const sourceKey = this.buildSourceKey(provider, issue.externalKey);
+    const existing = await this.taskRepository.findByProjectIdAndSourceKey(
+      projectId,
+      sourceKey,
+    );
+
+    const status = mapStatus(issue.status, provider);
+    const priority = mapPriority(issue.priority, provider);
+    const issueType = mapIssueType(issue.issueType);
+
+    let taskId: string;
+    let created: boolean;
+    if (existing) {
+      // 既存タスクを更新（親/Epic は後段パスで設定するためここでは触らない）。
+      existing.update({
+        title: issue.title,
+        description: issue.description,
+        status,
+        priority,
+        issueType,
+        storyPoints: issue.storyPoints ?? null,
+        sprint: issue.sprint ?? null,
+        assigneeName: issue.assigneeName,
+        startDate: parseDate(issue.startDate),
+        dueDate: parseDate(issue.dueDate),
+        estimatedHours: issue.estimatedHours,
+        actualHours: issue.actualHours,
+      });
+      await this.taskRepository.save(existing);
+      taskId = existing.id;
+      created = false;
+    } else {
+      taskId = this.taskRepository.generateId();
+      const task = Task.create(
+        {
+          projectId,
+          sourceKey,
+          title: issue.title,
+          description: issue.description,
+          status,
+          priority,
+          issueType,
+          storyPoints: issue.storyPoints ?? null,
+          sprint: issue.sprint ?? null,
+          assigneeName: issue.assigneeName,
+          startDate: parseDate(issue.startDate),
+          dueDate: parseDate(issue.dueDate),
+          estimatedHours: issue.estimatedHours,
+          actualHours: issue.actualHours,
+        },
+        taskId,
+      );
+      await this.taskRepository.save(task);
+      created = true;
+    }
+
+    // コメント取込（重複を避けて追記）。
+    let commentsCreated = 0;
+    if (issue.comments && issue.comments.length > 0) {
+      commentsCreated = await this.upsertComments(taskId, issue.comments);
+    }
+
+    return { taskId, created, commentsCreated };
+  }
+
+  /**
+   * webhook 受信時に「変更された 1 課題だけ」を既存の正規化 + upsert 経路で取り込む。
+   * 接続の provider/host/credential/projectKey を使い、その 1 key に絞って外部 API を呼ぶ。
+   * 取得できた NormalizedIssue を connection.projectId に upsert（sourceKey 冪等）し、
+   * 親/Epic は既存 Task から sourceKey で引けたら張る（取込集合は 1 件なので新規には作らない）。
+   *
+   * @param connectionId 接続レコード ID
+   * @param externalKey 取り込む課題の外部キー（例 "ABC-12" / "IPLOT-3"）
+   * @returns 'upserted'=取り込んだ / 'not_found'=外部に該当課題が無かった
+   */
+  async importSingleByKey(
+    connectionId: string,
+    externalKey: string,
+  ): Promise<'upserted' | 'not_found'> {
+    const conn = await this.prisma.issueTrackerConnection.findUnique({
+      where: { id: connectionId },
+    });
+    if (!conn) {
+      throw new Error(`トラッカー接続が見つかりません: ${connectionId}`);
+    }
+
+    const credential = this.crypto.decrypt(conn.credentialEnc);
+
+    // ===== 1. その 1 key に絞って外部 API から取得（正規化済み） =====
+    let issue: NormalizedIssue | null;
+    if (conn.provider === 'BACKLOG') {
+      issue = await backlogGetIssue(conn.host, credential, externalKey, {
+        includeComments: true,
+      });
+    } else if (conn.provider === 'JIRA') {
+      if (!conn.email) {
+        throw new Error('Jira 接続には認証メールアドレス(email)が必要です');
+      }
+      issue = await jiraGetIssue(conn.host, conn.email, credential, externalKey, {
+        includeComments: true,
+      });
+    } else {
+      throw new Error(`未対応のプロバイダです: ${conn.provider}`);
+    }
+
+    if (!issue) return 'not_found';
+
+    // ===== 2. upsert（sourceKey 冪等。既存あれば update、無ければ create） =====
+    const { taskId } = await this.upsertIssue(
+      conn.projectId,
+      conn.provider,
+      issue,
+    );
+
+    // ===== 3. 親/Epic を既存 Task から sourceKey で解決（単一なので新規には作らない） =====
+    // lastSyncedAt は更新しない（webhook の単発取込であり、差分ポーリングの取りこぼし補修
+    // 範囲を狭めないため。最終同期時刻は run() のフル/差分同期が担う）。
+    await this.relinkSingle(conn.projectId, conn.provider, taskId, issue);
+
+    return 'upserted';
+  }
+
+  /**
+   * 単一 import 時の親/Epic 解決。取込集合が 1 件なので、親/Epic は既存 Task を
+   * sourceKey で引けた場合のみ張る（無ければ親/Epic なしのまま＝安全側）。
+   * full import の親解除ロジックとは異なり、webhook は差分的なので明示クリアはしない。
+   */
+  private async relinkSingle(
+    projectId: string,
+    provider: string,
+    taskId: string,
+    issue: NormalizedIssue,
+  ): Promise<void> {
+    const resolve = async (key: string | null | undefined) => {
+      if (!key) return null;
+      const t = await this.taskRepository.findByProjectIdAndSourceKey(
+        projectId,
+        this.buildSourceKey(provider, key),
+      );
+      return t && t.id !== taskId ? t.id : null;
+    };
+
+    const parentId = await resolve(issue.parentExternalKey);
+    const epicId = await resolve(issue.epicExternalKey);
+    if (parentId === null && epicId === null) return;
+
+    const task = await this.taskRepository.findById(taskId);
+    if (!task) return;
+    let changed = false;
+    if (parentId !== null && task.parentId !== parentId) {
+      task.reparent(parentId);
+      changed = true;
+    }
+    if (epicId !== null && task.epicId !== epicId) {
+      task.update({ epicId });
+      changed = true;
+    }
+    if (changed) await this.taskRepository.save(task);
   }
 
   /**
@@ -333,6 +518,29 @@ export function mapPriority(
   if (/(低|lowest|low|minor|trivial)/.test(v)) return 'LOW';
   if (/(中|medium|normal|major)/.test(v)) return 'MEDIUM';
   return 'MEDIUM';
+}
+
+/**
+ * 課題種別の原文 → TaskIssueType。
+ * Jira（Epic/Story/Sub-task/Bug/Task）/ Backlog（タスク/バグ/子課題 等）双方を許容し、
+ * 未知値は安全な既定 'TASK' にフォールバックする。
+ */
+export function mapIssueType(
+  raw: string | null | undefined,
+): TaskIssueType {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (!v) return 'TASK';
+  // Epic
+  if (/(epic|エピック)/.test(v)) return 'EPIC';
+  // Sub-task（"sub-task" / "subtask" / Backlog の「子課題」「サブタスク」）。Story より先に判定。
+  if (/(sub[-\s]?task|subtask|子課題|サブタスク)/.test(v)) return 'SUBTASK';
+  // Story
+  if (/(story|ストーリー)/.test(v)) return 'STORY';
+  // Bug
+  if (/(bug|バグ|不具合|障害)/.test(v)) return 'BUG';
+  // Task（"task" / Backlog の「タスク」）
+  if (/(task|タスク)/.test(v)) return 'TASK';
+  return 'TASK';
 }
 
 /** 日付文字列 → Date（不正/空は null）。'YYYY/MM/DD' も許容。 */

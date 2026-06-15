@@ -15,6 +15,19 @@ export type TaskStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
 
 export type TaskPriority = 'HIGH' | 'MEDIUM' | 'LOW';
 
+/**
+ * アジャイル拡張: イシュー種別。
+ * EPIC（大きな塊）→ STORY（ユーザーストーリー）→ TASK/SUBTASK（作業）/ BUG（不具合）/ OTHER。
+ * 既存タスクの既定値は TASK（バックエンド schema の @default(TASK) と一致）。
+ */
+export type TaskIssueType =
+  | 'EPIC'
+  | 'STORY'
+  | 'TASK'
+  | 'SUBTASK'
+  | 'BUG'
+  | 'OTHER';
+
 export interface Task {
   id: string;
   projectId: string;
@@ -41,6 +54,15 @@ export interface Task {
   issueNodeLabel?: string | null;
   /** 紐付いた課題ノードの種別（CAUSE=調査 / COUNTERMEASURE=打ち手） */
   issueNodeKind?: IssueNodeKind | null;
+  // ---- アジャイル拡張（バックエンドが順次返すフィールド。未対応 API でも壊れないよう任意） ----
+  /** イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）。未指定なら TASK 相当。 */
+  issueType?: TaskIssueType | null;
+  /** 所属エピック（issueType=EPIC のタスク id）。未割当は null。 */
+  epicId?: string | null;
+  /** ストーリーポイント（見積もり）。未設定は null。 */
+  storyPoints?: number | null;
+  /** スプリント識別子（任意の文字列）。未設定は null。 */
+  sprint?: string | null;
 }
 
 /** 課題ツリーのノード種別。タスク紐付けで使うのは CAUSE / COUNTERMEASURE。 */
@@ -75,6 +97,18 @@ export interface ImportBacklogRowError {
 /** POST /projects/:id/tasks/import-backlog の結果。 */
 export interface ImportBacklogResult {
   created: number;
+  skipped: number;
+  errors: ImportBacklogRowError[];
+}
+
+/**
+ * POST /projects/:id/tasks/import-jira の結果。
+ * Backlog 版に加え、sourceKey='JIRA:<Issue key>' での冪等 upsert により
+ * 既存課題を更新した件数（updated）を含む。
+ */
+export interface ImportJiraResult {
+  created: number;
+  updated: number;
   skipped: number;
   errors: ImportBacklogRowError[];
 }
@@ -165,6 +199,69 @@ export const taskPriorityLabels: Record<
   MEDIUM: { label: '中', color: 'bg-amber-50 text-amber-600 border-amber-200' },
   LOW: { label: '低', color: 'bg-green-50 text-green-600 border-green-200' },
 };
+
+// ---------------------------------------------------------------------------
+// アジャイル: イシュー種別ラベル・色マップ
+// ---------------------------------------------------------------------------
+
+/** フォーム／フィルタで列挙する順序（EPIC を先頭に階層感を出す）。 */
+export const TASK_ISSUE_TYPES: TaskIssueType[] = [
+  'EPIC',
+  'STORY',
+  'TASK',
+  'SUBTASK',
+  'BUG',
+  'OTHER',
+];
+
+/** issueType ごとのバッジ表示（色分け：EPIC/STORY/TASK/SUBTASK/BUG/OTHER）。 */
+export const taskIssueTypeLabels: Record<
+  TaskIssueType,
+  { label: string; color: string }
+> = {
+  EPIC: {
+    label: 'エピック',
+    color: 'bg-purple-50 text-purple-700 border-purple-200',
+  },
+  STORY: {
+    label: 'ストーリー',
+    color: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  },
+  TASK: {
+    label: 'タスク',
+    color: 'bg-blue-50 text-blue-700 border-blue-200',
+  },
+  SUBTASK: {
+    label: 'サブタスク',
+    color: 'bg-sky-50 text-sky-700 border-sky-200',
+  },
+  BUG: {
+    label: 'バグ',
+    color: 'bg-red-50 text-red-700 border-red-200',
+  },
+  OTHER: {
+    label: 'その他',
+    color: 'bg-gray-100 text-gray-600 border-gray-200',
+  },
+};
+
+/** issueType の既定値（未指定なら TASK 扱い）。 */
+export function taskIssueTypeOf(task: Task): TaskIssueType {
+  return task.issueType ?? 'TASK';
+}
+
+/** 未知の種別でも落ちないようフォールバック付きで参照する。 */
+export function taskIssueTypeMeta(
+  type: string | null | undefined
+): { label: string; color: string } {
+  if (type && taskIssueTypeLabels[type as TaskIssueType]) {
+    return taskIssueTypeLabels[type as TaskIssueType];
+  }
+  return {
+    label: type ?? 'タスク',
+    color: 'bg-gray-100 text-gray-600 border-gray-200',
+  };
+}
 
 /**
  * タスクに紐付く課題ノードの種別チップ表示。
@@ -268,6 +365,18 @@ export const tasksApi = {
       headers: authHeaders(),
       body: JSON.stringify({ csv }),
     }).then((r) => handle<ImportBacklogResult>(r)),
+
+  /**
+   * POST /api/projects/:projectId/tasks/import-jira { csv }
+   * Jira の課題エクスポート CSV を取り込む。sourceKey='JIRA:<Issue key>' で
+   * 冪等 upsert（再取込で重複させず更新）。文字コードは frontend 側で UTF-8 に解決して送る。
+   */
+  importJira: (projectId: string, csv: string) =>
+    fetch(`${API_URL}/api/projects/${projectId}/tasks/import-jira`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ csv }),
+    }).then((r) => handle<ImportJiraResult>(r)),
 
   /** GET /api/tasks/:id */
   get: (id: string) =>
@@ -552,6 +661,29 @@ export function sortTaskTree(
       .map((n) => ({ ...n, children: walk(n.children) }));
 
   return walk(tree);
+}
+
+/** ストーリーポイントの表示（整数はそのまま、小数は末尾0を落とす）。 */
+export function formatSp(n: number): string {
+  if (Number.isInteger(n)) return String(n);
+  return String(Number(n.toFixed(1)));
+}
+
+/** ステータスごとの件数。 */
+export type TaskStatusCounts = Record<TaskStatus, number>;
+
+/** 全ステータス 0 の集計オブジェクト。 */
+export function emptyStatusCounts(): TaskStatusCounts {
+  return { OPEN: 0, IN_PROGRESS: 0, RESOLVED: 0, CLOSED: 0 };
+}
+
+/** タスク配列を status 別に集計する（未知 status は無視）。 */
+export function countTaskStatuses(tasks: Task[]): TaskStatusCounts {
+  const counts = emptyStatusCounts();
+  for (const t of tasks) {
+    if (t.status in counts) counts[t.status] += 1;
+  }
+  return counts;
 }
 
 /** ツリーを深さ優先でフラット化（描画用：順序＋depth を保持） */

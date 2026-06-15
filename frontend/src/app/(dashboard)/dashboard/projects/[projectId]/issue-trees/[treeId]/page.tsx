@@ -97,6 +97,8 @@ import {
 import { AiSuggestDialog } from '@/components/issue-trees/ai-suggest-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useReadOnly } from '@/components/read-only-context';
+import { ExportImportButton } from '@/components/io/ExportImportButton';
+import { entityJsonIo, type EntityBundle } from '@/lib/io';
 import { IdeationAssistDialog } from '@/components/issue-trees/ideation-assist-dialog';
 import {
   tasksApi,
@@ -2005,6 +2007,19 @@ function IssueTreeMindMap() {
             />
           </div>
           <ManualButton feature="issue-trees" />
+          <ExportImportButton
+            label="イシューツリー"
+            fileBaseName={`issue-tree-${name || treeId}`}
+            size="sm"
+            canEdit={canEdit}
+            withModeChoice={false}
+            importHint="選択した JSON でこのイシューツリーのノードを丸ごと置き換えます。既存ノードは全削除され、localId 参照で作り直されます（depth は親子関係から自動再計算）。注意: 他ツリーの確定ノードを指す根本原因リンク（rootCauseLocalId に他ツリーの DB id を入れたもの）は原値のまま保持されますが、このツリー内 localId は新しい id に振り直されます。get→PUT のラウンドトリップ以外でノードを差し替えると、このツリーを参照していた外部リンクが切れることがあります。"
+            getExport={() => entityJsonIo.exportIssueTree(treeId)}
+            onImport={(parsed) =>
+              entityJsonIo.importIssueTree(treeId, parsed as EntityBundle)
+            }
+            onDone={() => void fetchTree()}
+          />
           <Button variant="outline" size="sm" onClick={fetchTree} className="text-gray-600">
             <RefreshCw className="mr-1 h-4 w-4" />
             再読込

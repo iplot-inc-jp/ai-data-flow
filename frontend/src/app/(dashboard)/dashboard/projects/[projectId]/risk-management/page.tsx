@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
@@ -7,6 +8,8 @@ import { ManualButton } from '@/components/ui/manual-dialog';
 import { ShieldAlert } from 'lucide-react';
 import { RiskTableBoard } from './_components/risk-table-board';
 import { EditGate } from '@/components/edit-gate';
+import { useReadOnly } from '@/components/read-only-context';
+import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 
 /**
  * リスクマネジメント ワークスペース。
@@ -20,6 +23,8 @@ import { EditGate } from '@/components/edit-gate';
 export default function RiskManagementPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+  const { canEdit } = useReadOnly();
+  const [refreshKey, setRefreshKey] = useState(0);
 
   return (
     <div className="space-y-6">
@@ -47,12 +52,19 @@ export default function RiskManagementPage() {
               ]}
             />
             <ManualButton feature="risk-management" />
+            <FeatureSectionIo
+              projectId={projectId}
+              sectionKey="risks"
+              label="リスク"
+              canEdit={canEdit}
+              onDone={() => setRefreshKey((k) => k + 1)}
+            />
           </>
         }
       />
 
       <EditGate dim={false}>
-        <RiskTableBoard projectId={projectId} />
+        <RiskTableBoard key={refreshKey} projectId={projectId} />
       </EditGate>
     </div>
   );

@@ -25,6 +25,8 @@ import {
 import { dataObjectApi, type DataObjectDto } from '@/lib/data-objects';
 import { useReadOnly } from '@/components/read-only-context';
 import { EditGate } from '@/components/edit-gate';
+import { ExportImportButton } from '@/components/io/ExportImportButton';
+import { entityJsonIo, type EntityBundle } from '@/lib/io';
 
 /**
  * 第1レベルDFD（プロジェクト全体）。
@@ -239,7 +241,9 @@ export default function ProjectDfdPage() {
   );
 
   // データフロー再ルーティング（端点ドラッグで source/target ノード・接続側を付け替え）
-  // PATCH /api/dfd-flows/:id で sourceNodeId/targetNodeId/sourceHandle/targetHandle を更新 → 再取得。
+  // PATCH /api/dfd-flows/:id で更新。**楽観更新**でローカル diagram.flows を即書き換え、
+  // 再取得（load）はしない＝矢印付け替えのたびにリロード/ちらつきしないようにする。
+  // 失敗時のみ load() で巻き戻す。
   const handleReconnectFlow = useCallback(
     async (
       flowId: string,
@@ -250,13 +254,34 @@ export default function ProjectDfdPage() {
         targetHandle?: string | null;
       },
     ) => {
-      await dfdApi.updateFlow(flowId, {
-        sourceNodeId: next.sourceNodeId,
-        targetNodeId: next.targetNodeId,
-        sourceHandle: next.sourceHandle ?? null,
-        targetHandle: next.targetHandle ?? null,
-      });
-      await load();
+      setDiagram((prev) =>
+        prev
+          ? {
+              ...prev,
+              flows: prev.flows.map((f) =>
+                f.id === flowId
+                  ? {
+                      ...f,
+                      sourceNodeId: next.sourceNodeId,
+                      targetNodeId: next.targetNodeId,
+                      sourceHandle: next.sourceHandle ?? null,
+                      targetHandle: next.targetHandle ?? null,
+                    }
+                  : f,
+              ),
+            }
+          : prev,
+      );
+      try {
+        await dfdApi.updateFlow(flowId, {
+          sourceNodeId: next.sourceNodeId,
+          targetNodeId: next.targetNodeId,
+          sourceHandle: next.sourceHandle ?? null,
+          targetHandle: next.targetHandle ?? null,
+        });
+      } catch {
+        await load(); // 失敗時のみ再取得で巻き戻し
+      }
     },
     [load],
   );
@@ -319,6 +344,19 @@ export default function ProjectDfdPage() {
               ]}
             />
             <ManualButton feature="dfd" />
+            <ExportImportButton
+              label="DFD（第1レベル）"
+              fileBaseName="dfd-level1"
+              size="sm"
+              canEdit={canEdit}
+              withModeChoice={false}
+              importHint="選択した JSON でこの第1レベルDFDの中身（ノード・データフロー）を丸ごと置き換えます。注意: 手動で追加したノードだけでなく、自動生成（generate）で作られたノード/フローも区別なく全置換されます。FUNCTION ノードの refFlowId（業務フローへのリンク）は、GET の値をそのまま往復させた場合のみ保持され、自動生成の冪等突合に使われます。値を書き換える / 落とすと自動生成が別ノードを作り直すため、リンクは編集しないでください。"
+              getExport={() => entityJsonIo.exportProjectDfd(projectId)}
+              onImport={(parsed) =>
+                entityJsonIo.importProjectDfd(projectId, parsed as EntityBundle)
+              }
+              onDone={() => void load()}
+            />
           </>
         }
       />
@@ -331,7 +369,9 @@ export default function ProjectDfdPage() {
         </p>
       </div>
 
-      {loading ? (
+      {loading && !diagram ? (
+        // スピナーは初回ロード（diagram 未取得）のみ。リフェッチ(loading=true でも diagram あり)
+        // では DfdCanvas をアンマウントしない＝再マウント時の fitView で拡大率が戻るのを防ぐ。
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
         </div>
