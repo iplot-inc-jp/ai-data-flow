@@ -1,0 +1,71 @@
+// 全添付の共有アップロード経路。
+// Blob token があればブラウザ→Vercel Blob 直アップロード→register（関数を通らず大ファイル可）、
+// token 未設定（ローカル等）や失敗時は従来のサーバ経由 multipart 添付（4MB）にフォールバック。
+import { upload } from '@vercel/blob/client';
+import {
+  projectAttachmentApi,
+  type ProjectAttachment,
+} from '@/lib/project-attachments';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+
+/** 添付のスコープ（どの対象に紐づけるか）。未指定はプロジェクト直下。 */
+export interface UploadScope {
+  phaseId?: string;
+  taskId?: string;
+  flowId?: string;
+  informationTypeId?: string;
+  folder?: string;
+  displayName?: string;
+}
+
+function authHeaders(json = true): Record<string, string> {
+  const h: Record<string, string> = {};
+  if (json) h['Content-Type'] = 'application/json';
+  const t =
+    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  if (t) h['Authorization'] = `Bearer ${t}`;
+  return h;
+}
+
+/**
+ * 1ファイルをアップロードして Attachment を返す（共有プール）。
+ * client直（Blob）を試し、token未設定/失敗時はサーバ経由(4MB・プロジェクト直下)にフォールバック。
+ * scope を渡すと register でその対象に紐づける（client直経路のみ。フォールバックは直下）。
+ */
+export async function uploadProjectFile(
+  projectId: string,
+  file: File,
+  scope: UploadScope = {},
+): Promise<ProjectAttachment> {
+  try {
+    // 1) ブラウザ→Blob 直アップロード（token は handleUploadUrl 経由で発行）。
+    //    Authorization は handleUpload ルートへ転送される（JwtAuthGuard 配下）。
+    const blob = await upload(file.name, file, {
+      access: 'public',
+      handleUploadUrl: `${API_URL}/api/projects/${projectId}/blob/upload-token`,
+      headers: authHeaders(false),
+    });
+    // 2) register（冪等）で Attachment 作成
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/attachments/register-blob`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          blobUrl: blob.url,
+          filename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+          ...scope,
+        }),
+      },
+    );
+    if (!res.ok) throw new Error('register-blob に失敗しました');
+    return (await res.json()) as ProjectAttachment;
+  } catch {
+    // 3) フォールバック: サーバ経由 multipart（プロジェクト直下・4MB）。
+    //    token 未設定（{enabled:false}）でも upload() が失敗するためここに来る。
+    return projectAttachmentApi.upload(projectId, file);
+  }
+}
