@@ -32,6 +32,11 @@ import {
   GitCompareArrows,
   Clock,
   ExternalLink,
+  Webhook,
+  Copy,
+  Check,
+  RefreshCw,
+  PowerOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -124,6 +129,30 @@ type ActiveImport = {
   mode: TrackerImportMode;
 };
 
+/**
+ * 接続ごとの Webhook 状態。
+ *   - loaded … 初回の url 取得が済んだか（false の間は「読み込み中」）。
+ *   - url    … 秘密入り受信 URL。null=webhook 無効。
+ *   - busy   … enable/regenerate/disable 実行中。
+ *   - error  … 直近の操作エラー。
+ *   - copied … URL をクリップボードにコピー済みか（一時表示）。
+ */
+type WebhookState = {
+  loaded: boolean;
+  url: string | null;
+  busy: boolean;
+  error: string | null;
+  copied: boolean;
+};
+
+const initialWebhookState: WebhookState = {
+  loaded: false,
+  url: null,
+  busy: false,
+  error: null,
+  copied: false,
+};
+
 export function TrackerConnectionsAdminPanel({
   projectId,
 }: {
@@ -151,6 +180,9 @@ export function TrackerConnectionsAdminPanel({
   const [active, setActive] = useState<ActiveImport | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const { job, polling } = useBackgroundJob(active?.jobId ?? null);
+
+  // Webhook（接続ごと）の状態（url 取得・有効化/再生成/無効化・コピー）
+  const [webhooks, setWebhooks] = useState<Record<string, WebhookState>>({});
 
   const fetchConnections = useCallback(async () => {
     setLoading(true);
@@ -185,6 +217,47 @@ export function TrackerConnectionsAdminPanel({
       void fetchConnections();
     }
   }, [job, fetchConnections]);
+
+  // 一覧取得後、まだ読み込んでいない接続の Webhook URL（有効/無効＝url=null）を取得する。
+  useEffect(() => {
+    let cancelled = false;
+    for (const c of connections) {
+      if (webhooks[c.id]?.loaded || webhooks[c.id]?.busy) continue;
+      void trackersApi
+        .getWebhookUrl(c.id)
+        .then((res) => {
+          if (cancelled) return;
+          setWebhooks((prev) => ({
+            ...prev,
+            [c.id]: {
+              ...initialWebhookState,
+              ...prev[c.id],
+              loaded: true,
+              url: res.url,
+              busy: false,
+            },
+          }));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // 取得失敗（403 等）は「無効」扱いで読み込み済みにする（操作ボタンは表示）。
+          setWebhooks((prev) => ({
+            ...prev,
+            [c.id]: {
+              ...initialWebhookState,
+              ...prev[c.id],
+              loaded: true,
+              busy: false,
+            },
+          }));
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // webhooks を依存に含めると毎回ループするため connections のみで起動する。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connections]);
 
   // ---- フォーム操作 ----
   const openCreate = () => {
@@ -365,6 +438,65 @@ export function TrackerConnectionsAdminPanel({
       setImportError(
         err instanceof Error ? err.message : '取り込みの起票に失敗しました',
       );
+    }
+  };
+
+  // ---- Webhook 操作 ----
+  const patchWebhook = (id: string, patch: Partial<WebhookState>) => {
+    setWebhooks((prev) => ({
+      ...prev,
+      [id]: { ...initialWebhookState, ...prev[id], ...patch },
+    }));
+  };
+
+  const runWebhookAction = async (
+    id: string,
+    action: () => Promise<{ url: string | null }>,
+  ) => {
+    patchWebhook(id, { busy: true, error: null, copied: false });
+    try {
+      const res = await action();
+      patchWebhook(id, { url: res.url, busy: false, loaded: true });
+    } catch (err) {
+      patchWebhook(id, {
+        busy: false,
+        error: err instanceof Error ? err.message : 'Webhook の操作に失敗しました',
+      });
+    }
+  };
+
+  const handleEnableWebhook = (c: TrackerConnection) =>
+    runWebhookAction(c.id, () => trackersApi.enableWebhook(c.id));
+
+  const handleRegenerateWebhook = (c: TrackerConnection) => {
+    if (
+      !confirm(
+        'Webhook URL を再生成すると、現在の URL は無効になります。Jira/Backlog 側の設定も新しい URL に貼り替える必要があります。続行しますか？',
+      )
+    )
+      return;
+    void runWebhookAction(c.id, () => trackersApi.regenerateWebhook(c.id));
+  };
+
+  const handleDisableWebhook = (c: TrackerConnection) => {
+    if (
+      !confirm(
+        'Webhook を無効化すると、この URL での受信は停止します。続行しますか？',
+      )
+    )
+      return;
+    void runWebhookAction(c.id, () => trackersApi.disableWebhook(c.id));
+  };
+
+  const handleCopyWebhookUrl = async (c: TrackerConnection) => {
+    const url = webhooks[c.id]?.url;
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      patchWebhook(c.id, { copied: true });
+      setTimeout(() => patchWebhook(c.id, { copied: false }), 2000);
+    } catch {
+      patchWebhook(c.id, { error: 'クリップボードへのコピーに失敗しました' });
     }
   };
 
@@ -918,6 +1050,129 @@ export function TrackerConnectionsAdminPanel({
                           </p>
                         </div>
                       )}
+
+                      {/* Webhook（インバウンド同期）節 */}
+                      {(() => {
+                        const wh = webhooks[c.id] ?? initialWebhookState;
+                        const enabled = wh.url != null;
+                        return (
+                          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-800">
+                                <Webhook className="h-4 w-4 text-gray-500" />
+                                Webhook（インバウンド同期）
+                                <HelpTooltip text="Jira/Backlog で課題が作成/更新/削除されたとき、この URL に通知（Webhook）を送ると、該当の1課題だけを即座に取り込みます。有効化すると自動同期のポーリングは日次バックストップに間引かれます。" />
+                                <span
+                                  className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${
+                                    enabled
+                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                      : 'border-gray-200 bg-gray-50 text-gray-500'
+                                  }`}
+                                >
+                                  {!wh.loaded
+                                    ? '読み込み中…'
+                                    : enabled
+                                      ? '有効'
+                                      : '無効'}
+                                </span>
+                              </span>
+
+                              <div className="flex flex-shrink-0 items-center gap-1">
+                                {enabled ? (
+                                  <>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleRegenerateWebhook(c)}
+                                      disabled={wh.busy}
+                                      className="gap-1.5 border-gray-300 text-gray-700"
+                                      title="新しい URL を発行します（現在の URL は無効化されます）"
+                                    >
+                                      {wh.busy ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="h-4 w-4" />
+                                      )}
+                                      URL 再生成
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDisableWebhook(c)}
+                                      disabled={wh.busy}
+                                      className="gap-1.5 text-red-500 hover:bg-red-50 hover:text-red-600"
+                                      title="Webhook 受信を無効化します"
+                                    >
+                                      <PowerOff className="h-4 w-4" />
+                                      無効化
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleEnableWebhook(c)}
+                                    disabled={wh.busy || !wh.loaded}
+                                    className="bg-blue-600 hover:bg-blue-700 gap-1.5"
+                                    title="Webhook を有効化し、受信用 URL を発行します"
+                                  >
+                                    {wh.busy ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Webhook className="h-4 w-4" />
+                                    )}
+                                    Webhook を有効化
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* URL コピー欄（有効時のみ） */}
+                            {enabled && wh.url && (
+                              <div className="mt-3 space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <code className="min-w-0 flex-1 break-all rounded border border-gray-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-700">
+                                    {wh.url}
+                                  </code>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleCopyWebhookUrl(c)}
+                                    className="flex-shrink-0 gap-1.5 border-gray-300 text-gray-700"
+                                    title="URL をコピー"
+                                  >
+                                    {wh.copied ? (
+                                      <>
+                                        <Check className="h-4 w-4 text-emerald-600" />
+                                        コピー済み
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="h-4 w-4" />
+                                        コピー
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                                <p className="text-xs text-gray-500">
+                                  この URL を Jira/Backlog の Webhook 設定に貼り付けてください（課題の作成/更新/削除イベント）。
+                                  <span className="font-medium text-amber-700">
+                                    {' '}
+                                    URL には秘密が含まれます。
+                                  </span>
+                                </p>
+                              </div>
+                            )}
+
+                            {/* 操作エラー */}
+                            {wh.error && (
+                              <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
+                                <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                                <span className="break-all">{wh.error}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}

@@ -131,6 +131,15 @@ export interface TrackerTestResult {
   error?: string;
 }
 
+/**
+ * Webhook 管理 API のレスポンス（backend ManageTrackerWebhookUseCase.WebhookUrlResult）。
+ * url には秘密トークンが含まれる（管理者のみ取得可）。webhook 無効なら url=null。
+ */
+export interface WebhookUrlResult {
+  /** 秘密トークンを埋め込んだ受信用 URL。webhook 無効なら null。 */
+  url: string | null;
+}
+
 /** 取り込みモード。full=全件移行 / incremental=lastSyncedAt 以降の差分。 */
 export type TrackerImportMode = 'full' | 'incremental';
 
@@ -253,4 +262,47 @@ export const trackersApi = {
       headers: authHeaders(),
       body: JSON.stringify({ mode }),
     }).then((r) => handle<TrackerImportEnqueueResult>(r)),
+
+  // -------------------------------------------------------------------------
+  // Webhook（インバウンド同期）管理。秘密入り URL は管理者のみ取得可。
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /api/tracker-connections/:id/webhook/url
+   * 現在の Webhook URL を取得（無効なら url=null）。管理画面の再表示用。
+   */
+  getWebhookUrl: (id: string) =>
+    fetch(`${API_URL}/api/tracker-connections/${id}/webhook/url`, {
+      headers: authHeaders(),
+    }).then((r) => handle<WebhookUrlResult>(r)),
+
+  /**
+   * POST /api/tracker-connections/:id/webhook/enable
+   * Webhook を有効化し、秘密入り URL を返す。
+   */
+  enableWebhook: (id: string) =>
+    fetch(`${API_URL}/api/tracker-connections/${id}/webhook/enable`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).then((r) => handle<WebhookUrlResult>(r)),
+
+  /**
+   * POST /api/tracker-connections/:id/webhook/regenerate
+   * Webhook URL を再生成（旧 URL は無効化）し、新 URL を返す。
+   */
+  regenerateWebhook: (id: string) =>
+    fetch(`${API_URL}/api/tracker-connections/${id}/webhook/regenerate`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).then((r) => handle<WebhookUrlResult>(r)),
+
+  /**
+   * POST /api/tracker-connections/:id/webhook/disable
+   * Webhook を無効化（秘密を破棄）。url=null を返す。
+   */
+  disableWebhook: (id: string) =>
+    fetch(`${API_URL}/api/tracker-connections/${id}/webhook/disable`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).then((r) => handle<WebhookUrlResult>(r)),
 };
