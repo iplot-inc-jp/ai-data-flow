@@ -25,12 +25,12 @@ export type KpiStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 
 export const KPI_CATEGORY_LABELS: Record<KpiCategory, string> = {
   BUSINESS: '業務KPI',
-  AI_QUALITY: 'AI精度KPI',
+  AI_QUALITY: 'AI精度指標',
 };
 
 export const KPI_CATEGORY_OPTIONS: ReadonlyArray<{ value: KpiCategory; label: string }> = [
   { value: 'BUSINESS', label: '業務KPI' },
-  { value: 'AI_QUALITY', label: 'AI精度KPI' },
+  { value: 'AI_QUALITY', label: 'AI精度指標' },
 ];
 
 export const KPI_DIRECTION_LABELS: Record<KpiDirection, string> = {
