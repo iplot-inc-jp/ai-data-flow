@@ -17,6 +17,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   AlertCircle,
+  Brain,
   FileText,
   Landmark,
   Loader2,
@@ -242,6 +243,21 @@ export default function BackgroundPage() {
                 </span>
               </div>
 
+              {/* ナレッジと共通の資料プールである旨の明示＋取り込みページ導線 */}
+              <p className="flex flex-wrap items-center gap-1 text-xs text-gray-500">
+                <Brain className="h-3.5 w-3.5 shrink-0 text-primary" />
+                ここの資料は<span className="font-medium text-[#050f3e]">ナレッジの取り込み元</span>と共通です。各資料の
+                <Brain className="inline h-3 w-3" />
+                ボタン、または
+                <Link
+                  href={`/dashboard/projects/${projectId}/knowledge/ingestion`}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  ナレッジ取り込み
+                </Link>
+                からナレッジ化できます。
+              </p>
+
               {/* ドラッグ&ドロップ（クリックでファイル選択も可）。複数可・逐次アップロード */}
               <FileDropZone
                 onFiles={(files) => void uploadAttachments(files)}
@@ -309,6 +325,14 @@ export default function BackgroundPage() {
                           <span className="shrink-0 text-[10px] text-gray-400">
                             {formatBytes(a.size)}
                           </span>
+                          <Link
+                            href={`/dashboard/projects/${projectId}/knowledge/ingestion?attach=${a.id}`}
+                            className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-primary"
+                            title="この資料をナレッジに取り込む"
+                            aria-label={`${a.filename} をナレッジに取り込む`}
+                          >
+                            <Brain className="h-3.5 w-3.5" />
+                          </Link>
                           <button
                             type="button"
                             onClick={() => void deleteAttachment(a)}

@@ -81,6 +81,11 @@ interface Props {
   settings: ProjectKnowledgeSettings | null
   /** 作成成功時（バッチ id を親に渡す）。 */
   onCreated: (batchId: string) => void
+  /**
+   * 開いた時に事前選択しておく既存添付の id 群（背景・目的の関連資料から
+   * 「ナレッジに取り込む」で渡る共有プール導線で使う）。指定時は「既存添付」タブを既定で開く。
+   */
+  initialAttachmentIds?: string[]
 }
 
 const ACCEPT =
@@ -92,8 +97,13 @@ export function NewBatchDialog({
   projectId,
   settings,
   onCreated,
+  initialAttachmentIds,
 }: Props) {
   const [name, setName] = useState('')
+  // 事前選択の id 群（配列の参照変化で effect が暴発しないよう安定キーで扱う）。
+  const initialAttKey = (initialAttachmentIds ?? []).join(',')
+  // ソース選択タブ（事前選択があれば「既存添付」を開く）。
+  const [tab, setTab] = useState<string>('upload')
   const [uploads, setUploads] = useState<StagedUpload[]>([])
   const [attachments, setAttachments] = useState<SelectableAttachment[]>([])
   const [selectedAttIds, setSelectedAttIds] = useState<Set<string>>(new Set())
@@ -127,7 +137,10 @@ export function NewBatchDialog({
     if (!open) return
     setName('')
     setUploads([])
-    setSelectedAttIds(new Set())
+    // 共有プール導線で渡った既存添付を事前選択し、「既存添付」タブを開く。
+    const preselect = initialAttKey ? initialAttKey.split(',') : []
+    setSelectedAttIds(new Set(preselect))
+    setTab(preselect.length > 0 ? 'attachment' : 'upload')
     setError(null)
     setAiExtractionEnabled(settings?.aiExtractionEnabled ?? true)
     setOcrEnabled(settings?.ocrEnabled ?? true)
@@ -139,7 +152,7 @@ export function NewBatchDialog({
     setDriveFiles([])
     setDriveCrumbs([{ id: null, name: 'マイドライブ' }])
     setSelectedDrive(new Map())
-  }, [open, settings])
+  }, [open, settings, initialAttKey])
 
   const loadAttachments = useCallback(async () => {
     setLoadingAtt(true)
@@ -390,8 +403,8 @@ export function NewBatchDialog({
             />
           </div>
 
-          {/* ソース選択 */}
-          <Tabs defaultValue="upload">
+          {/* ソース選択（事前選択があれば「既存添付」タブを開く） */}
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="upload">
                 <UploadIcon className="h-3.5 w-3.5 mr-1.5" />
