@@ -36,6 +36,7 @@ import {
 } from '@/lib/llm-usage';
 import {
   knowledgeSettingsApi,
+  CLAUDE_MODEL_OPTIONS,
   type ProjectKnowledgeSettings,
 } from '@/lib/knowledge';
 
@@ -302,13 +303,14 @@ export default function AiUsagePage() {
                       <SelectValue placeholder="サーバ既定" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__default__">サーバ既定</SelectItem>
-                      <SelectItem value="claude-sonnet-4-6">
-                        claude-sonnet-4-6（標準）
+                      <SelectItem value="__default__">
+                        サーバ既定（EXTRACTION_MODEL）
                       </SelectItem>
-                      <SelectItem value="claude-opus-4-8">
-                        claude-opus-4-8（高品質・高単価）
-                      </SelectItem>
+                      {CLAUDE_MODEL_OPTIONS.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

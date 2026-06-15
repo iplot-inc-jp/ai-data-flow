@@ -200,6 +200,18 @@ export interface UpdateSettingsInput {
   maxFilesPerBatch?: number;
 }
 
+/**
+ * モデル選択肢（Claude 現行ラインアップ）。AI抽出/KPI生成等のモデル select で共有する。
+ * 単価帯は概算（USD/MTok）。最新は claude-api / platform.claude.com/pricing 参照。
+ * 安い順に並べ、既定（EXTRACTION_MODEL）は claude-sonnet-4-6。
+ */
+export const CLAUDE_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'claude-haiku-4-5', label: 'claude-haiku-4-5（高速・低コスト / $1・$5）' },
+  { value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6（標準・バランス / $3・$15）' },
+  { value: 'claude-opus-4-8', label: 'claude-opus-4-8（高品質・最新Opus / $5・$25）' },
+  { value: 'claude-fable-5', label: 'claude-fable-5（最高性能・最高単価 / $10・$50）' },
+];
+
 /** ナレッジグラフのノード種別（Prisma enum KnowledgeNodeType と一致）。 */
 export type KnowledgeNodeType = 'TAG' | 'ENTITY';
 
