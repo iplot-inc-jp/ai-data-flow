@@ -56,6 +56,31 @@ describe('enum 写像: mapPriority', () => {
   });
 });
 
+/**
+ * Jira API 同期（tracker-import）側の写像検証。
+ *
+ * Jira API 同期は実装済み。ここでは Jira 語彙（英語の status/priority）が
+ * 同期側の mapStatus/mapPriority で正しい TaskStatus/TaskPriority に畳まれることを
+ * 固定し、「完成」を裏付ける（CSV 側 mapJiraStatus/mapJiraPriority は use-case の spec で担保）。
+ */
+describe('Jira API 同期の写像検証', () => {
+  it('Jira status を TaskStatus に写す（同期側 mapStatus）', () => {
+    expect(mapStatus('To Do', 'JIRA')).toBe('OPEN');
+    expect(mapStatus('In Progress', 'JIRA')).toBe('IN_PROGRESS');
+    // Jira の "Done" は完了系。実装は処理済/resolved 以外の完了系を CLOSED に写す。
+    expect(mapStatus('Done', 'JIRA')).toBe('CLOSED');
+    expect(mapStatus('Resolved', 'JIRA')).toBe('RESOLVED');
+  });
+
+  it('Jira priority を TaskPriority に写す（同期側 mapPriority）', () => {
+    expect(mapPriority('Highest', 'JIRA')).toBe('HIGH');
+    expect(mapPriority('High', 'JIRA')).toBe('HIGH');
+    expect(mapPriority('Medium', 'JIRA')).toBe('MEDIUM');
+    expect(mapPriority('Low', 'JIRA')).toBe('LOW');
+    expect(mapPriority('Lowest', 'JIRA')).toBe('LOW');
+  });
+});
+
 describe('親子の循環ガード: wouldFormCycle', () => {
   it('直接の自己参照/相互参照を検知する', () => {
     const applied = new Map<string, string>();
