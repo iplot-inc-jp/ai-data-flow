@@ -63,6 +63,22 @@ export default function IngestionDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
+  // 背景・目的の関連資料から「ナレッジに取り込む」で渡る事前選択（?attach=id,id）。
+  const [preselectAttachmentIds, setPreselectAttachmentIds] = useState<string[]>([])
+
+  // 共有プール導線: ?attach=<id,id> 付きで来たらダイアログを事前選択で開く。
+  // useSearchParams は Suspense 要件があるため、クライアント側で location から読む。
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = new URLSearchParams(window.location.search).get('attach')
+    if (!raw) return
+    const ids = raw.split(',').map((s) => s.trim()).filter(Boolean)
+    if (ids.length === 0) return
+    setPreselectAttachmentIds(ids)
+    setDialogOpen(true)
+    // 戻る/リロードで再オープンしないよう URL からクエリを除去。
+    router.replace(`/dashboard/projects/${projectId}/knowledge/ingestion`)
+  }, [projectId, router])
 
   const load = useCallback(async () => {
     try {
@@ -128,7 +144,10 @@ export default function IngestionDashboardPage() {
               更新
             </Button>
             {canEdit && (
-              <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Button size="sm" onClick={() => {
+                  setPreselectAttachmentIds([])
+                  setDialogOpen(true)
+                }}>
                 <Plus className="h-4 w-4 mr-1.5" />
                 新規バッチ
               </Button>
@@ -156,7 +175,10 @@ export default function IngestionDashboardPage() {
               まだ取り込みバッチがありません。
             </div>
             {canEdit && (
-              <Button onClick={() => setDialogOpen(true)}>
+              <Button onClick={() => {
+                  setPreselectAttachmentIds([])
+                  setDialogOpen(true)
+                }}>
                 <Plus className="h-4 w-4 mr-1.5" />
                 最初のバッチを作成
               </Button>
@@ -225,6 +247,7 @@ export default function IngestionDashboardPage() {
         projectId={projectId}
         settings={settings}
         onCreated={handleCreated}
+        initialAttachmentIds={preselectAttachmentIds}
       />
     </div>
   )

@@ -620,6 +620,10 @@ export default function DashboardLayout({
         label: '背景・目的',
         items: [
           { name: '背景・目的', href: `${base}/background`, icon: Landmark },
+          { name: 'ナレッジ取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
+          { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
+          { name: 'ナレッジ一覧編集', href: `${base}/knowledge/list`, icon: ListTodo },
+          { name: 'ナレッジ設定', href: `${base}/knowledge/settings`, icon: Settings },
         ],
       },
       {
@@ -648,15 +652,6 @@ export default function DashboardLayout({
           { name: 'オブジェクト関係性マップ', href: `${base}/object-map`, icon: Boxes },
           { name: 'ER図', href: `${base}/er-diagram`, icon: Table2 },
           { name: 'データカタログ', href: `${base}/catalog`, icon: Database },
-        ],
-      },
-      {
-        label: 'ナレッジ',
-        items: [
-          { name: '取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
-          { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
-          { name: '一覧編集', href: `${base}/knowledge/list`, icon: ListTodo },
-          { name: '設定', href: `${base}/knowledge/settings`, icon: Settings },
         ],
       },
       {
