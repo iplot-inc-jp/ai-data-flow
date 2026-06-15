@@ -24,33 +24,12 @@ import {
   ingestionApi,
   knowledgeSettingsApi,
   BATCH_STATUS_LABEL,
+  BATCH_STATUS_STYLE,
+  formatBatchDate as formatDate,
   isBatchTerminal,
   type IngestionBatch,
-  type IngestionBatchStatus,
   type ProjectKnowledgeSettings,
 } from '@/lib/knowledge'
-
-const BATCH_STATUS_STYLE: Record<IngestionBatchStatus, string> = {
-  PENDING: 'bg-gray-100 text-gray-600',
-  EXPANDING: 'bg-blue-100 text-blue-700',
-  RUNNING: 'bg-indigo-100 text-indigo-700',
-  PARTIAL: 'bg-amber-100 text-amber-700',
-  SUCCEEDED: 'bg-emerald-100 text-emerald-700',
-  FAILED: 'bg-red-100 text-red-700',
-  CANCELLED: 'bg-gray-100 text-gray-500',
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('ja-JP', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 export default function IngestionDashboardPage() {
   const params = useParams()
