@@ -437,6 +437,7 @@ import { WebhookController } from './presentation/controllers/webhook.controller
 import { TrackerConnectionController } from './presentation/controllers/tracker-connection.controller';
 import { TrackerWebhookController } from './presentation/controllers/tracker-webhook.controller';
 import { LlmUsageController } from './presentation/controllers/llm-usage.controller';
+import { BlobUploadController } from './presentation/controllers/blob-upload.controller';
 import {
   JobWorkerController,
   ProjectJobController,
@@ -578,6 +579,7 @@ import { DriveController } from './presentation/controllers/drive.controller';
     // 外部トラッカー Webhook 秘密の管理（admin）
     TrackerWebhookController,
     LlmUsageController,
+    BlobUploadController,
     // ナレッジグラフ バッチ取り込み（取り込み/ナレッジ/設定）
     IngestionBatchProjectController,
     IngestionBatchByIdController,
