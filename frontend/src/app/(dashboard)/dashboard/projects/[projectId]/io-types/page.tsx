@@ -247,6 +247,7 @@ export default function IoTypesPage() {
               {ioTypes.map((it) => (
                 <IoTypeRow
                   key={it.id}
+                  projectId={projectId}
                   ioType={it}
                   subProjects={subProjects}
                   linkedTables={tablesByIoType.get(it.id) ?? []}
@@ -266,6 +267,7 @@ export default function IoTypesPage() {
 }
 
 function IoTypeRow({
+  projectId,
   ioType,
   subProjects,
   linkedTables,
@@ -275,6 +277,7 @@ function IoTypeRow({
   folderCandidates,
   onFoldersSeen,
 }: {
+  projectId: string;
   ioType: InformationType;
   subProjects: SubProjectMaster[];
   linkedTables: Table[];
@@ -471,6 +474,7 @@ function IoTypeRow({
       {/* アコーディオン: 具体データ（PDF・画像などの添付）。フォルダ分け・名前編集はパネル側。
           collapsed 中も mount したまま（取得済み一覧を保持し、再展開時の再取得を避ける） */}
       <IoAttachmentsPanel
+        projectId={projectId}
         informationTypeId={ioType.id}
         expanded={expanded}
         folderCandidates={folderCandidates}

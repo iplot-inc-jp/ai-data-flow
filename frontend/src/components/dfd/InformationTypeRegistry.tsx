@@ -33,6 +33,7 @@ import {
   type InformationCategory,
   type InformationTypeAttachment,
 } from '@/lib/dfd';
+import { uploadProjectFile } from '@/lib/upload';
 
 export interface InformationTypeRegistryProps {
   projectId: string;
@@ -158,6 +159,7 @@ export function InformationTypeRegistry({ projectId, onInformationTypesChange }:
             {informationTypes.map((it) => (
               <InformationTypeRow
                 key={it.id}
+                projectId={projectId}
                 informationType={it}
                 expanded={expanded === it.id}
                 onToggle={() => setExpanded((cur) => (cur === it.id ? null : it.id))}
@@ -172,11 +174,13 @@ export function InformationTypeRegistry({ projectId, onInformationTypesChange }:
 }
 
 function InformationTypeRow({
+  projectId,
   informationType,
   expanded,
   onToggle,
   onChanged,
 }: {
+  projectId: string;
   informationType: InformationType;
   expanded: boolean;
   onToggle: () => void;
@@ -251,7 +255,13 @@ function InformationTypeRow({
       // 逐次アップロード。失敗したものはまとめてインライン表示。
       for (const file of files) {
         try {
-          await informationTypeApi.upload(informationType.id, file);
+          // 共有プール: client直Blob（大ファイル可）→ 失敗/未設定時は従来のio-types添付(4MB)へフォールバック。
+          await uploadProjectFile(
+            projectId,
+            file,
+            { informationTypeId: informationType.id },
+            (_p, f) => informationTypeApi.upload(informationType.id, f),
+          );
         } catch {
           failed.push(file.name);
         }
@@ -263,7 +273,7 @@ function InformationTypeRow({
       }
       setUploading(false);
     },
-    [informationType.id, loadAttachments, onChanged],
+    [projectId, informationType.id, loadAttachments, onChanged],
   );
 
   const handleDeleteAttachment = useCallback(
