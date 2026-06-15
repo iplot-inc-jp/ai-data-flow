@@ -281,6 +281,7 @@ model Project {
   knowledgeNodes          KnowledgeNode[]
   knowledgeRelations      KnowledgeRelation[]
   driveConnections        DriveConnection[]
+  llmUsageLogs            LlmUsageLog[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -2703,4 +2704,36 @@ model DriveConnection {
 
   @@unique([projectId])
   @@index([projectId])
+}
+
+enum LlmUsageArea {
+  KNOWLEDGE_EXTRACTION
+  MERMAID_FLOW
+  MERMAID_OBJECT
+  KPI
+  REQUIREMENT
+  ISSUE_SUGGEST
+  CODE_EXTRACTION
+  OTHER
+}
+
+model LlmUsageLog {
+  id             String       @id @default(cuid())
+  projectId      String       @map("project_id")
+  organizationId String?      @map("organization_id")
+  userId         String?      @map("user_id")
+  area           LlmUsageArea
+  model          String
+  inputTokens    Int          @default(0) @map("input_tokens")
+  outputTokens   Int          @default(0) @map("output_tokens")
+  cacheReadInputTokens     Int? @map("cache_read_input_tokens")
+  cacheCreationInputTokens Int? @map("cache_creation_input_tokens")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([projectId, area])
+  @@index([projectId, model])
+  @@map("llm_usage_logs")
 }
