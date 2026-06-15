@@ -118,6 +118,7 @@ import {
   AddTaskDependencyUseCase,
   RemoveTaskDependencyUseCase,
   ImportBacklogTasksUseCase,
+  ImportJiraTasksUseCase,
   // Task Comment
   CreateTaskCommentUseCase,
   GetTaskCommentsUseCase,
@@ -814,6 +815,7 @@ import { DriveController } from './presentation/controllers/drive.controller';
     AddTaskDependencyUseCase,
     RemoveTaskDependencyUseCase,
     ImportBacklogTasksUseCase,
+    ImportJiraTasksUseCase,
     // Task Comment
     CreateTaskCommentUseCase,
     GetTaskCommentsUseCase,

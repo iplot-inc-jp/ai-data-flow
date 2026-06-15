@@ -40,6 +40,8 @@ import {
   RemoveTaskDependencyUseCase,
   ImportBacklogTasksUseCase,
   ImportBacklogTasksOutput,
+  ImportJiraTasksUseCase,
+  ImportJiraTasksOutput,
   TaskOutput,
   TaskListOutput,
   TaskDependencyOutput,
@@ -346,6 +348,15 @@ class ImportBacklogDto {
   csv: string;
 }
 
+class ImportJiraDto {
+  @ApiProperty({
+    description:
+      'Jira の課題エクスポート CSV テキスト全体。frontend で文字コード（UTF-8/SJIS）を解決し、UTF-8 文字列で送る。',
+  })
+  @IsString()
+  csv: string;
+}
+
 @ApiTags('タスク')
 @ApiBearerAuth()
 @ProjectScopedAccess()
@@ -356,6 +367,7 @@ export class TaskController {
     private readonly getTasksUseCase: GetTasksUseCase,
     private readonly createTaskUseCase: CreateTaskUseCase,
     private readonly importBacklogTasksUseCase: ImportBacklogTasksUseCase,
+    private readonly importJiraTasksUseCase: ImportJiraTasksUseCase,
   ) {}
 
   @Get()
@@ -437,6 +449,31 @@ export class TaskController {
     @Body() dto: ImportBacklogDto,
   ): Promise<ImportBacklogTasksOutput> {
     return this.importBacklogTasksUseCase.execute({
+      userId: user.id,
+      projectId,
+      csv: dto.csv,
+    });
+  }
+
+  @Post('import-jira')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Jira 課題CSVの取り込み（2パスで親キー→parentIdを解決・sourceKey冪等upsert）',
+  })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiResponse({
+    status: 201,
+    description: '取り込み完了（created / updated / skipped / errors を返す）',
+  })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
+  async importJira(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Body() dto: ImportJiraDto,
+  ): Promise<ImportJiraTasksOutput> {
+    return this.importJiraTasksUseCase.execute({
       userId: user.id,
       projectId,
       csv: dto.csv,
