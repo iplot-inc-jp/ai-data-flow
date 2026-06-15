@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   TaskStatus,
   TaskPriority,
+  TaskIssueType,
   ITaskRepository,
   TASK_REPOSITORY,
   ProjectRepository,
@@ -29,6 +30,14 @@ export interface UpdateTaskInput {
   description?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
+  /** イシュー種別（省略で変更なし）。 */
+  issueType?: TaskIssueType;
+  /** 所属 Epic の TaskId。指定で差し替え / null で解除 / 省略で変更なし。 */
+  epicId?: string | null;
+  /** ストーリーポイント。指定で更新 / null で解除 / 省略で変更なし。 */
+  storyPoints?: number | null;
+  /** スプリント識別子。指定で更新 / null で解除 / 省略で変更なし。 */
+  sprint?: string | null;
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
@@ -123,6 +132,10 @@ export class UpdateTaskUseCase {
       description: input.description,
       status: input.status,
       priority: input.priority,
+      issueType: input.issueType,
+      epicId: input.epicId,
+      storyPoints: input.storyPoints,
+      sprint: input.sprint,
       assigneeName: input.assigneeName,
       assigneeRoleId: input.assigneeRoleId,
       issueNodeId: input.issueNodeId,

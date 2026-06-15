@@ -3,6 +3,7 @@ import {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskIssueType,
   TaskComment,
   ITaskRepository,
   TASK_REPOSITORY,
@@ -117,11 +118,12 @@ export class TrackerImportService {
     // ===== 2. パス1: Task の upsert（sourceKey で冪等） =====
     // externalKey（プロバイダ内一意） → 作成/既存の TaskId。
     const keyToTaskId = new Map<string, string>();
-    // 親解決パス用に各課題の (taskId, parentExternalKey) を保持。
+    // 親/Epic 解決パス用に各課題の (taskId, parentExternalKey, epicExternalKey) を保持。
     const linkPlan: Array<{
       externalKey: string;
       taskId: string;
       parentExternalKey: string | null;
+      epicExternalKey: string | null;
     }> = [];
 
     const total = issues.length || 1;
@@ -136,15 +138,19 @@ export class TrackerImportService {
 
         const status = mapStatus(issue.status, conn.provider);
         const priority = mapPriority(issue.priority, conn.provider);
+        const issueType = mapIssueType(issue.issueType);
 
         let taskId: string;
         if (existing) {
-          // 既存タスクを更新（親は後段パスで設定するためここでは触らない）。
+          // 既存タスクを更新（親/Epic は後段パスで設定するためここでは触らない）。
           existing.update({
             title: issue.title,
             description: issue.description,
             status,
             priority,
+            issueType,
+            storyPoints: issue.storyPoints ?? null,
+            sprint: issue.sprint ?? null,
             assigneeName: issue.assigneeName,
             startDate: parseDate(issue.startDate),
             dueDate: parseDate(issue.dueDate),
@@ -164,6 +170,9 @@ export class TrackerImportService {
               description: issue.description,
               status,
               priority,
+              issueType,
+              storyPoints: issue.storyPoints ?? null,
+              sprint: issue.sprint ?? null,
               assigneeName: issue.assigneeName,
               startDate: parseDate(issue.startDate),
               dueDate: parseDate(issue.dueDate),
@@ -181,6 +190,7 @@ export class TrackerImportService {
           externalKey: issue.externalKey,
           taskId,
           parentExternalKey: issue.parentExternalKey,
+          epicExternalKey: issue.epicExternalKey ?? null,
         });
 
         // コメント取込（重複を避けて追記）。
@@ -212,10 +222,28 @@ export class TrackerImportService {
     // 既存リンクをシードに入れる（取込外のタスクとの循環も検知できるよう全件は引かないが、
     // 取込対象内の整合は十分担保できる）。
     for (const plan of linkPlan) {
-      if (!plan.parentExternalKey) continue;
-      const parentId = keyToTaskId.get(plan.parentExternalKey);
+      const parentId = plan.parentExternalKey
+        ? keyToTaskId.get(plan.parentExternalKey)
+        : undefined;
       // 取込集合に親が居ない（差分取込で親が範囲外 等）/ 自己参照は親なしのまま。
-      if (!parentId || parentId === plan.taskId) continue;
+      if (!parentId || parentId === plan.taskId) {
+        // full モードのみ: 外部側で親が外れた（externalKey が null）場合は parentId を明示クリアする。
+        // 差分モードは取込範囲外の親（externalKey 解決不能）を誤って外す恐れがあるため対象外。
+        if (mode === 'full' && !plan.parentExternalKey) {
+          try {
+            const task = await this.taskRepository.findById(plan.taskId);
+            if (task && task.parentId !== null) {
+              task.reparent(null);
+              await this.taskRepository.save(task);
+            }
+          } catch (e) {
+            result.errors.push(
+              `課題 ${plan.externalKey} の親解除に失敗: ${(e as Error)?.message ?? String(e)}`,
+            );
+          }
+        }
+        continue;
+      }
       if (wouldFormCycle(appliedParent, plan.taskId, parentId)) {
         result.errors.push(
           `課題 ${plan.externalKey} の親 ${plan.parentExternalKey} は循環になるため親なしにしました`,
@@ -233,6 +261,45 @@ export class TrackerImportService {
       } catch (e) {
         result.errors.push(
           `課題 ${plan.externalKey} の親紐付けに失敗: ${(e as Error)?.message ?? String(e)}`,
+        );
+      }
+    }
+
+    // ===== 3b. Epic 紐付け（epicExternalKey → epicId）を解決 =====
+    // parentId（subtask の親）とは別系統の自己FK。externalKey→taskId マップで解決する。
+    // 取込集合に Epic が居ない（差分取込で範囲外 等）/ 自己参照は epic なしのまま（安全側 null）。
+    for (const plan of linkPlan) {
+      const epicId = plan.epicExternalKey
+        ? keyToTaskId.get(plan.epicExternalKey)
+        : undefined;
+      if (!epicId || epicId === plan.taskId) {
+        // full モードのみ: 外部側で Epic Link が外れた場合は epicId を明示クリアする。
+        // 差分モードは Epic が取込範囲外のことがあり誤クリアの恐れがあるため対象外。
+        if (mode === 'full' && !plan.epicExternalKey) {
+          try {
+            const task = await this.taskRepository.findById(plan.taskId);
+            if (task && task.epicId !== null) {
+              task.update({ epicId: null });
+              await this.taskRepository.save(task);
+            }
+          } catch (e) {
+            result.errors.push(
+              `課題 ${plan.externalKey} の Epic 解除に失敗: ${(e as Error)?.message ?? String(e)}`,
+            );
+          }
+        }
+        continue;
+      }
+      try {
+        const task = await this.taskRepository.findById(plan.taskId);
+        if (!task) continue;
+        if (task.epicId !== epicId) {
+          task.update({ epicId });
+          await this.taskRepository.save(task);
+        }
+      } catch (e) {
+        result.errors.push(
+          `課題 ${plan.externalKey} の Epic 紐付けに失敗: ${(e as Error)?.message ?? String(e)}`,
         );
       }
     }
@@ -333,6 +400,29 @@ export function mapPriority(
   if (/(低|lowest|low|minor|trivial)/.test(v)) return 'LOW';
   if (/(中|medium|normal|major)/.test(v)) return 'MEDIUM';
   return 'MEDIUM';
+}
+
+/**
+ * 課題種別の原文 → TaskIssueType。
+ * Jira（Epic/Story/Sub-task/Bug/Task）/ Backlog（タスク/バグ/子課題 等）双方を許容し、
+ * 未知値は安全な既定 'TASK' にフォールバックする。
+ */
+export function mapIssueType(
+  raw: string | null | undefined,
+): TaskIssueType {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (!v) return 'TASK';
+  // Epic
+  if (/(epic|エピック)/.test(v)) return 'EPIC';
+  // Sub-task（"sub-task" / "subtask" / Backlog の「子課題」「サブタスク」）。Story より先に判定。
+  if (/(sub[-\s]?task|subtask|子課題|サブタスク)/.test(v)) return 'SUBTASK';
+  // Story
+  if (/(story|ストーリー)/.test(v)) return 'STORY';
+  // Bug
+  if (/(bug|バグ|不具合|障害)/.test(v)) return 'BUG';
+  // Task（"task" / Backlog の「タスク」）
+  if (/(task|タスク)/.test(v)) return 'TASK';
+  return 'TASK';
 }
 
 /** 日付文字列 → Date（不正/空は null）。'YYYY/MM/DD' も許容。 */

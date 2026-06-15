@@ -106,6 +106,8 @@ interface BacklogIssueRaw {
   description?: string;
   status?: { name?: string };
   priority?: { name?: string };
+  // Backlog の種別（例: "タスク" / "バグ" / "子課題" / "Story" 等。プロジェクト毎に定義可）。
+  issueType?: { name?: string } | null;
   assignee?: BacklogUser | null;
   startDate?: string | null;
   dueDate?: string | null;
@@ -264,6 +266,11 @@ export async function backlogListIssues(
         typeof r.estimatedHours === 'number' ? r.estimatedHours : null,
       actualHours: typeof r.actualHours === 'number' ? r.actualHours : null,
       parentExternalKey,
+      issueType: r.issueType?.name ?? null,
+      // Backlog API は Epic Link / Story Points / Sprint の標準提供が無いため null。
+      epicExternalKey: null,
+      storyPoints: null,
+      sprint: null,
       comments,
     });
   }

@@ -23,6 +23,33 @@ const PAGE_SIZE = 100;
 /** コメント取得の 1 課題あたり上限。 */
 const COMMENT_MAX = 100;
 
+/**
+ * アジャイル拡張のカスタムフィールド（代表値）。
+ * インスタンス毎に customfield 番号が異なるため、Jira Cloud の典型的な既定値を best-effort で走査する。
+ *   - Epic Link: customfield_10014（"team-managed" は parent で表現されるため parent も後段で見る）。
+ *     インスタンス差を吸収するため 10008 等の代表代替番号も列挙する。
+ *   - Story Points: customfield_10016（company-managed）/ 10026 / 10004 / 10002（テンプレ差）。
+ *     "Story point estimate"（team-managed）の 10016 とは別番号のことがあるため複数走査。
+ *   - Sprint: customfield_10020 / 10010 / 10018（active/最後の sprint name を抽出）。
+ */
+const EPIC_LINK_FIELDS = ['customfield_10014', 'customfield_10008'];
+const STORY_POINTS_FIELDS = [
+  'customfield_10016',
+  'customfield_10026',
+  'customfield_10004',
+  'customfield_10002',
+];
+const SPRINT_FIELDS = [
+  'customfield_10020',
+  'customfield_10010',
+  'customfield_10018',
+];
+const AGILE_CUSTOM_FIELDS = [
+  ...EPIC_LINK_FIELDS,
+  ...STORY_POINTS_FIELDS,
+  ...SPRINT_FIELDS,
+];
+
 /** siteUrl を正規化（末尾スラッシュ除去）。スキームは保持（https 前提）。 */
 export function normalizeSiteUrl(raw: string): string {
   let s = (raw || '').trim().replace(/\/+$/, '');
@@ -135,9 +162,13 @@ interface JiraIssueFields {
   duedate?: string | null;
   // Jira の開始日はカスタムフィールド差があるため、標準で取れる範囲のみ扱う。
   parent?: { key?: string } | null;
+  issuetype?: { name?: string } | null;
   timetracking?: JiraTimeTracking | null;
   created?: string | null;
   updated?: string | null;
+  // Epic Link / Story Points / Sprint はインスタンス毎に customfield 番号が異なるため、
+  // 代表 customfield を best-effort で走査する（取れなければ null）。任意キーを許容。
+  [customField: string]: unknown;
 }
 
 interface JiraIssueRaw {
@@ -242,13 +273,27 @@ export async function jiraTest(
   }
 }
 
+/**
+ * Jira の projectKey として妥当な形か。先頭は英字、以降は英数字/アンダースコアのみ。
+ * これに合致しないものは JQL に載せない（JQL インジェクション残余の排除）。
+ */
+function isValidProjectKey(key: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]*$/.test(key);
+}
+
 /** JQL を組み立てる（projectKey と updatedSince を考慮）。 */
 function buildJql(
   projectKey?: string | null,
   updatedSince?: string | null,
 ): string {
   const clauses: string[] = [];
-  if (projectKey) clauses.push(`project = "${projectKey.replace(/"/g, '')}"`);
+  if (projectKey) {
+    const pk = projectKey.trim();
+    // 不正な projectKey はインジェクションを避けるため JQL に載せない（例外にはしない）。
+    if (isValidProjectKey(pk)) {
+      clauses.push(`project = "${pk}"`);
+    }
+  }
   if (updatedSince) {
     const d = new Date(updatedSince);
     if (!Number.isNaN(d.getTime())) {
@@ -314,9 +359,13 @@ export async function jiraListIssues(
     'assignee',
     'duedate',
     'parent',
+    'issuetype',
     'timetracking',
     'created',
     'updated',
+    // アジャイル拡張のカスタムフィールド（インスタンス毎に番号差があるため代表値を取得）。
+    // Epic Link: 代表 customfield_10014。Story Points: 10016 / 10026。Sprint: 10020。
+    ...AGILE_CUSTOM_FIELDS,
   ];
 
   // 拡張 JQL 検索 /rest/api/3/search/jql を使う（旧 GET /search は 410 で撤去）。
@@ -370,6 +419,19 @@ export async function jiraListIssues(
       }
     }
 
+    const epicExternalKey = extractEpicExternalKey(f);
+    let parentExternalKey = f.parent?.key ?? null;
+    // team-managed では Epic を parent で表すため、parent.key が Epic Link として既に
+    // 採られている場合は parentExternalKey 側を外す（同一 Epic を parentId/epicId 両方に
+    // 二重リンクしない）。parent は Epic Link としてのみ扱う。
+    if (
+      parentExternalKey &&
+      epicExternalKey &&
+      parentExternalKey === epicExternalKey
+    ) {
+      parentExternalKey = null;
+    }
+
     issues.push({
       externalKey: r.key,
       title: f.summary ?? '(no title)',
@@ -382,7 +444,11 @@ export async function jiraListIssues(
       dueDate: f.duedate ?? null,
       estimatedHours: typeof est === 'number' ? roundHours(est / 3600) : null,
       actualHours: typeof spent === 'number' ? roundHours(spent / 3600) : null,
-      parentExternalKey: f.parent?.key ?? null,
+      parentExternalKey,
+      issueType: f.issuetype?.name ?? null,
+      epicExternalKey,
+      storyPoints: extractStoryPoints(f),
+      sprint: extractSprint(f),
       comments,
     });
   }
@@ -392,4 +458,130 @@ export async function jiraListIssues(
 /** 秒→時間換算の丸め（小数 2 桁）。 */
 function roundHours(h: number): number {
   return Math.round(h * 100) / 100;
+}
+
+/**
+ * Epic Link の外部キーを best-effort で抽出する。
+ *   - 代表 customfield（Epic Link）が文字列なら、それを Epic キー（例 "ABC-1"）とみなす。
+ *   - team-managed プロジェクトは Epic を parent で表すため、Epic 直下に位置する種別
+ *     （Story/Task/Bug）の課題に限り parent.key を Epic とみなす。
+ *
+ * 注意: Sub-task の parent は Story/Task であって Epic ではないため除外する。種別が不明
+ * （issuetype 無し）な場合も誤判定（parent を Epic に誤分類して parentId と二重リンク）を
+ * 避けるため Epic とはみなさない。
+ * 検出できなければ null。
+ */
+export function extractEpicExternalKey(f: JiraIssueFields): string | null {
+  for (const key of EPIC_LINK_FIELDS) {
+    const v = f[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  // team-managed: Epic は parent で表現される。Epic 直下に来る種別のみ parent を Epic とみなす。
+  const parentKey = f.parent?.key;
+  if (parentKey) {
+    const t = (f.issuetype?.name ?? '').toLowerCase();
+    // Story / Task / Bug（および「ストーリー」等の日本語）だけを対象にする。
+    // Sub-task・Epic・種別不明は対象外（Sub-task の親は Story、Epic に親 Epic は無い）。
+    const parentIsEpicCandidate =
+      /(story|ストーリー|bug|バグ|不具合|障害)/.test(t) ||
+      // "task"/"タスク" は含むが "sub-task"/"サブタスク" は除外する。
+      (/(task|タスク)/.test(t) && !/(sub[-\s]?task|subtask|子課題|サブタスク)/.test(t));
+    if (parentIsEpicCandidate) return parentKey;
+  }
+  return null;
+}
+
+/**
+ * Story Points を best-effort で抽出する。代表 customfield を順に走査し、最初の有限な数値を採用。
+ * 型揺れ（数値 / 文字列 / {value} {name} オブジェクト / 配列）でも例外を出さず、
+ * 数値化できなければ次の候補へ。検出できなければ null。
+ */
+export function extractStoryPoints(f: JiraIssueFields): number | null {
+  for (const key of STORY_POINTS_FIELDS) {
+    const num = coerceStoryPoints(f[key]);
+    if (num !== null) return num;
+  }
+  return null;
+}
+
+/** 任意の値から Story Points 数値を best-effort で取り出す（配列/オブジェクトも辿る）。 */
+function coerceStoryPoints(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!t) return null;
+    const num = Number(t);
+    return Number.isFinite(num) ? num : null;
+  }
+  if (Array.isArray(v)) {
+    // 配列で来た場合は最初に数値化できた要素を採用（非数値や入れ子で例外を出さない）。
+    for (const item of v) {
+      const num = coerceStoryPoints(item);
+      if (num !== null) return num;
+    }
+    return null;
+  }
+  if (typeof v === 'object') {
+    // {value: 3} / {name: "3"} 形式（select 系カスタムフィールド）から数値抽出。
+    const obj = v as { value?: unknown; name?: unknown };
+    const fromValue = coerceStoryPoints(obj.value);
+    if (fromValue !== null) return fromValue;
+    return coerceStoryPoints(obj.name);
+  }
+  return null;
+}
+
+/**
+ * Sprint 名を best-effort で抽出する。
+ * customfield_10020 は通常 sprint オブジェクトの配列（[{name, state}, ...]）。
+ *   - state==='active' の sprint を優先し、無ければ配列の最後（最新）の name を返す。
+ *   - 古い API では "...,name=Sprint 1,..." の文字列表現で来ることがあるため name= も拾う。
+ * 検出できなければ null。
+ */
+export function extractSprint(f: JiraIssueFields): string | null {
+  for (const key of SPRINT_FIELDS) {
+    const v = f[key];
+    if (v == null) continue;
+    if (Array.isArray(v)) {
+      const names: string[] = [];
+      let activeName: string | null = null;
+      for (const item of v) {
+        const name = sprintName(item);
+        if (!name) continue;
+        names.push(name);
+        const state =
+          item && typeof item === 'object'
+            ? (item as { state?: unknown }).state
+            : undefined;
+        if (typeof state === 'string' && state.toLowerCase() === 'active') {
+          activeName = name;
+        }
+      }
+      if (activeName) return activeName;
+      if (names.length > 0) return names[names.length - 1];
+    } else {
+      const name = sprintName(v);
+      if (name) return name;
+    }
+  }
+  return null;
+}
+
+/** 1 件分の sprint 表現（オブジェクト / 文字列）から name を取り出す。 */
+function sprintName(item: unknown): string | null {
+  if (item == null) return null;
+  if (typeof item === 'object') {
+    const name = (item as { name?: unknown }).name;
+    if (typeof name === 'string' && name.trim()) return name.trim();
+    return null;
+  }
+  if (typeof item === 'string') {
+    // 古い文字列表現 "...,name=Sprint 1,startDate=..." から name= を拾う。
+    const m = /name=([^,\]]+)/.exec(item);
+    if (m && m[1].trim()) return m[1].trim();
+    const s = item.trim();
+    return s.length > 0 ? s : null;
+  }
+  return null;
 }

@@ -8,6 +8,18 @@ import { IssueNodeKind } from './issue-node.entity';
 export type TaskStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
 
 /**
+ * イシュー種別（Prisma enum TaskIssueType と一致）。
+ * アジャイル階層（Epic > Story > Task/Sub-task）と Bug を表現する。
+ */
+export type TaskIssueType =
+  | 'EPIC'
+  | 'STORY'
+  | 'TASK'
+  | 'SUBTASK'
+  | 'BUG'
+  | 'OTHER';
+
+/**
  * 紐付くイシューノードの最小情報（由来表示用）。
  * リポジトリが read 時に IssueNode リレーションを join して同梱する。
  */
@@ -31,6 +43,14 @@ export interface CreateTaskProps {
   description?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
+  /** イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）。省略時は 'TASK'。 */
+  issueType?: TaskIssueType;
+  /** 所属 Epic の TaskId（issueType=EPIC の Task を指す）。未紐付けは null。 */
+  epicId?: string | null;
+  /** ストーリーポイント（見積もり）。未設定は null。 */
+  storyPoints?: number | null;
+  /** スプリント識別子（任意文字列）。未設定は null。 */
+  sprint?: string | null;
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
@@ -56,6 +76,14 @@ export interface ReconstructTaskProps {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  /** イシュー種別。 */
+  issueType: TaskIssueType;
+  /** 所属 Epic の TaskId（未紐付けは null）。 */
+  epicId: string | null;
+  /** ストーリーポイント（未設定は null）。 */
+  storyPoints: number | null;
+  /** スプリント識別子（未設定は null）。 */
+  sprint: string | null;
   assigneeName: string | null;
   assigneeRoleId: string | null;
   issueNodeId: string | null;
@@ -84,6 +112,14 @@ export interface UpdateTaskProps {
   description?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
+  /** イシュー種別（省略で変更なし）。 */
+  issueType?: TaskIssueType;
+  /** 所属 Epic の TaskId。指定で差し替え / null で解除 / 省略で変更なし。 */
+  epicId?: string | null;
+  /** ストーリーポイント。指定で更新 / null で解除 / 省略で変更なし。 */
+  storyPoints?: number | null;
+  /** スプリント識別子。指定で更新 / null で解除 / 省略で変更なし。 */
+  sprint?: string | null;
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
@@ -106,6 +142,14 @@ const VALID_STATUSES: TaskStatus[] = [
   'CLOSED',
 ];
 const VALID_PRIORITIES: TaskPriority[] = ['HIGH', 'MEDIUM', 'LOW'];
+const VALID_ISSUE_TYPES: TaskIssueType[] = [
+  'EPIC',
+  'STORY',
+  'TASK',
+  'SUBTASK',
+  'BUG',
+  'OTHER',
+];
 
 /**
  * Task エンティティ（Backlog 相当のタスク）
@@ -119,6 +163,10 @@ export class Task extends BaseEntity {
   private _description: string | null;
   private _status: TaskStatus;
   private _priority: TaskPriority;
+  private _issueType: TaskIssueType;
+  private _epicId: string | null;
+  private _storyPoints: number | null;
+  private _sprint: string | null;
   private _assigneeName: string | null;
   private _assigneeRoleId: string | null;
   private _issueNodeId: string | null;
@@ -143,6 +191,10 @@ export class Task extends BaseEntity {
     description: string | null,
     status: TaskStatus,
     priority: TaskPriority,
+    issueType: TaskIssueType,
+    epicId: string | null,
+    storyPoints: number | null,
+    sprint: string | null,
     assigneeName: string | null,
     assigneeRoleId: string | null,
     issueNodeId: string | null,
@@ -167,6 +219,10 @@ export class Task extends BaseEntity {
     this._description = description;
     this._status = status;
     this._priority = priority;
+    this._issueType = issueType;
+    this._epicId = epicId;
+    this._storyPoints = storyPoints;
+    this._sprint = sprint;
     this._assigneeName = assigneeName;
     this._assigneeRoleId = assigneeRoleId;
     this._issueNodeId = issueNodeId;
@@ -233,6 +289,26 @@ export class Task extends BaseEntity {
     return priority;
   }
 
+  private static validateIssueType(issueType: TaskIssueType): TaskIssueType {
+    if (!VALID_ISSUE_TYPES.includes(issueType)) {
+      throw new ValidationError(`Invalid task issue type: ${issueType}`);
+    }
+    return issueType;
+  }
+
+  /** ストーリーポイント（非負の有限数 / null）を検証する。 */
+  private static normalizeStoryPoints(
+    points: number | null | undefined,
+  ): number | null {
+    if (points === null || points === undefined) {
+      return null;
+    }
+    if (!Number.isFinite(points) || points < 0) {
+      throw new ValidationError('Story points must be a non-negative number');
+    }
+    return points;
+  }
+
   /**
    * 新規タスク作成
    */
@@ -244,6 +320,8 @@ export class Task extends BaseEntity {
     const title = Task.normalizeTitle(props.title);
     const status = Task.validateStatus(props.status ?? 'OPEN');
     const priority = Task.validatePriority(props.priority ?? 'MEDIUM');
+    const issueType = Task.validateIssueType(props.issueType ?? 'TASK');
+    const storyPoints = Task.normalizeStoryPoints(props.storyPoints);
     const progress = Task.normalizeProgress(props.progress ?? 0);
 
     if (props.parentId && props.parentId === id) {
@@ -260,6 +338,10 @@ export class Task extends BaseEntity {
       props.description?.trim() || null,
       status,
       priority,
+      issueType,
+      props.epicId ?? null,
+      storyPoints,
+      props.sprint?.trim() || null,
       props.assigneeName?.trim() || null,
       props.assigneeRoleId ?? null,
       props.issueNodeId ?? null,
@@ -290,6 +372,10 @@ export class Task extends BaseEntity {
       props.description,
       props.status,
       props.priority,
+      props.issueType,
+      props.epicId,
+      props.storyPoints,
+      props.sprint,
       props.assigneeName,
       props.assigneeRoleId,
       props.issueNodeId,
@@ -326,6 +412,18 @@ export class Task extends BaseEntity {
     }
     if (props.priority !== undefined) {
       this._priority = Task.validatePriority(props.priority);
+    }
+    if (props.issueType !== undefined) {
+      this._issueType = Task.validateIssueType(props.issueType);
+    }
+    if (props.epicId !== undefined) {
+      this._epicId = props.epicId ?? null;
+    }
+    if (props.storyPoints !== undefined) {
+      this._storyPoints = Task.normalizeStoryPoints(props.storyPoints);
+    }
+    if (props.sprint !== undefined) {
+      this._sprint = props.sprint?.trim() || null;
     }
     if (props.assigneeName !== undefined) {
       this._assigneeName = props.assigneeName?.trim() || null;
@@ -441,6 +539,26 @@ export class Task extends BaseEntity {
 
   get priority(): TaskPriority {
     return this._priority;
+  }
+
+  /** イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）。 */
+  get issueType(): TaskIssueType {
+    return this._issueType;
+  }
+
+  /** 所属 Epic の TaskId（未紐付けは null）。 */
+  get epicId(): string | null {
+    return this._epicId;
+  }
+
+  /** ストーリーポイント（未設定は null）。 */
+  get storyPoints(): number | null {
+    return this._storyPoints;
+  }
+
+  /** スプリント識別子（未設定は null）。 */
+  get sprint(): string | null {
+    return this._sprint;
   }
 
   get assigneeName(): string | null {

@@ -682,6 +682,7 @@ export default function DashboardLayout({
           { name: 'ステークホルダーマネジメント', href: `${base}/stakeholder-management`, icon: Users },
           { name: 'リスクマネジメント', href: `${base}/risk-management`, icon: ShieldAlert },
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
+          { name: 'アジャイル', href: `${base}/tasks/agile`, icon: Layers },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
           { name: '変更履歴', href: `${base}/history`, icon: History },
         ],

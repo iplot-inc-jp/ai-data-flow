@@ -46,7 +46,7 @@ import {
   TaskListOutput,
   TaskDependencyOutput,
 } from '../../application';
-import { TaskStatus, TaskPriority } from '../../domain';
+import { TaskStatus, TaskPriority, TaskIssueType } from '../../domain';
 import {
   CurrentUser,
   CurrentUserPayload,
@@ -61,6 +61,14 @@ const TASK_STATUSES: TaskStatus[] = [
   'CLOSED',
 ];
 const TASK_PRIORITIES: TaskPriority[] = ['HIGH', 'MEDIUM', 'LOW'];
+const TASK_ISSUE_TYPES: TaskIssueType[] = [
+  'EPIC',
+  'STORY',
+  'TASK',
+  'SUBTASK',
+  'BUG',
+  'OTHER',
+];
 
 /** ISO 文字列 (YYYY-MM-DD or full ISO) を Date に変換。空/未指定はそのまま返す。 */
 function toDate(value?: string | null): Date | null | undefined {
@@ -107,6 +115,39 @@ class CreateTaskDto {
   @IsOptional()
   @IsIn(TASK_PRIORITIES)
   priority?: TaskPriority;
+
+  @ApiProperty({
+    description: 'イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）',
+    enum: TASK_ISSUE_TYPES,
+    required: false,
+  })
+  @IsOptional()
+  @IsIn(TASK_ISSUE_TYPES)
+  issueType?: TaskIssueType;
+
+  @ApiProperty({
+    description: '所属 Epic の TaskId（null で未紐付け）',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  epicId?: string | null;
+
+  @ApiProperty({
+    description: 'ストーリーポイント（見積もり）',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  storyPoints?: number | null;
+
+  @ApiProperty({ description: 'スプリント識別子', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  sprint?: string | null;
 
   @ApiProperty({ description: '担当者名', required: false, nullable: true })
   @IsOptional()
@@ -238,6 +279,43 @@ class UpdateTaskDto {
   @IsOptional()
   @IsIn(TASK_PRIORITIES)
   priority?: TaskPriority;
+
+  @ApiProperty({
+    description: 'イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）',
+    enum: TASK_ISSUE_TYPES,
+    required: false,
+  })
+  @IsOptional()
+  @IsIn(TASK_ISSUE_TYPES)
+  issueType?: TaskIssueType;
+
+  @ApiProperty({
+    description: '所属 Epic の TaskId。指定で差し替え / null で解除 / 省略で変更なし',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  epicId?: string | null;
+
+  @ApiProperty({
+    description: 'ストーリーポイント。指定で更新 / null で解除 / 省略で変更なし',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  storyPoints?: number | null;
+
+  @ApiProperty({
+    description: 'スプリント識別子。指定で更新 / null で解除 / 省略で変更なし',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  sprint?: string | null;
 
   @ApiProperty({ description: '担当者名', required: false, nullable: true })
   @IsOptional()
@@ -415,6 +493,10 @@ export class TaskController {
       description: dto.description,
       status: dto.status,
       priority: dto.priority,
+      issueType: dto.issueType,
+      epicId: dto.epicId,
+      storyPoints: dto.storyPoints,
+      sprint: dto.sprint,
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
       issueNodeId: dto.issueNodeId,
@@ -528,6 +610,10 @@ export class TaskByIdController {
       description: dto.description,
       status: dto.status,
       priority: dto.priority,
+      issueType: dto.issueType,
+      epicId: dto.epicId,
+      storyPoints: dto.storyPoints,
+      sprint: dto.sprint,
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
       issueNodeId: dto.issueNodeId,

@@ -3,6 +3,7 @@ import {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskIssueType,
   ITaskRepository,
   TASK_REPOSITORY,
   ProjectRepository,
@@ -13,6 +14,10 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  mapStatus,
+  mapPriority,
+} from '../../../infrastructure/services/trackers/tracker-import.service';
 import { parseCsv, wouldFormCycle } from './import-backlog-tasks.use-case';
 
 export interface ImportJiraTasksInput {
@@ -108,15 +113,19 @@ export class ImportJiraTasksUseCase {
       rowNo: number;
       taskId: string;
       parentKey: string | null;
+      epicKey: string | null;
     } | null> = [];
     let created = 0;
     let updated = 0;
+    // 完全空行は skipped に計上しない（取込対象でないため別管理）。
+    let emptyRows = 0;
 
     // ===== パス1: upsert（sourceKey で冪等）=====
     for (let i = 0; i < dataRows.length; i++) {
       const rowNo = i + 1;
       const fields = dataRows[i];
       if (fields.every((f) => f.trim() === '')) {
+        emptyRows++;
         processed.push(null);
         continue;
       }
@@ -128,16 +137,6 @@ export class ImportJiraTasksUseCase {
         continue;
       }
       const key = cell(fields, col.key).trim();
-      const props = {
-        title,
-        description: optional(cell(fields, col.description)),
-        status: mapJiraStatus(cell(fields, col.status)),
-        priority: mapJiraPriority(cell(fields, col.priority)),
-        assigneeName: optional(cell(fields, col.assigneeName)),
-        dueDate: parseDate(cell(fields, col.dueDate)),
-        estimatedHours: secondsToHours(cell(fields, col.estimatedHours)),
-        actualHours: secondsToHours(cell(fields, col.actualHours)),
-      };
 
       try {
         let taskId: string;
@@ -149,14 +148,22 @@ export class ImportJiraTasksUseCase {
             )
           : null;
         if (existing) {
-          existing.update(props); // 既存を更新（重複作成しない）
+          // 更新時は CSV に列があり値が取れたフィールドだけを props に含める。
+          // 列なし/空セルは undefined のまま（Task.update の undefined=無変更）にして、
+          // 既定値や NULL で既存値を破壊しない（再取込でのデータ破壊防止）。
+          existing.update(buildUpdateProps(fields, col, title));
           await this.taskRepository.save(existing);
           taskId = existing.id;
           updated++;
         } else {
+          // 新規作成は既定値ありで全フィールドを構築（列なしは既定値/NULL）。
           const id = this.taskRepository.generateId();
           const task = Task.create(
-            { projectId: input.projectId, sourceKey, ...props },
+            {
+              projectId: input.projectId,
+              sourceKey,
+              ...buildCreateProps(fields, col, title),
+            },
             id,
           );
           await this.taskRepository.save(task);
@@ -176,7 +183,13 @@ export class ImportJiraTasksUseCase {
           }
         }
         const parentKey = cell(fields, col.parentKey).trim();
-        processed.push({ rowNo, taskId, parentKey: parentKey || null });
+        const epicKey = cell(fields, col.epicKey).trim();
+        processed.push({
+          rowNo,
+          taskId,
+          parentKey: parentKey || null,
+          epicKey: epicKey || null,
+        });
       } catch (e) {
         errors.push({ row: rowNo, message: (e as Error)?.message ?? String(e) });
         processed.push(null);
@@ -217,8 +230,34 @@ export class ImportJiraTasksUseCase {
       }
     }
 
+    // ===== パス3: Epic Link キー解決（親系統とは別の自己FK epicId）=====
+    for (const entry of processed) {
+      if (!entry || !entry.epicKey) continue;
+      const epicId = keyToTaskId.get(entry.epicKey);
+      if (!epicId || epicId === entry.taskId) continue;
+      if (duplicateKeys.has(entry.epicKey)) {
+        errors.push({
+          row: entry.rowNo,
+          message: `Epic キー「${entry.epicKey}」が重複しており紐付け先が一意でないため Epic なしにしました`,
+        });
+        continue;
+      }
+      try {
+        const task = await this.taskRepository.findById(entry.taskId);
+        if (!task) continue;
+        task.update({ epicId });
+        await this.taskRepository.save(task);
+      } catch (e) {
+        errors.push({
+          row: entry.rowNo,
+          message: `Epic の紐付けに失敗: ${(e as Error)?.message ?? String(e)}`,
+        });
+      }
+    }
+
     const processedCount = processed.filter((c) => c !== null).length;
-    const skipped = dataRows.length - processedCount;
+    // 空行は取込対象外なので skipped から除外する（件名空などの「スキップ」とは区別）。
+    const skipped = dataRows.length - processedCount - emptyRows;
     return { created, updated, skipped, errors };
   }
 }
@@ -230,6 +269,10 @@ interface JiraColumnIndex {
   description?: number;
   status?: number;
   priority?: number;
+  issueType?: number;
+  epicKey?: number;
+  storyPoints?: number;
+  sprint?: number;
   assigneeName?: number;
   dueDate?: number;
   estimatedHours?: number;
@@ -252,10 +295,20 @@ function buildJiraColumnIndex(header: string[]): JiraColumnIndex {
   };
   return {
     title: find('Summary', '件名'),
-    key: find('Issue key', 'Issue Key', 'Key'),
+    key: find('Issue key', 'Issue Key', 'Key', 'キー', '課題キー'),
     description: find('Description', '説明'),
     status: find('Status', '状態'),
     priority: find('Priority', '優先度'),
+    issueType: find('Issue Type', 'IssueType', '課題種別', '課題タイプ', '種別'),
+    epicKey: find('Epic Link', 'エピック', '親Epic', 'Custom field (Epic Link)'),
+    storyPoints: find(
+      'Story Points',
+      'Story point estimate',
+      'ストーリーポイント',
+      '見積もりポイント',
+      'Custom field (Story Points)',
+    ),
+    sprint: find('Sprint', 'スプリント', 'Custom field (Sprint)'),
     assigneeName: find('Assignee', '担当者'),
     dueDate: find('Due date', 'Due Date', '期限'),
     estimatedHours: find(
@@ -264,7 +317,14 @@ function buildJiraColumnIndex(header: string[]): JiraColumnIndex {
       'Original estimate',
     ),
     actualHours: find('Time Spent', 'Σ Time Spent', 'Time spent'),
-    parentKey: find('Parent', 'Parent key', 'Parent id', 'Parent Issue'),
+    parentKey: find(
+      'Parent',
+      'Parent key',
+      'Parent id',
+      'Parent Issue',
+      '親',
+      '親課題',
+    ),
   };
 }
 function cell(fields: string[], index: number | undefined): string {
@@ -275,24 +335,111 @@ function optional(value: string): string | null {
   const t = (value ?? '').trim();
   return t === '' ? null : t;
 }
-// ===== Jira enum 写像 =====
-export function mapJiraStatus(raw: string): TaskStatus {
-  const v = (raw ?? '').trim().toLowerCase();
-  if (['to do', 'todo', 'open', 'backlog', 'reopened'].includes(v))
-    return 'OPEN';
-  if (['in progress', 'in review', 'doing'].includes(v)) return 'IN_PROGRESS';
-  if (['resolved'].includes(v)) return 'RESOLVED';
-  if (['done', 'closed', 'complete', 'completed'].includes(v)) return 'CLOSED';
-  return 'OPEN';
+/** CSV に当該列が存在し、かつセルに非空の値があるか（更新時に含めるか判定）。 */
+function hasValue(fields: string[], index: number | undefined): boolean {
+  if (index === undefined) return false;
+  return (fields[index] ?? '').trim() !== '';
 }
-export function mapJiraPriority(raw: string): TaskPriority {
+
+/**
+ * 新規作成用 props。既定値ありで全フィールドを構築する（列なし/空セルは既定値/NULL）。
+ * status/priority は共有写像 mapStatus/mapPriority('JIRA')（日英・正規表現対応）を使う。
+ */
+function buildCreateProps(
+  fields: string[],
+  col: JiraColumnIndex,
+  title: string,
+) {
+  return {
+    title,
+    description: optional(cell(fields, col.description)),
+    status: mapStatus(cell(fields, col.status), 'JIRA'),
+    priority: mapPriority(cell(fields, col.priority), 'JIRA'),
+    issueType: mapJiraIssueType(cell(fields, col.issueType)),
+    storyPoints: parseStoryPoints(cell(fields, col.storyPoints)),
+    sprint: optional(cell(fields, col.sprint)),
+    assigneeName: optional(cell(fields, col.assigneeName)),
+    dueDate: parseDate(cell(fields, col.dueDate)),
+    estimatedHours: secondsToHours(cell(fields, col.estimatedHours)),
+    actualHours: secondsToHours(cell(fields, col.actualHours)),
+  };
+}
+
+/**
+ * 更新用 props。CSV に列があり値が取れたフィールドだけを含める（再取込でのデータ破壊防止）。
+ *   - status/priority/issueType: 列非存在/空セルでは既定値を流し込まない（除外＝無変更）。
+ *   - その他: 列があり非空のときだけ含める。列なし/空セルは undefined（=Task.update で無変更）。
+ * title は必須なので常に含める。
+ */
+function buildUpdateProps(
+  fields: string[],
+  col: JiraColumnIndex,
+  title: string,
+) {
+  const props: {
+    title: string;
+    description?: string | null;
+    status?: TaskStatus;
+    priority?: TaskPriority;
+    issueType?: TaskIssueType;
+    storyPoints?: number | null;
+    sprint?: string | null;
+    assigneeName?: string | null;
+    dueDate?: Date | null;
+    estimatedHours?: number | null;
+    actualHours?: number | null;
+  } = { title };
+
+  // enum 系は「列があり値がある」ときだけ写像して上書き（既定値での破壊を避ける）。
+  if (hasValue(fields, col.status))
+    props.status = mapStatus(cell(fields, col.status), 'JIRA');
+  if (hasValue(fields, col.priority))
+    props.priority = mapPriority(cell(fields, col.priority), 'JIRA');
+  if (hasValue(fields, col.issueType))
+    props.issueType = mapJiraIssueType(cell(fields, col.issueType));
+
+  // 値フィールドも「列があり値がある」ときだけ含める（空セルは無変更）。
+  if (hasValue(fields, col.description))
+    props.description = optional(cell(fields, col.description));
+  if (hasValue(fields, col.storyPoints))
+    props.storyPoints = parseStoryPoints(cell(fields, col.storyPoints));
+  if (hasValue(fields, col.sprint))
+    props.sprint = optional(cell(fields, col.sprint));
+  if (hasValue(fields, col.assigneeName))
+    props.assigneeName = optional(cell(fields, col.assigneeName));
+  if (hasValue(fields, col.dueDate))
+    props.dueDate = parseDate(cell(fields, col.dueDate));
+  if (hasValue(fields, col.estimatedHours))
+    props.estimatedHours = secondsToHours(cell(fields, col.estimatedHours));
+  if (hasValue(fields, col.actualHours))
+    props.actualHours = secondsToHours(cell(fields, col.actualHours));
+
+  return props;
+}
+/**
+ * Jira の課題種別（Epic/Story/Sub-task/Bug/Task 等）→ TaskIssueType。
+ * 未知値は安全な既定 'TASK' にフォールバックする。
+ */
+export function mapJiraIssueType(raw: string): TaskIssueType {
   const v = (raw ?? '').trim().toLowerCase();
-  if (['highest', 'high', 'blocker', 'critical'].includes(v)) return 'HIGH';
-  if (['medium', 'normal'].includes(v)) return 'MEDIUM';
-  if (['low', 'lowest', 'trivial', 'minor'].includes(v)) return 'LOW';
-  return 'MEDIUM';
+  if (!v) return 'TASK';
+  if (/(epic|エピック)/.test(v)) return 'EPIC';
+  // Sub-task は Story / Task より先に判定（"sub-task" の "task" 誤判定を避ける）。
+  if (/(sub[-\s]?task|subtask|子課題|サブタスク)/.test(v)) return 'SUBTASK';
+  if (/(story|ストーリー)/.test(v)) return 'STORY';
+  if (/(bug|バグ|不具合|障害)/.test(v)) return 'BUG';
+  if (/(task|タスク)/.test(v)) return 'TASK';
+  return 'TASK';
 }
 // ===== 値パーサ =====
+/** ストーリーポイント文字列を数値に変換。空や不正値・負値は null。 */
+function parseStoryPoints(raw: string): number | null {
+  const v = (raw ?? '').trim();
+  if (!v) return null;
+  const num = Number(v);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
 function parseDate(raw: string): Date | null {
   const v = (raw ?? '').trim();
   if (!v) return null;
