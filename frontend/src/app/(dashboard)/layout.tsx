@@ -16,6 +16,7 @@ import {
   FileText,
   Grid3X3,
   Home,
+  Inbox,
   ChevronRight,
   ChevronDown,
   Zap,
@@ -602,6 +603,7 @@ export default function DashboardLayout({
     const nav = [
       { name: 'ダッシュボード', href: '/dashboard', icon: Home },
       { name: 'プロジェクト', href: '/dashboard/projects', icon: FolderOpen },
+      { name: '取り込みバッチ', href: '/dashboard/batches', icon: Inbox },
     ]
 
     // 全体管理者のみ「会社管理」を表示
