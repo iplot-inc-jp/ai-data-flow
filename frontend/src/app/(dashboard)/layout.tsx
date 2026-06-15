@@ -585,12 +585,12 @@ export default function DashboardLayout({
   const { subProjects, flows } = useFlowTree(projectId)
   const { isSuperAdmin } = useCurrentUser()
 
-  // ガイド（全体マニュアル＋背景・目的）。プロジェクト選択時のみ・サイドメニュー最上部に表示
+  // ガイド（全体マニュアル）。プロジェクト選択時のみ・サイドメニュー最上部に表示。
+  // 背景・目的は独立したサブカテゴリ（projectGroups 先頭）へ移動した。
   const guideNav = useMemo(() => {
     if (!projectId) return []
     return [
       { name: 'ガイド', href: `/dashboard/projects/${projectId}/guide`, icon: Compass },
-      { name: '背景・目的', href: `/dashboard/projects/${projectId}/background`, icon: Landmark },
     ]
   }, [projectId])
 
@@ -614,6 +614,12 @@ export default function DashboardLayout({
     if (!projectId) return []
     const base = `/dashboard/projects/${projectId}`
     return [
+      {
+        label: '背景・目的',
+        items: [
+          { name: '背景・目的', href: `${base}/background`, icon: Landmark },
+        ],
+      },
       {
         label: '共通マスタ',
         items: [
