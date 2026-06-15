@@ -38,4 +38,9 @@ describe('presence-helpers', () => {
     expect(displayName({ name: null, email: 'bob@x.com' })).toBe('bob');
     expect(displayName({ name: null, email: null })).toBe('匿名');
   });
+
+  it('displayName tolerates nullish info (mid-handshake peer)', () => {
+    expect(displayName(null)).toBe('匿名');
+    expect(displayName(undefined)).toBe('匿名');
+  });
 });

@@ -29,9 +29,13 @@ export function WhoIsOnline() {
   const others = useOthers()
   const self = useSelf()
 
+  // 接続直後の未解決ピアは info が undefined になり得るので除外する（描画時クラッシュ防止）。
   const entries: Entry[] = []
-  if (self) entries.push({ id: self.id ?? 'self', info: self.info, isSelf: true })
-  for (const o of others) entries.push({ id: o.id ?? `c${o.connectionId}`, info: o.info, isSelf: false })
+  if (self?.info) entries.push({ id: self.id ?? 'self', info: self.info, isSelf: true })
+  for (const o of others) {
+    if (!o.info) continue
+    entries.push({ id: o.id ?? `c${o.connectionId}`, info: o.info, isSelf: false })
+  }
   const unique = dedupeByUserId(entries)
 
   if (unique.length === 0) return null

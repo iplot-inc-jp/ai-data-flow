@@ -35,6 +35,7 @@ export const {
   useOthers,
   useSelf,
   useUpdateMyPresence,
+  useErrorListener,
 } = createRoomContext<Presence, Record<string, never>, UserMeta>(liveblocksClient)
 
 export { roomIdForProject }

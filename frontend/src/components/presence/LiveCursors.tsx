@@ -37,7 +37,8 @@ export function LiveCursors() {
   return (
     <div className="pointer-events-none fixed inset-0 z-50">
       {others.map((o) => {
-        if (!shouldShowCursor(o, pathname) || !o.presence.cursor) return null
+        // info は接続直後の未解決ピアで undefined になり得る（描画時クラッシュ防止）。
+        if (!shouldShowCursor(o, pathname) || !o.presence.cursor || !o.info) return null
         const { x, y } = o.presence.cursor
         return (
           <div key={o.connectionId} className="absolute" style={{ left: x, top: y, transform: 'translate(-2px, -2px)' }}>
