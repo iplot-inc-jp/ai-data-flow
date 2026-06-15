@@ -30,13 +30,18 @@ function authHeaders(json = true): Record<string, string> {
 
 /**
  * 1ファイルをアップロードして Attachment を返す（共有プール）。
- * client直（Blob）を試し、token未設定/失敗時はサーバ経由(4MB・プロジェクト直下)にフォールバック。
- * scope を渡すと register でその対象に紐づける（client直経路のみ。フォールバックは直下）。
+ * client直（Blob）を試し、token未設定/失敗時はサーバ経由(4MB)にフォールバック。
+ * scope を渡すと register でその対象に紐づける（client直経路）。
+ *
+ * @param serverFallback フォールバック時に使うサーバ経由アップロード。スコープ付き添付の画面は
+ *   ここに既存のスコープ付き upload API を渡すこと（フォールバックでもスコープを保つ）。
+ *   省略時はプロジェクト直下添付（projectAttachmentApi.upload）。
  */
 export async function uploadProjectFile(
   projectId: string,
   file: File,
   scope: UploadScope = {},
+  serverFallback?: (projectId: string, file: File) => Promise<unknown>,
 ): Promise<ProjectAttachment> {
   try {
     // 1) ブラウザ→Blob 直アップロード（token は handleUploadUrl 経由で発行）。
@@ -64,8 +69,10 @@ export async function uploadProjectFile(
     if (!res.ok) throw new Error('register-blob に失敗しました');
     return (await res.json()) as ProjectAttachment;
   } catch {
-    // 3) フォールバック: サーバ経由 multipart（プロジェクト直下・4MB）。
+    // 3) フォールバック: サーバ経由 multipart（4MB）。
     //    token 未設定（{enabled:false}）でも upload() が失敗するためここに来る。
-    return projectAttachmentApi.upload(projectId, file);
+    //    スコープ付き画面は serverFallback で既存スコープ付き API を使い、挙動を不変に保つ。
+    const fb = serverFallback ?? projectAttachmentApi.upload;
+    return (await fb(projectId, file)) as ProjectAttachment;
   }
 }
