@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { FileDropZone } from '@/components/ui/file-drop-zone';
 import { informationTypeApi, type InformationTypeAttachment } from '@/lib/dfd';
+import { uploadProjectFile } from '@/lib/upload';
 
 /** 「新しいフォルダ…」選択肢の内部値（実フォルダ名と衝突しない sentinel）。 */
 const NEW_FOLDER_VALUE = '__new_folder__';
@@ -272,12 +273,14 @@ function FileAttachmentRow({
 }
 
 export function IoAttachmentsPanel({
+  projectId,
   informationTypeId,
   expanded,
   folderCandidates,
   onFoldersSeen,
   onCountChange,
 }: {
+  projectId: string;
   informationTypeId: string;
   /** 行が展開されているか。false の間は描画しない（取得済みの状態は保持）。 */
   expanded: boolean;
@@ -337,9 +340,15 @@ export function IoAttachmentsPanel({
       // 逐次アップロード（multipart）。失敗したものはまとめてインライン表示。
       for (const file of files) {
         try {
-          const created = await informationTypeApi.upload(informationTypeId, file);
+          // 共有プール: client直Blob（大ファイル可）→ 失敗/未設定時は従来のio-types添付(4MB)へフォールバック。
+          const created = await uploadProjectFile(
+            projectId,
+            file,
+            { informationTypeId, folder: uploadFolder || undefined },
+            (_p, f) => informationTypeApi.upload(informationTypeId, f),
+          );
           if (uploadFolder) {
-            // アップロード API はフォルダ未対応のため、直後にメタ更新で振り分ける
+            // フォールバック経路はフォルダ未設定のため、直後にメタ更新で振り分ける（client直は scope で設定済み）
             try {
               await informationTypeApi.updateAttachment(created.id, { folder: uploadFolder });
             } catch {

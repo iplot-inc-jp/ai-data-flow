@@ -41,6 +41,7 @@ import {
   projectAttachmentApi,
   type ProjectAttachment,
 } from '@/lib/project-attachments';
+import { uploadProjectFile } from '@/lib/upload';
 
 // 文章セクションの定義（key は ProjectCharter のフィールド名と一致）。
 const TEXT_SECTIONS: {
@@ -133,7 +134,8 @@ export default function BackgroundPage() {
       const failed: string[] = [];
       for (const file of files) {
         try {
-          await projectAttachmentApi.upload(projectId, file);
+          // 共有プール: client直Blob（大ファイル可）→ 失敗/未設定時はサーバ経由(4MB)へフォールバック。
+          await uploadProjectFile(projectId, file);
         } catch {
           failed.push(file.name);
         }

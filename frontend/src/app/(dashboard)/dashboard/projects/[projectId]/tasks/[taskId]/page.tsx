@@ -58,6 +58,7 @@ import {
   type TaskAttachment,
   type IssueNodeRef,
 } from '@/lib/tasks';
+import { uploadProjectFile } from '@/lib/upload';
 import {
   listRisks,
   riskScore,
@@ -405,7 +406,10 @@ export default function TaskDetailPage() {
     // 逐次アップロード。失敗したものはまとめてインライン表示。
     for (const file of files) {
       try {
-        await attachmentsApi.upload(taskId, file);
+        // 共有プール: client直Blob（大ファイル可）→ 失敗/未設定時は従来のタスク添付(4MB)へフォールバック。
+        await uploadProjectFile(projectId, file, { taskId }, (_p, f) =>
+          attachmentsApi.upload(taskId, f),
+        );
       } catch {
         failed.push(file.name);
       }
