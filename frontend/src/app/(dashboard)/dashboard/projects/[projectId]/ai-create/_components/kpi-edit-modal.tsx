@@ -58,14 +58,19 @@ const numToStr = (v: number | null): string => (v == null ? '' : String(v));
 
 export function KpiEditModal({
   kpi,
+  projectId,
   flows,
   systems,
   roles,
   informationTypes,
   onClose,
   onSaved,
+  lockedCategory,
 }: {
-  kpi: KpiDto;
+  /** 編集対象。`null` のとき空フォームで新規作成（要 projectId）。 */
+  kpi: KpiDto | null;
+  /** 新規作成（kpi===null）時に必須。`kpiApi.create(projectId, …)` に使う。 */
+  projectId?: string;
   flows: BusinessFlowItem[];
   systems: SystemMaster[];
   roles: RoleItem[];
@@ -73,30 +78,35 @@ export function KpiEditModal({
   onClose: () => void;
   /** 保存成功後に呼ばれる（KPI一覧の再読込） */
   onSaved: () => Promise<void> | void;
+  /** 区分固定（業務KPI / AI精度指標 専用画面の新規作成）。指定時は区分セレクトを固定表示する。 */
+  lockedCategory?: KpiCategory;
 }) {
-  const [name, setName] = useState(kpi.name);
-  const [category, setCategory] = useState<KpiCategory>(kpi.category);
-  const [flowId, setFlowId] = useState(kpi.flowId ?? '');
-  const [systemId, setSystemId] = useState(kpi.systemId ?? '');
-  const [description, setDescription] = useState(kpi.description ?? '');
-  const [definition, setDefinition] = useState(kpi.definition ?? '');
-  const [unit, setUnit] = useState(kpi.unit ?? '');
-  const [baseline, setBaseline] = useState(numToStr(kpi.baselineValue));
-  const [current, setCurrent] = useState(numToStr(kpi.currentValue));
-  const [target, setTarget] = useState(numToStr(kpi.targetValue));
-  const [direction, setDirection] = useState<KpiDirection>(kpi.direction);
-  const [frequency, setFrequency] = useState<KpiFrequency>(kpi.frequency);
-  const [measurementMethod, setMeasurementMethod] = useState(kpi.measurementMethod ?? '');
-  const [ownerRoleId, setOwnerRoleId] = useState(kpi.ownerRoleId ?? '');
-  const [status, setStatus] = useState<KpiStatus>(kpi.status);
-  const [smartS, setSmartS] = useState(numToStr(kpi.smartSpecific));
-  const [smartM, setSmartM] = useState(numToStr(kpi.smartMeasurable));
-  const [smartA, setSmartA] = useState(numToStr(kpi.smartAchievable));
-  const [smartR, setSmartR] = useState(numToStr(kpi.smartRelevant));
-  const [smartT, setSmartT] = useState(numToStr(kpi.smartTimeBound));
-  const [smartComment, setSmartComment] = useState(kpi.smartComment ?? '');
+  const isCreate = kpi === null;
+  const [name, setName] = useState(kpi?.name ?? '');
+  const [category, setCategory] = useState<KpiCategory>(
+    kpi?.category ?? lockedCategory ?? 'BUSINESS',
+  );
+  const [flowId, setFlowId] = useState(kpi?.flowId ?? '');
+  const [systemId, setSystemId] = useState(kpi?.systemId ?? '');
+  const [description, setDescription] = useState(kpi?.description ?? '');
+  const [definition, setDefinition] = useState(kpi?.definition ?? '');
+  const [unit, setUnit] = useState(kpi?.unit ?? '');
+  const [baseline, setBaseline] = useState(numToStr(kpi?.baselineValue ?? null));
+  const [current, setCurrent] = useState(numToStr(kpi?.currentValue ?? null));
+  const [target, setTarget] = useState(numToStr(kpi?.targetValue ?? null));
+  const [direction, setDirection] = useState<KpiDirection>(kpi?.direction ?? 'INCREASE');
+  const [frequency, setFrequency] = useState<KpiFrequency>(kpi?.frequency ?? 'MONTHLY');
+  const [measurementMethod, setMeasurementMethod] = useState(kpi?.measurementMethod ?? '');
+  const [ownerRoleId, setOwnerRoleId] = useState(kpi?.ownerRoleId ?? '');
+  const [status, setStatus] = useState<KpiStatus>(kpi?.status ?? 'DRAFT');
+  const [smartS, setSmartS] = useState(numToStr(kpi?.smartSpecific ?? null));
+  const [smartM, setSmartM] = useState(numToStr(kpi?.smartMeasurable ?? null));
+  const [smartA, setSmartA] = useState(numToStr(kpi?.smartAchievable ?? null));
+  const [smartR, setSmartR] = useState(numToStr(kpi?.smartRelevant ?? null));
+  const [smartT, setSmartT] = useState(numToStr(kpi?.smartTimeBound ?? null));
+  const [smartComment, setSmartComment] = useState(kpi?.smartComment ?? '');
   const [ioIds, setIoIds] = useState<Set<string>>(
-    () => new Set(kpi.informationTypes.map((it) => it.id)),
+    () => new Set((kpi?.informationTypes ?? []).map((it) => it.id)),
   );
 
   const [saving, setSaving] = useState(false);
@@ -120,10 +130,14 @@ export function KpiEditModal({
       setError('名称を入力してください');
       return;
     }
+    if (isCreate && !projectId) {
+      setError('プロジェクトIDが指定されていません');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const patch: KpiUpsertBody = {
+      const body: KpiUpsertBody = {
         name: trimmedName,
         category,
         flowId: flowId || null,
@@ -146,14 +160,26 @@ export function KpiEditModal({
         smartComment: smartComment.trim() || null,
         status,
       };
-      await kpiApi.update(kpi.id, patch);
 
-      // IO紐づけは変更があったときだけ全置換（PUT information-types）
-      const before = new Set(kpi.informationTypes.map((it) => it.id));
-      const changed =
-        before.size !== ioIds.size || Array.from(ioIds).some((id) => !before.has(id));
-      if (changed) {
-        await kpiApi.setInformationTypes(kpi.id, Array.from(ioIds));
+      if (isCreate) {
+        // 新規作成。create 後、IO選択があれば 2段目で setInformationTypes（プリセット追加と同方式）。
+        const created = await kpiApi.create(projectId as string, {
+          ...body,
+          name: trimmedName,
+        });
+        if (ioIds.size > 0) {
+          await kpiApi.setInformationTypes(created.id, Array.from(ioIds));
+        }
+      } else {
+        await kpiApi.update(kpi.id, body);
+
+        // IO紐づけは変更があったときだけ全置換（PUT information-types）
+        const before = new Set(kpi.informationTypes.map((it) => it.id));
+        const changed =
+          before.size !== ioIds.size || Array.from(ioIds).some((id) => !before.has(id));
+        if (changed) {
+          await kpiApi.setInformationTypes(kpi.id, Array.from(ioIds));
+        }
       }
 
       await onSaved();
@@ -165,6 +191,8 @@ export function KpiEditModal({
     }
   }, [
     kpi,
+    isCreate,
+    projectId,
     name,
     category,
     flowId,
@@ -198,7 +226,7 @@ export function KpiEditModal({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>KPIを編集</DialogTitle>
+          <DialogTitle>{isCreate ? 'KPIを新規作成' : 'KPIを編集'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -213,9 +241,13 @@ export function KpiEditModal({
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value as KpiCategory)}
-                className={selectClass}
+                disabled={lockedCategory != null}
+                className={`${selectClass}${lockedCategory != null ? ' cursor-not-allowed bg-gray-50 text-gray-500' : ''}`}
               >
-                {KPI_CATEGORY_OPTIONS.map((o) => (
+                {(lockedCategory != null
+                  ? KPI_CATEGORY_OPTIONS.filter((o) => o.value === lockedCategory)
+                  : KPI_CATEGORY_OPTIONS
+                ).map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
@@ -454,7 +486,7 @@ export function KpiEditModal({
           </Button>
           <Button onClick={() => void handleSave()} disabled={saving || !name.trim()}>
             {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-            保存
+            {isCreate ? '作成' : '保存'}
           </Button>
         </DialogFooter>
       </DialogContent>

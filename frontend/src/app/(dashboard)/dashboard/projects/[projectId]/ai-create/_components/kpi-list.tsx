@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   GitBranch,
   Loader2,
+  Plus,
   Server,
   Target,
   Trash2,
@@ -27,6 +28,7 @@ import type { InformationType } from '@/lib/dfd';
 import type { SystemMaster } from '@/lib/masters';
 import {
   kpiApi,
+  KPI_CATEGORY_LABELS,
   KPI_FREQUENCY_LABELS,
   type KpiCategory,
   type KpiDto,
@@ -49,7 +51,7 @@ type CategoryFilter = 'ALL' | KpiCategory;
 const FILTERS: ReadonlyArray<{ value: CategoryFilter; label: string }> = [
   { value: 'ALL', label: '全部' },
   { value: 'BUSINESS', label: '業務KPI' },
-  { value: 'AI_QUALITY', label: 'AI精度KPI' },
+  { value: 'AI_QUALITY', label: 'AI精度指標' },
 ];
 
 export function KpiList({
@@ -62,6 +64,8 @@ export function KpiList({
   roles,
   informationTypes,
   onChanged,
+  lockedCategory,
+  onCreateNew,
 }: {
   kpis: KpiDto[];
   loading: boolean;
@@ -73,6 +77,10 @@ export function KpiList({
   roles: RoleItem[];
   informationTypes: InformationType[];
   onChanged: () => Promise<void> | void;
+  /** 区分固定（業務KPI / AI精度指標 専用画面）。指定時はカテゴリフィルタ群を出さない。 */
+  lockedCategory?: KpiCategory;
+  /** ヘッダの「＋手動で追加」ボタン。指定時のみ表示する。 */
+  onCreateNew?: () => void;
 }) {
   const [filter, setFilter] = useState<CategoryFilter>('ALL');
   const [editing, setEditing] = useState<KpiDto | null>(null);
@@ -80,15 +88,17 @@ export function KpiList({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const filtered = useMemo(
-    () => (filter === 'ALL' ? kpis : kpis.filter((k) => k.category === filter)),
-    [kpis, filter],
-  );
+  // lockedCategory 指定時はフィルタUIを出さず、その区分のみ表示する。
+  const filtered = useMemo(() => {
+    if (lockedCategory) return kpis;
+    return filter === 'ALL' ? kpis : kpis.filter((k) => k.category === filter);
+  }, [kpis, filter, lockedCategory]);
 
   const counts = useMemo(() => {
+    if (lockedCategory) return { ALL: 0, BUSINESS: 0, AI_QUALITY: 0 } as Record<CategoryFilter, number>;
     const business = kpis.filter((k) => k.category === 'BUSINESS').length;
     return { ALL: kpis.length, BUSINESS: business, AI_QUALITY: kpis.length - business };
-  }, [kpis]);
+  }, [kpis, lockedCategory]);
 
   const runAction = useCallback(
     async (id: string, action: () => Promise<unknown>) => {
@@ -132,24 +142,39 @@ export function KpiList({
         <Target className="h-4 w-4 text-blue-600" />
         <h2 className="text-sm font-semibold text-gray-800">KPI一覧</h2>
         <span className="text-xs text-gray-400">クリックで編集。下書きは「採用」で運用開始。</span>
-        {/* カテゴリフィルタ */}
-        <div className="ml-auto flex items-center gap-1">
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => setFilter(f.value)}
-              className={`rounded px-2 py-1 text-xs font-medium ${
-                filter === f.value
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
-              }`}
-            >
-              {f.label}
-              <span className="ml-1 tabular-nums opacity-70">{counts[f.value]}</span>
-            </button>
-          ))}
-        </div>
+        {/* カテゴリフィルタ（区分固定画面では非表示） */}
+        {!lockedCategory && (
+          <div className="ml-auto flex items-center gap-1">
+            {FILTERS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setFilter(f.value)}
+                className={`rounded px-2 py-1 text-xs font-medium ${
+                  filter === f.value
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                }`}
+              >
+                {f.label}
+                <span className="ml-1 tabular-nums opacity-70">{counts[f.value]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {/* 手動追加（指定時のみ）。区分固定画面では右寄せの起点になる。 */}
+        {onCreateNew && (
+          <button
+            type="button"
+            onClick={onCreateNew}
+            className={`inline-flex items-center gap-1 rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 ${
+              lockedCategory ? 'ml-auto' : ''
+            }`}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            手動で追加
+          </button>
+        )}
       </div>
 
       <div className="space-y-2 p-4">
@@ -163,9 +188,13 @@ export function KpiList({
           <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
         ) : filtered.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-400">
-            {kpis.length === 0
-              ? 'KPIがまだありません。上のタブからAI生成またはプリセット追加してください。'
-              : 'この区分のKPIはありません。'}
+            {lockedCategory
+              ? onCreateNew
+                ? `${KPI_CATEGORY_LABELS[lockedCategory]}がまだありません。「＋手動で追加」から作成できます。`
+                : `${KPI_CATEGORY_LABELS[lockedCategory]}がまだありません。`
+              : kpis.length === 0
+                ? 'KPIがまだありません。上のタブからAI生成またはプリセット追加してください。'
+                : 'この区分のKPIはありません。'}
           </p>
         ) : (
           <ul className="space-y-2">

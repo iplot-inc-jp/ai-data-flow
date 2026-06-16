@@ -43,10 +43,13 @@ import {
   Compass,
   Boxes,
   Table2,
+  TableProperties,
   Sparkles,
   Brain,
   FileStack,
   BarChart3,
+  Goal,
+  Gauge,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -664,7 +667,10 @@ export default function DashboardLayout({
           { name: 'ロードマップ', href: `${base}/roadmap`, icon: MapIcon },
           { name: '要求定義', href: `${base}/requirements`, icon: FileText },
           { name: 'CRUD表', href: `${base}/crud-matrix`, icon: Grid3X3 },
-          { name: 'AI作成', href: `${base}/ai-create`, icon: Sparkles },
+          { name: '俯瞰思考', href: `${base}/overview-matrix`, icon: TableProperties },
+          { name: '業務KPI', href: `${base}/business-kpi`, icon: Goal },
+          { name: 'AI精度指標', href: `${base}/ai-accuracy`, icon: Gauge },
+          { name: 'AI下書き', href: `${base}/ai-create`, icon: Sparkles },
         ],
       },
       {
