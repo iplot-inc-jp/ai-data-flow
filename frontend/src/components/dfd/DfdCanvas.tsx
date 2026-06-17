@@ -1431,8 +1431,8 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           selectionMode={SelectionMode.Partial}
           proOptions={{ hideAttribution: true }}
           onNodeDragStop={handleNodeDragStop}
-          onPaneClick={() => { setSelectedEdgeId(null); setSelectedNodeId(null); }}
-          onEdgeClick={(_, edge) => { setSelectedEdgeId(edge.id); setSelectedNodeId(null); }}
+          onPaneClick={() => { setSelectedEdgeId(null); setSelectedNodeId(null); setPanel(null); }}
+          onEdgeClick={(_, edge) => { setSelectedEdgeId(edge.id); setSelectedNodeId(null); setPanel(null); }}
           onNodeClick={(_, node) => {
             if (node.type === 'boundary') return;
             // 注釈（付箋・メモ）は専用UI（インライン編集/✕/リサイズ）で完結。編集パネルは出さない。
