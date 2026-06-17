@@ -42,6 +42,20 @@ function priorityBadgeClasses(priority: string | null | undefined): string {
   return 'bg-gray-100 text-gray-500';
 }
 
+// 担当者ポップオーバ（portal+fixed）のサイズ。w-60 / max-h-56。
+const POPOVER_W = 240;
+const POPOVER_H = 224;
+/** トリガ rect から fixed 座標を計算し、画面右端・下端で見切れないようクランプ/フリップする。 */
+function clampPopover(rect: DOMRect): { top: number; left: number } {
+  const M = 8;
+  const left = Math.max(M, Math.min(rect.left, window.innerWidth - POPOVER_W - M));
+  const top =
+    rect.bottom + 4 + POPOVER_H > window.innerHeight
+      ? Math.max(M, rect.top - POPOVER_H - 4) // 下に収まらなければ上にフリップ
+      : rect.bottom + 4;
+  return { top, left };
+}
+
 export default function BusinessListPage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -106,6 +120,19 @@ export default function BusinessListPage() {
     rows,
     sortAccessors,
   );
+
+  // ポップオーバは fixed 座標固定なので、スクロール/リサイズで閉じる（トリガから乖離して浮くのを防ぐ）。
+  // capture:true で表の overflow-x-auto スクロールも拾う。
+  useEffect(() => {
+    if (!openPicker) return;
+    const close = () => setOpenPicker(null);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [openPicker]);
 
   // 担当者トグル（楽観更新 → 保存、失敗時は reload で巻き戻す）。
   const toggleAssignee = async (row: BusinessListRow, stakeholderId: string) => {
@@ -289,12 +316,11 @@ export default function BusinessListPage() {
                                     setOpenPicker(null);
                                     return;
                                   }
-                                  const rect =
-                                    e.currentTarget.getBoundingClientRect();
-                                  setPickerPos({
-                                    top: rect.bottom + 4,
-                                    left: rect.left,
-                                  });
+                                  setPickerPos(
+                                    clampPopover(
+                                      e.currentTarget.getBoundingClientRect(),
+                                    ),
+                                  );
                                   setOpenPicker(r.asis.id);
                                 }}
                                 disabled={!hasStakeholders || savingId === r.asis.id}

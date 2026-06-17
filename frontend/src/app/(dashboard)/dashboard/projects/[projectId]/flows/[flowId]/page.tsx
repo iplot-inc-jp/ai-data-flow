@@ -401,6 +401,19 @@ const DEF_INPUT_FIELDS: { key: keyof FlowDefinition; label: string; placeholder?
 // 次工程ロール select の「未設定」を表すセンチネル（Radix Select は空文字値を許さない）。
 const NEXT_PROCESS_NONE = '__none__';
 
+// 担当者ピッカー（portal + fixed）のサイズと、ビューポートからはみ出さないようクランプする補助。
+const ASSIGNEE_POPOVER_W = 240; // w-60
+const ASSIGNEE_POPOVER_H = 224; // max-h-56
+function clampAssigneePopover(rect: DOMRect): { top: number; left: number } {
+  const M = 8;
+  const left = Math.max(M, Math.min(rect.left, window.innerWidth - ASSIGNEE_POPOVER_W - M));
+  const top =
+    rect.bottom + 4 + ASSIGNEE_POPOVER_H > window.innerHeight
+      ? Math.max(M, rect.top - ASSIGNEE_POPOVER_H - 4)
+      : rect.bottom + 4;
+  return { top, left };
+}
+
 // 複数行テキスト項目（textarea で編集）
 const DEF_TEXTAREA_FIELDS: { key: keyof FlowDefinition; label: string; placeholder?: string }[] = [
   { key: 'stakeholders', label: '関係者' },
@@ -854,6 +867,8 @@ export default function ProjectFlowDetailPage() {
   const [assigneePickerPos, setAssigneePickerPos] = useState<{ top: number; left: number } | null>(null);
   // 担当者保存中フラグ（連打レース防止＝replace-all の取りこぼし防止）。
   const [assigneeSaving, setAssigneeSaving] = useState(false);
+  // 担当者保存エラー（ページ全体の error とは分離。失敗してもエディタは落とさず、チップ脇に小さく表示）。
+  const [assigneeError, setAssigneeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flowHistory, setFlowHistory] = useState<string[]>([]);
@@ -962,28 +977,31 @@ export default function ProjectFlowDetailPage() {
       // 保存中の連打は無視（replace-all の取りこぼし防止）。
       if (assigneeSaving) return;
       setAssigneeSaving(true);
+      // 直前の担当者保存エラーはクリア（再操作のたびにリセット）。
+      setAssigneeError(null);
       const cur = (flowData.assignees ?? []).map((a) => a.stakeholderId);
       const nextIds = cur.includes(stakeholderId)
         ? cur.filter((x) => x !== stakeholderId)
         : [...cur, stakeholderId];
-      // 楽観更新。
-      setFlowData((prev) =>
-        prev
-          ? {
-              ...prev,
-              assignees: nextIds.map((id, i) => ({
-                stakeholderId: id,
-                name: stakeholderById.get(id)?.name ?? '',
-                order: i,
-              })),
-            }
-          : prev,
-      );
+      // 楽観更新。既存担当者のサーバ提供名は温存し、未取得の stakeholders で「（不明）」化させない。
+      setFlowData((prev) => {
+        if (!prev) return prev;
+        const prevNames = new Map((prev.assignees ?? []).map((a) => [a.stakeholderId, a.name]));
+        return {
+          ...prev,
+          assignees: nextIds.map((id, i) => ({
+            stakeholderId: id,
+            name: prevNames.get(id) || stakeholderById.get(id)?.name || '',
+            order: i,
+          })),
+        };
+      });
       try {
         const { assignees } = await setFlowStakeholders(flowData.id, nextIds);
         setFlowData((prev) => (prev ? { ...prev, assignees } : prev));
       } catch {
-        setError('担当者の保存に失敗しました');
+        // ページ全体の error には触れない（エディタを落とさない）。専用 state でチップ脇に表示。
+        setAssigneeError('担当者の保存に失敗しました');
         await fetchFlowData(flowData.id, true);
       } finally {
         setAssigneeSaving(false);
@@ -1076,6 +1094,24 @@ export default function ProjectFlowDetailPage() {
   useEffect(() => {
     if (projectId) fetchStakeholders();
   }, [projectId, fetchStakeholders]);
+
+  // フロー切替（ドリルダウン／戻る）時に担当者ピッカーを閉じる（旧座標・別フローの誤表示防止）。
+  useEffect(() => {
+    setAssigneePickerOpen(false);
+    setAssigneePickerPos(null);
+  }, [flowData?.id]);
+
+  // ピッカー表示中はスクロール／リサイズで閉じる（fixed の座標ずれ・はみ出し防止）。
+  useEffect(() => {
+    if (!assigneePickerOpen) return;
+    const close = () => setAssigneePickerOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [assigneePickerOpen]);
 
   // 子フローへナビゲート
   const handleNodeDoubleClick = useCallback(
@@ -2534,8 +2570,7 @@ export default function ProjectFlowDetailPage() {
                     setAssigneePickerOpen(false);
                     return;
                   }
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  setAssigneePickerPos({ top: rect.bottom + 4, left: rect.left });
+                  setAssigneePickerPos(clampAssigneePopover(e.currentTarget.getBoundingClientRect()));
                   setAssigneePickerOpen(true);
                 }}
                 disabled={stakeholders.length === 0 || assigneeSaving}
@@ -2544,6 +2579,10 @@ export default function ProjectFlowDetailPage() {
                 <Users className="h-3 w-3" />
                 担当者
               </button>
+            )}
+            {/* 担当者保存エラー（ページ全体は落とさず、ここに小さく赤字で表示） */}
+            {assigneeError && (
+              <span className="text-[11px] text-red-600">{assigneeError}</span>
             )}
             {/* ポップオーバは portal + fixed でヘッダーの overflow クリップを回避 */}
             {canEdit &&

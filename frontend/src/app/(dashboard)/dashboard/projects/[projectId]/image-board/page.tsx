@@ -83,7 +83,8 @@ export default function ImageBoardPage() {
       try {
         const [list, subs] = await Promise.all([
           imageBoardApi.list(projectId),
-          subProjectApi.list(projectId),
+          // 領域マスタ取得の失敗でボード一覧全体を潰さない（領域はフォルダ分けの補助）。
+          subProjectApi.list(projectId).catch(() => [] as SubProjectMaster[]),
         ]);
         setBoards(list);
         setSubProjects(subs);
@@ -130,6 +131,13 @@ export default function ImageBoardPage() {
     return () => {
       cancelled = true;
     };
+  }, [selectedId]);
+
+  // 選択ボードが無くなったらフルスクリーンを必ず解除する。
+  // （全画面中に選択中ボードを削除すると、トグルボタンを含むヘッダが selectedId 分岐の
+  //  「選択あり」側にしか無いため、fixed inset-0 のプレースホルダだけが残りマウスで抜け出せなくなる詰みを防ぐ。）
+  useEffect(() => {
+    if (!selectedId) setIsFullscreen(false);
   }, [selectedId]);
 
   // Escape でフルスクリーン解除（入力中は無視）。
