@@ -60,6 +60,31 @@ function toDto(e: any) {
 export class DiagramElementController {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** diagramId が projectId 配下か検証（クロステナント防止）。FLOW=BusinessFlow / DFD=DfdDiagram / OBJECT_MAP=projectId 自身。 */
+  private async assertDiagramInProject(
+    projectId: string,
+    kind: (typeof DIAGRAM_KINDS)[number],
+    diagramId: string,
+  ): Promise<void> {
+    if (kind === 'OBJECT_MAP') {
+      if (diagramId !== projectId) throw new NotFoundException('図が見つかりません');
+      return;
+    }
+    if (kind === 'FLOW') {
+      const f = await this.prisma.businessFlow.findUnique({
+        where: { id: diagramId },
+        select: { projectId: true },
+      });
+      if (!f || f.projectId !== projectId) throw new NotFoundException('業務フローが見つかりません');
+      return;
+    }
+    const d = await this.prisma.dfdDiagram.findUnique({
+      where: { id: diagramId },
+      select: { projectId: true },
+    });
+    if (!d || d.projectId !== projectId) throw new NotFoundException('DFDが見つかりません');
+  }
+
   @Get()
   async list(
     @Param('projectId') projectId: string,
@@ -76,6 +101,15 @@ export class DiagramElementController {
 
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateDiagramElementDto) {
+    // diagramId / attachmentId が URL の projectId 配下か検証（クロステナント混入防止）。
+    await this.assertDiagramInProject(projectId, dto.diagramKind, dto.diagramId);
+    if (dto.attachmentId) {
+      const att = await this.prisma.attachment.findFirst({
+        where: { id: dto.attachmentId, projectId },
+        select: { id: true },
+      });
+      if (!att) throw new NotFoundException('添付ファイルが見つかりません');
+    }
     const created = await this.prisma.diagramElement.create({
       data: {
         projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId,

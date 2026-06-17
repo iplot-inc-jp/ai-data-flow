@@ -95,7 +95,8 @@ export class NodeAttachmentController {
   @Post()
   async create(@Param('projectId') projectId: string, @Body() dto: CreateNodeAttachmentDto) {
     const label = await this.resolveNode(projectId, dto.nodeKind, dto.nodeId);
-    const att = await this.prisma.attachment.findUnique({ where: { id: dto.attachmentId }, select: ATTACHMENT_SELECT });
+    // 添付は URL の projectId 配下のもののみ許可（クロステナント混入防止）。
+    const att = await this.prisma.attachment.findFirst({ where: { id: dto.attachmentId, projectId }, select: ATTACHMENT_SELECT });
     if (!att) throw new NotFoundException('添付ファイルが見つかりません');
 
     const created = await this.prisma.nodeAttachment.create({

@@ -10,6 +10,10 @@ function makePrisma(overrides: any = {}) {
       update: jest.fn(async ({ data }: any) => ({ id: 'de1', projectId: 'p1', ...data })),
       delete: jest.fn(async () => undefined),
     },
+    // diagramId / attachmentId のクロステナント検証用（既定は projectId 一致）。
+    businessFlow: { findUnique: jest.fn(async () => ({ projectId: 'p1' })) },
+    dfdDiagram: { findUnique: jest.fn(async () => ({ projectId: 'p1' })) },
+    attachment: { findFirst: jest.fn(async () => ({ id: 'a1' })) },
     ...overrides,
   } as any;
 }
@@ -37,6 +41,28 @@ describe('DiagramElementController', () => {
     expect(prisma.diagramElement.findMany.mock.calls[0][0].where).toEqual({
       projectId: 'p1', diagramKind: 'FLOW', diagramId: 'f1',
     });
+  });
+
+  it('rejects a diagramId belonging to another project (cross-tenant)', async () => {
+    const prisma = makePrisma({
+      businessFlow: { findUnique: jest.fn(async () => ({ projectId: 'OTHER' })) },
+    });
+    const c = new DiagramElementController(prisma);
+    await expect(
+      c.create('p1', { diagramKind: 'FLOW', diagramId: 'f-other' } as any),
+    ).rejects.toThrow();
+    expect(prisma.diagramElement.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an attachmentId belonging to another project (cross-tenant)', async () => {
+    const prisma = makePrisma({
+      attachment: { findFirst: jest.fn(async () => null) }, // 別プロジェクトの添付は projectId 絞りで見つからない
+    });
+    const c = new DiagramElementController(prisma);
+    await expect(
+      c.create('p1', { diagramKind: 'FLOW', diagramId: 'f1', attachmentId: 'a-other' } as any),
+    ).rejects.toThrow();
+    expect(prisma.diagramElement.create).not.toHaveBeenCalled();
   });
 });
 
