@@ -423,6 +423,10 @@ import {
   OverviewMatrixController,
   OverviewMatrixByIdController,
 } from './presentation/controllers/overview-matrix.controller';
+import {
+  ImageBoardController,
+  ImageBoardByIdController,
+} from './presentation/controllers/image-board.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -531,6 +535,9 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // 俯瞰思考（N軸 俯瞰マトリクスビルダー）
     OverviewMatrixController,
     OverviewMatrixByIdController,
+    // 業務イメージ（スライド）ボード
+    ImageBoardController,
+    ImageBoardByIdController,
     DfdController,
     DataObjectController,
     InformationTypeController,

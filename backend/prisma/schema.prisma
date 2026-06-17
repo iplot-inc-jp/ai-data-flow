@@ -283,6 +283,7 @@ model Project {
   driveConnections        DriveConnection[]
   llmUsageLogs            LlmUsageLog[]
   overviewMatrices        OverviewMatrix[]
+  imageBoards             ImageBoard[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -2811,4 +2812,32 @@ model OverviewMatrixCell {
   @@unique([matrixId, rowItemId, colItemId, layerItemId])
   @@index([matrixId])
   @@map("overview_matrix_cells")
+}
+
+// ========================================================================
+// 業務イメージ（スライド）ボード
+//   図形/矢印/テキスト/画像/手書きを自由配置して ASIS/TOBE の業務の流れを
+//   1枚のスライドとしてラフに描く補完ツール（DFD/swimlane/object-map の手前）。
+//   キャンバスは Excalidraw(MIT) を埋め込み、ボード単位で scene(JSON) を保存する。
+// ========================================================================
+enum ImageBoardKind {
+  ASIS
+  TOBE
+}
+
+model ImageBoard {
+  id        String         @id @default(uuid())
+  projectId String         @map("project_id")
+  kind      ImageBoardKind @default(ASIS)
+  title     String         @default("")
+  order     Int            @default(0)
+  // Excalidraw のシーン（{ elements, appState, files }）をそのまま保持する。
+  scene     Json?
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("image_boards")
 }

@@ -28,6 +28,7 @@ import {
   Building2,
   UserCog,
   ClipboardList,
+  Presentation,
   Target,
   ListTodo,
   GanttChartSquare,
@@ -641,6 +642,7 @@ export default function DashboardLayout({
         label: '現状把握',
         items: [
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
+          { name: '業務イメージボード', href: `${base}/image-board`, icon: Presentation },
           { name: '業務定義シート', href: `${base}/business-definition`, icon: FileSpreadsheet },
         ],
       },
