@@ -55,6 +55,7 @@ import type {
   FlowSummary,
   Role,
 } from '@/components/flow-editor/flow-types';
+import { applyEdgePatch } from '@/components/flow-editor/flow-types';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
@@ -1066,9 +1067,20 @@ export default function ProjectFlowDetailPage() {
         });
 
         if (!res.ok) throw new Error('Failed to update edge label');
-        fetchFlowData(flowData.id);
+        // 楽観更新（全体再取得＝キャンバス全再描画を避ける）。
+        setFlowData((prev) =>
+          prev
+            ? {
+                ...prev,
+                edges: prev.edges.map((e) =>
+                  e.id === edgeId ? applyEdgePatch(e, { label }) : e
+                ),
+              }
+            : prev
+        );
       } catch (err) {
         console.error('Failed to update edge label:', err);
+        if (flowData) fetchFlowData(flowData.id, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -1142,11 +1154,26 @@ export default function ProjectFlowDetailPage() {
               ensure(edge.targetNodeId, 'INPUT'),
             ]);
           }
+          // 情報種別を「実値で設定」した時のみ、名前解決＋ノード IN/OUT 反映のため再取得する。
+          fetchFlowData(flowData.id);
+          return;
         }
 
-        fetchFlowData(flowData.id);
+        // それ以外（pathStyle 曲線↔直線 / labelT・infoT のドラッグ / label / 情報種別クリア）は
+        // ローカル楽観更新で軽くする（全体再取得＝キャンバス全再描画を避ける）。
+        setFlowData((prev) =>
+          prev
+            ? {
+                ...prev,
+                edges: prev.edges.map((e) =>
+                  e.id === edgeId ? applyEdgePatch(e, patch) : e
+                ),
+              }
+            : prev
+        );
       } catch (err) {
         console.error('Failed to update edge:', err);
+        if (flowData) fetchFlowData(flowData.id, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -1384,9 +1411,41 @@ export default function ProjectFlowDetailPage() {
         });
 
         if (!res.ok) throw new Error('Failed to create edge');
-        fetchFlowData(flowData.id);
+        // 楽観更新: サーバが返した新エッジをローカルへ追加（全体再取得＝キャンバス全再描画を避ける）。
+        const created = await res.json().catch(() => null);
+        if (created?.id) {
+          setFlowData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  edges: [
+                    ...prev.edges,
+                    {
+                      id: created.id,
+                      sourceNodeId,
+                      targetNodeId,
+                      sourceHandle: created.sourceHandle ?? handles?.sourceHandle ?? null,
+                      targetHandle: created.targetHandle ?? handles?.targetHandle ?? null,
+                      label: created.label ?? undefined,
+                      condition: created.condition ?? undefined,
+                      informationTypeId: created.informationTypeId ?? null,
+                      informationType: created.informationType ?? null,
+                      pathStyle: created.pathStyle ?? null,
+                      labelT: created.labelT ?? null,
+                      infoT: created.infoT ?? null,
+                      apiLinks: created.apiLinks ?? [],
+                    },
+                  ],
+                }
+              : prev
+          );
+        } else {
+          // レスポンスが想定外なら従来どおり再取得でフォールバック。
+          fetchFlowData(flowData.id, true);
+        }
       } catch (err) {
         console.error('Failed to create edge:', err);
+        if (flowData) fetchFlowData(flowData.id, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -1473,9 +1532,28 @@ export default function ProjectFlowDetailPage() {
         });
 
         if (!res.ok) throw new Error('Failed to reconnect edge');
-        fetchFlowData(flowData.id);
+        // 楽観更新: 端点（source/target/接続側）をローカルに反映（全体再取得を避ける）。
+        setFlowData((prev) =>
+          prev
+            ? {
+                ...prev,
+                edges: prev.edges.map((e) =>
+                  e.id === edgeId
+                    ? {
+                        ...e,
+                        sourceNodeId: next.sourceNodeId,
+                        targetNodeId: next.targetNodeId,
+                        sourceHandle: next.sourceHandle ?? null,
+                        targetHandle: next.targetHandle ?? null,
+                      }
+                    : e
+                ),
+              }
+            : prev
+        );
       } catch (err) {
         console.error('Failed to reconnect edge:', err);
+        if (flowData) fetchFlowData(flowData.id, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]

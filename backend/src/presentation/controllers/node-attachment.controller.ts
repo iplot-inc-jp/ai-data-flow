@@ -84,6 +84,8 @@ export class NodeAttachmentController {
     @Query('nodeKind') nodeKind: NodeKind,
     @Query('nodeId') nodeId: string,
   ) {
+    // 不正/未指定の query では Prisma が enum 不一致で 500 を投げるため、空配列で返す。
+    if (!NODE_KINDS.includes(nodeKind) || !nodeId) return [];
     const rows = await this.prisma.nodeAttachment.findMany({
       where: { projectId, nodeKind, nodeId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
@@ -98,6 +100,13 @@ export class NodeAttachmentController {
     // 添付は URL の projectId 配下のもののみ許可（クロステナント混入防止）。
     const att = await this.prisma.attachment.findFirst({ where: { id: dto.attachmentId, projectId }, select: ATTACHMENT_SELECT });
     if (!att) throw new NotFoundException('添付ファイルが見つかりません');
+
+    // 同じノードに同じ添付を再度付けた場合は既存行を返す（冪等・二重作成の P2002 500 を回避）。
+    const existing = await this.prisma.nodeAttachment.findFirst({
+      where: { projectId, nodeKind: dto.nodeKind, nodeId: dto.nodeId, attachmentId: dto.attachmentId },
+      include: { attachment: { select: ATTACHMENT_SELECT } },
+    });
+    if (existing) return toDto(existing);
 
     const created = await this.prisma.nodeAttachment.create({
       data: { projectId, nodeKind: dto.nodeKind, nodeId: dto.nodeId, attachmentId: dto.attachmentId, caption: dto.caption ?? null },
@@ -127,6 +136,7 @@ export class NodeAttachmentByIdController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectAccess: ProjectAccessService,
+    private readonly bridge: DiagramKgBridgeService,
   ) {}
 
   private async assert(id: string, userId: string, required: 'view' | 'edit') {
@@ -151,6 +161,12 @@ export class NodeAttachmentByIdController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
     await this.assert(id, user.id, 'edit');
+    const row = await this.prisma.nodeAttachment.findUnique({ where: { id }, select: { projectId: true, attachmentId: true } });
     await this.prisma.nodeAttachment.delete({ where: { id } });
+    try {
+      if (row) await this.bridge.unregisterAttachmentDocumentIfOrphaned(row.projectId, row.attachmentId);
+    } catch (e) {
+      console.warn('[node-attachment] KG cleanup failed', e);
+    }
   }
 }

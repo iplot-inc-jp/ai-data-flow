@@ -24,6 +24,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type MouseEvent as ReactMouseEvent,
+  type DragEvent as ReactDragEvent,
 } from 'react';
 import {
   ReactFlow,
@@ -105,6 +106,7 @@ import {
   BoxSelect,
   Plug,
   Search,
+  Paperclip,
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -133,6 +135,12 @@ import {
   type InformationType,
 } from '@/lib/dfd';
 import type { SystemMaster } from '@/lib/masters';
+import { diagramElementApi, type DiagramElementDto } from '@/lib/diagram-elements';
+import { nodeAttachmentApi } from '@/lib/node-attachments';
+import { uploadProjectFile } from '@/lib/upload';
+import { ImageElementNode } from '@/components/diagram/ImageElementNode';
+import { NodeInspectorPanel } from '@/components/diagram/NodeInspectorPanel';
+import { firstImageFile } from '@/components/diagram/diagram-drop';
 
 const LANE_LABEL_W = 132;
 
@@ -1559,7 +1567,7 @@ function AnnotationNode({
   );
 }
 
-const nodeTypes = { content: ContentNode, lane: LaneNode, annotation: AnnotationNode };
+const nodeTypes = { content: ContentNode, lane: LaneNode, annotation: AnnotationNode, imageElement: ImageElementNode };
 const edgeTypes = { editable: EditableEdge };
 
 // カテゴリ → バッジ配色（情報/物体/帳票）。
@@ -2255,6 +2263,22 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   );
   const wrapperRef = useRef<HTMLDivElement>(null);
 
+  // --- 画像要素（DiagramElement.type=IMAGE）— flow ノード/注釈とは別系統 ---
+  const [imageElements, setImageElements] = useState<DiagramElementDto[]>([]);
+  const flowId = flowData.id;
+  useEffect(() => {
+    const pid = props.projectId;
+    if (!pid || !flowId) return;
+    let cancelled = false;
+    void diagramElementApi.list(pid, 'FLOW', flowId).then((list) => {
+      if (!cancelled) setImageElements(list.filter((e) => e.type === 'IMAGE'));
+    }).catch(() => { /* 取得失敗は致命ではない */ });
+    return () => { cancelled = true; };
+  }, [props.projectId, flowId]);
+
+  // --- ノードインスペクタパネル（content ノード単一クリック時） ---
+  const [panel, setPanel] = useState<{ nodeId: string; nodeLabel: string } | null>(null);
+
   // --- 向き（縦/横）: flow ごとに localStorage 永続化 ---
   const [orientation, setOrientation] = useState<FlowOrientation>('horizontal');
   useEffect(() => {
@@ -2609,13 +2633,48 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     props.onDeleteAnnotation,
   ]);
 
+  // 画像要素ノード（type:'imageElement'）— flow ノード/注釈とは別系統。connectable:false。
+  // 整形（onTidyNodes）・縦横転置・Undo-Redo の対象外。zIndex 4 でコンテンツより上。
+  const imageElementRfNodes: Node[] = useMemo(
+    () =>
+      imageElements.map((e) => ({
+        id: e.id,
+        type: 'imageElement',
+        position: { x: e.positionX, y: e.positionY },
+        width: e.width ?? 200,
+        height: e.height ?? 150,
+        style: { width: e.width ?? 200, height: e.height ?? 150 },
+        draggable: true,
+        selectable: true,
+        connectable: false,
+        zIndex: 4,
+        data: {
+          url: nodeAttachmentApi.fileUrl(e.attachmentId!),
+          onResizeEnd: (id: string, size: { width: number; height: number }) => {
+            void diagramElementApi.patch(id, { width: size.width, height: size.height });
+            setImageElements((prev) =>
+              prev.map((x) => (x.id === id ? { ...x, width: size.width, height: size.height } : x)),
+            );
+          },
+        },
+      } as Node)),
+    [imageElements],
+  );
+
+  // 全ノード = レーン背景 + コンテンツ + 注釈 + 画像要素。
+  // 画像要素はレーン帯の上、コンテンツ/注釈には干渉しない独立ノード。
+  const allRfNodes = useMemo(
+    () => [...rfNodes, ...imageElementRfNodes],
+    [rfNodes, imageElementRfNodes],
+  );
+
   // React Flow は制御モードでは onNodesChange が無いとドラッグで位置が動かない。
-  // 決定的レイアウト(rfNodes)を初期値にした内部 state を持ち、ドラッグ中の位置変更を
-  // 反映させる。レイアウトが再計算されたら(rfNodes が変わったら)正規位置へ同期し直す。
-  const [dragNodes, setDragNodes, onNodesChange] = useNodesState(rfNodes);
+  // 決定的レイアウト(allRfNodes)を初期値にした内部 state を持ち、ドラッグ中の位置変更を
+  // 反映させる。レイアウトが再計算されたら(allRfNodes が変わったら)正規位置へ同期し直す。
+  const [dragNodes, setDragNodes, onNodesChange] = useNodesState(allRfNodes);
   useEffect(() => {
-    setDragNodes(rfNodes);
-  }, [rfNodes, setDragNodes]);
+    setDragNodes(allRfNodes);
+  }, [allRfNodes, setDragNodes]);
 
   const rfEdges: Edge[] = useMemo(
     () =>
@@ -2914,6 +2973,37 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     [screenToFlowPosition, props],
   );
 
+  // --- 画像ファイルのドラッグ＆ドロップ: キャンバスへ画像を貼り付ける ---
+  const onDragOver = useCallback((e: ReactDragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onDrop = useCallback(async (e: ReactDragEvent) => {
+    e.preventDefault();
+    const file = firstImageFile(Array.from(e.dataTransfer.files));
+    if (!file) return;
+    const pid = props.projectId;
+    if (!pid) return;
+    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    try {
+      const att = await uploadProjectFile(pid, file);
+      const created = await diagramElementApi.create(pid, {
+        diagramKind: 'FLOW',
+        diagramId: flowId,
+        type: 'IMAGE',
+        attachmentId: att.id,
+        positionX: pos.x,
+        positionY: pos.y,
+        width: 200,
+        height: 150,
+      });
+      setImageElements((prev) => [...prev, created]);
+    } catch {
+      /* 作成失敗は致命ではない */
+    }
+  }, [props.projectId, flowId, screenToFlowPosition]);
+
   // --- ドロップ先レーン（ロール）判定の共通ロジック ---
   // content ノードの左上座標とサイズ・現在の roleId を受け取り、ドロップ位置が含まれる
   // 帯（レーン）を探して、変更すべき roleId を返す（変更不要なら undefined）。
@@ -2969,6 +3059,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           positionX: node.position.x,
           positionY: node.position.y,
         });
+        return;
+      }
+      // 画像要素ノードは DiagramElement API へ位置を保存する（flow ノード系とは独立）。
+      // 整形バッチ（onTidyNodes）には渡さず、常にこのブランチで完結する。
+      if (node.type === 'imageElement') {
+        void diagramElementApi.patch(node.id, { positionX: node.position.x, positionY: node.position.y });
         return;
       }
       if (node.type !== 'content') return;
@@ -3027,6 +3123,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             positionX: node.position.x,
             positionY: node.position.y,
           });
+        } else if (node.type === 'imageElement') {
+          // 画像要素は DiagramElement API へ位置を保存する（flow バッチとは独立）。
+          void diagramElementApi.patch(node.id, { positionX: node.position.x, positionY: node.position.y });
         }
       }
     },
@@ -3255,8 +3354,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   ]);
 
   return (
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     <div
       ref={wrapperRef}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       className={
         isFullscreen
           ? 'fixed inset-0 z-50 bg-white'
@@ -3296,7 +3398,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         proOptions={{ hideAttribution: true }}
         onNodeDragStop={handleNodeDragStop}
         onSelectionDragStop={handleSelectionDragStop}
-        onPaneClick={() => { setSelectedEdgeId(null); setSelectedScopeId(null); closeMenu(); }}
+        onPaneClick={() => { setSelectedEdgeId(null); setSelectedScopeId(null); setPanel(null); closeMenu(); }}
         onEdgeClick={(_, edge) => { if (props.embedded) return; setSelectedEdgeId(edge.id); }}
         onNodeClick={(_, node) => {
           if (props.embedded) return;
@@ -3304,13 +3406,18 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             // ノードプロパティと SCOPE 入出力パネルは右サイドを取り合うため排他にする。
             setSelectedScopeId(null);
             setEditingNodeId(node.id);
+            // 添付・ナレッジグラフは NodePropertyPanel 内の「添付・ナレッジグラフ」ボタンで開く。
+            // ここでは inspector を開かず、編集パネルのみ開く（右辺衝突回避）。
             return;
           }
+          // imageElement クリックはドラッグ/リサイズのみ。パネルは開かない。
+          if (node.type === 'imageElement') { setPanel(null); return; }
           // SCOPE 囲みクリック → 境界 INPUT/OUTPUT パネルを開く（付箋/コメント/アイコンは対象外）。
           if (node.type === 'annotation') {
             const ann = (props.annotations ?? []).find((a) => a.id === node.id);
             if (ann?.kind === 'SCOPE') {
               setEditingNodeId(null);
+              setPanel(null);
               setSelectedScopeId(node.id);
             }
           }
@@ -3702,6 +3809,25 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           informationTypes={props.informationTypes ?? []}
           onSaveNodeInformationLinks={props.onSaveNodeInformationLinks}
           onCreateInformationType={props.onCreateInformationType}
+          onOpenAttachments={
+            !props.embedded && props.projectId
+              ? (nodeId, nodeLabel) => {
+                  setEditingNodeId(null);
+                  setPanel({ nodeId, nodeLabel });
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {/* ノードインスペクタパネル（添付ファイル / ナレッジグラフ。NodePropertyPanel の「添付・ナレッジグラフ」ボタン経由で開く） */}
+      {!props.embedded && panel && props.projectId && (
+        <NodeInspectorPanel
+          projectId={props.projectId}
+          nodeKind="FLOW_NODE"
+          nodeId={panel.nodeId}
+          nodeLabel={panel.nodeLabel}
+          onClose={() => setPanel(null)}
         />
       )}
 
@@ -4823,6 +4949,7 @@ function NodePropertyPanel({
   onCreateNodeLink,
   onDeleteNodeLink,
   onFetchFlowNodes,
+  onOpenAttachments,
 }: {
   node: FlowDataNode | null;
   roles: Role[];
@@ -4846,6 +4973,8 @@ function NodePropertyPanel({
   ) => Promise<void>;
   onDeleteNodeLink?: (linkId: string) => Promise<void>;
   onFetchFlowNodes?: (flowId: string) => Promise<Array<{ id: string; label: string }>>;
+  /** 添付ファイル / ナレッジグラフ inspector を開く（embedded or projectId 未設定時は undefined）。 */
+  onOpenAttachments?: (nodeId: string, nodeLabel: string) => void;
 }) {
   const [label, setLabel] = useState(node?.label ?? '');
   const [type, setType] = useState(node?.type ?? 'PROCESS');
@@ -4934,14 +5063,27 @@ function NodePropertyPanel({
     <div className="absolute top-0 right-0 h-full w-full sm:w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900">ノードのプロパティ</h3>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-1 rounded hover:bg-gray-100 text-gray-500"
-          title="閉じる"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onOpenAttachments && (
+            <button
+              type="button"
+              onClick={() => onOpenAttachments(node.id, node.label ?? '')}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-gray-100 text-gray-600"
+              title="添付・ナレッジグラフ"
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+              添付・ナレッジグラフ
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded hover:bg-gray-100 text-gray-500"
+            title="閉じる"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
