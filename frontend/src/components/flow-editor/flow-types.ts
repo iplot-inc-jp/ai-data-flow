@@ -131,6 +131,36 @@ export type FlowDataEdge = {
   apiLinks?: FlowEdgeApiLink[];
 };
 
+/**
+ * 矢印（エッジ）への部分パッチをローカル state へ非破壊適用する純関数。
+ * 業務フローページの楽観更新で使い、PUT 後の「フロー全体再取得（＝キャンバス全再描画）」を
+ * 避けて操作を軽くするためのもの（pathStyle 曲線↔直線・ラベル/チップ位置 labelT/infoT・ラベル）。
+ * informationTypeId を null で渡すと埋め込みの informationType もクリアする。
+ * （informationTypeId に実値を設定する場合は名前解決＋ノードの IN/OUT 同期が要るため、
+ *  呼び出し側でサーバ再取得する＝この純関数は使わない。）
+ */
+export function applyEdgePatch(
+  edge: FlowDataEdge,
+  patch: {
+    label?: string;
+    pathStyle?: string | null;
+    labelT?: number | null;
+    infoT?: number | null;
+    informationTypeId?: string | null;
+  },
+): FlowDataEdge {
+  const next: FlowDataEdge = { ...edge };
+  if (patch.label !== undefined) next.label = patch.label;
+  if (patch.pathStyle !== undefined) next.pathStyle = patch.pathStyle;
+  if (patch.labelT !== undefined) next.labelT = patch.labelT;
+  if (patch.infoT !== undefined) next.infoT = patch.infoT;
+  if (patch.informationTypeId === null) {
+    next.informationTypeId = null;
+    next.informationType = null;
+  }
+  return next;
+}
+
 export type FlowData = {
   id: string;
   name: string;
