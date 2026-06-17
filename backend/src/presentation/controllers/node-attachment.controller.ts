@@ -35,7 +35,18 @@ function toDto(r: any) {
   return {
     id: r.id, projectId: r.projectId, nodeKind: r.nodeKind, nodeId: r.nodeId,
     attachmentId: r.attachmentId, order: r.order ?? 0, caption: r.caption ?? null,
-    attachment: r.attachment ? { ...r.attachment } : null,
+    attachment: r.attachment
+      ? {
+          id: r.attachment.id,
+          filename: r.attachment.filename,
+          displayName: r.attachment.displayName ?? null,
+          mimeType: r.attachment.mimeType,
+          kind: r.attachment.kind,
+          size: r.attachment.size,
+          url: r.attachment.url,
+          pageRange: r.attachment.pageRange ?? null,
+        }
+      : null,
   };
 }
 
@@ -98,7 +109,7 @@ export class NodeAttachmentController {
       await this.bridge.registerAttachmentDocument({
         projectId, attachmentId: dto.attachmentId,
         title: att.displayName || att.filename, mimeType: att.mimeType,
-        blobUrl: (att as any).blobUrl ?? null, linkNodeId: knowledgeNodeId,
+        blobUrl: att.blobUrl ?? null, linkNodeId: knowledgeNodeId,
       });
     } catch (e) {
       // best-effort; ログのみ
