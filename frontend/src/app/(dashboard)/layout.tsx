@@ -794,24 +794,8 @@ export default function DashboardLayout({
               </div>
             )}
 
-            {/* 業務フローブラウザ（プロジェクト → サブプロジェクト → ASIS/TOBE → フロー） */}
-            {projectId && (
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-1.5 px-3 pt-1 text-[11px] font-semibold tracking-wide text-gray-400">
-                  <GitBranch className="h-3.5 w-3.5 text-primary/70" />
-                  業務フロー
-                </div>
-                <FlowTree
-                  projectId={projectId}
-                  subProjects={subProjects}
-                  flows={flows}
-                  pathname={pathname}
-                  onNavigate={() => setSidebarOpen(false)}
-                />
-              </div>
-            )}
-
-            {/* ステージごとにグループ化したプロジェクトナビ */}
+            {/* ステージごとにグループ化したプロジェクトナビ
+                （業務フローブラウザは「現状把握」グループ配下に階層表示する。下記参照） */}
             {projectId &&
               projectGroups.map((group) => (
                 <div key={group.label} className="space-y-0.5">
@@ -835,6 +819,24 @@ export default function DashboardLayout({
                       </div>
                     )
                   })}
+                  {/* 業務フローブラウザ（領域 → サブ領域 → ASIS/TOBE → フロー）は
+                      ASIS/TOBE 業務フローの一覧なので「現状把握」グループ配下に階層表示する。
+                      以前はサイドメニュー最上部に浮いていたのをここへ移動。 */}
+                  {group.label === '現状把握' && projectId && (
+                    <div className="ml-2 space-y-0.5">
+                      <div className="flex items-center gap-1.5 px-3 pt-1 text-[11px] font-semibold tracking-wide text-gray-400">
+                        <GitBranch className="h-3.5 w-3.5 text-primary/70" />
+                        業務フロー
+                      </div>
+                      <FlowTree
+                        projectId={projectId}
+                        subProjects={subProjects}
+                        flows={flows}
+                        pathname={pathname}
+                        onNavigate={() => setSidebarOpen(false)}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
 
