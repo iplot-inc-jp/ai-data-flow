@@ -47,6 +47,10 @@ import {
 } from '../decorators/current-user.decorator';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
+import { KnowledgeDocumentExtractService } from '../../infrastructure/knowledge/knowledge-document-extract.service';
+import { EntityNotFoundError } from '../../domain';
 
 // ========== DTOs ==========
 
@@ -264,6 +268,9 @@ export class KnowledgeDocumentController {
     private readonly updateDocumentPositionUseCase: UpdateDocumentPositionUseCase,
     private readonly updateKnowledgeDocumentUseCase: UpdateKnowledgeDocumentUseCase,
     private readonly deleteKnowledgeDocumentUseCase: DeleteKnowledgeDocumentUseCase,
+    private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
+    private readonly extractService: KnowledgeDocumentExtractService,
   ) {}
 
   @Patch(':id/position')
@@ -298,6 +305,35 @@ export class KnowledgeDocumentController {
       title: dto.title,
       summary: dto.summary,
     });
+  }
+
+  @Post(':id/extract')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'オンデマンドで添付文書を Claude 抽出し、実体をナレッジグラフへマージ',
+  })
+  @ApiParam({ name: 'id', description: '文書ID' })
+  @ApiResponse({ status: 404, description: '文書が見つかりません' })
+  @ApiResponse({ status: 403, description: '編集権限がありません' })
+  async extract(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ): Promise<{
+    created: { nodes: number; mentions: number };
+    skipped?: 'NO_SOURCE' | 'AI_DISABLED';
+  }> {
+    // PATCH と同じ認可: 文書ロード → projectId → edit 権限を assert。
+    const doc = await this.prisma.knowledgeDocument.findUnique({
+      where: { id },
+      select: { projectId: true },
+    });
+    if (!doc) {
+      throw new EntityNotFoundError('KnowledgeDocument', id);
+    }
+    await this.projectAccess.assertProjectAccess(doc.projectId, user.id, 'edit');
+
+    return this.extractService.extract(id, user.id);
   }
 
   @Delete(':id')

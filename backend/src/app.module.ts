@@ -463,6 +463,7 @@ import {
 import { BlobStorageService } from './infrastructure/services/blob-storage.service';
 import { FileExtractionService } from './infrastructure/knowledge/file-extraction.service';
 import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
+import { KnowledgeDocumentExtractService } from './infrastructure/knowledge/knowledge-document-extract.service';
 import {
   IngestionBatchProjectController,
   IngestionBatchByIdController,
@@ -1055,6 +1056,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     BlobStorageService,
     FileExtractionService,
     KnowledgeIngestionService,
+    KnowledgeDocumentExtractService,
     // Google Drive ソースアダプタ（Phase 3）
     DriveService,
     // KGブリッジ（ダイアグラムノード → KGエンティティ + 添付ドキュメント登録）
