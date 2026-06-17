@@ -423,6 +423,18 @@ import {
   OverviewMatrixController,
   OverviewMatrixByIdController,
 } from './presentation/controllers/overview-matrix.controller';
+import {
+  ImageBoardController,
+  ImageBoardByIdController,
+} from './presentation/controllers/image-board.controller';
+import {
+  DiagramElementController,
+  DiagramElementByIdController,
+} from './presentation/controllers/diagram-element.controller';
+import {
+  NodeAttachmentController,
+  NodeAttachmentByIdController,
+} from './presentation/controllers/node-attachment.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -451,6 +463,7 @@ import {
 import { BlobStorageService } from './infrastructure/services/blob-storage.service';
 import { FileExtractionService } from './infrastructure/knowledge/file-extraction.service';
 import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
+import { KnowledgeDocumentExtractService } from './infrastructure/knowledge/knowledge-document-extract.service';
 import {
   IngestionBatchProjectController,
   IngestionBatchByIdController,
@@ -468,6 +481,8 @@ import {
 import { KnowledgeSettingsController } from './presentation/controllers/knowledge-settings.controller';
 // ナレッジグラフ Google Drive ソースアダプタ（Phase 3）
 import { DriveService } from './infrastructure/knowledge/drive.service';
+import { DiagramKgBridgeService } from './infrastructure/knowledge/diagram-kg-bridge.service';
+import { DiagramCleanupService } from './infrastructure/knowledge/diagram-cleanup.service';
 import { DriveController } from './presentation/controllers/drive.controller';
 // Liveblocks リアルタイム・プレゼンス（トークン発行）
 import { LiveblocksController } from './presentation/controllers/liveblocks.controller';
@@ -531,6 +546,15 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // 俯瞰思考（N軸 俯瞰マトリクスビルダー）
     OverviewMatrixController,
     OverviewMatrixByIdController,
+    // 業務イメージ（スライド）ボード
+    ImageBoardController,
+    ImageBoardByIdController,
+    // 図要素（FLOW/DFD/OBJECT_MAP 共通 movable canvas 要素）
+    DiagramElementController,
+    DiagramElementByIdController,
+    // ノード添付ファイル（KG自動登録つき）
+    NodeAttachmentController,
+    NodeAttachmentByIdController,
     DfdController,
     DataObjectController,
     InformationTypeController,
@@ -1032,8 +1056,13 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     BlobStorageService,
     FileExtractionService,
     KnowledgeIngestionService,
+    KnowledgeDocumentExtractService,
     // Google Drive ソースアダプタ（Phase 3）
     DriveService,
+    // KGブリッジ（ダイアグラムノード → KGエンティティ + 添付ドキュメント登録）
+    DiagramKgBridgeService,
+    // KGクリーンアップ（ノード削除時に NodeAttachment / KnowledgeNodeLink の孤立行を削除）
+    DiagramCleanupService,
 
     // ========== Global Guards ==========
     {

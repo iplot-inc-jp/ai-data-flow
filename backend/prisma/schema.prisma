@@ -283,6 +283,10 @@ model Project {
   driveConnections        DriveConnection[]
   llmUsageLogs            LlmUsageLog[]
   overviewMatrices        OverviewMatrix[]
+  imageBoards             ImageBoard[]
+  diagramElements         DiagramElement[]
+  nodeAttachments         NodeAttachment[]
+  knowledgeNodeLinks      KnowledgeNodeLink[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1435,6 +1439,8 @@ model Attachment {
   task    Task?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
   informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
   flow    BusinessFlow? @relation("FlowAttachments", fields: [flowId], references: [id], onDelete: Cascade)
+  diagramElements DiagramElement[]
+  nodeAttachments NodeAttachment[]
 
   @@map("attachments")
 }
@@ -2644,6 +2650,7 @@ model KnowledgeNode {
   mentions     KnowledgeMention[]
   outRelations KnowledgeRelation[] @relation("RelationFrom")
   inRelations  KnowledgeRelation[] @relation("RelationTo")
+  diagramLinks KnowledgeNodeLink[]
 
   @@unique([projectId, type, normalizedLabel]) // 文書横断マージ
   @@index([projectId])
@@ -2811,4 +2818,112 @@ model OverviewMatrixCell {
   @@unique([matrixId, rowItemId, colItemId, layerItemId])
   @@index([matrixId])
   @@map("overview_matrix_cells")
+}
+
+// ========================================================================
+// 業務イメージ（スライド）ボード
+//   図形/矢印/テキスト/画像/手書きを自由配置して ASIS/TOBE の業務の流れを
+//   1枚のスライドとしてラフに描く補完ツール（DFD/swimlane/object-map の手前）。
+//   キャンバスは Excalidraw(MIT) を埋め込み、ボード単位で scene(JSON) を保存する。
+// ========================================================================
+enum ImageBoardKind {
+  ASIS
+  TOBE
+}
+
+enum DiagramKind {
+  FLOW
+  DFD
+  OBJECT_MAP
+}
+
+enum DiagramElementType {
+  IMAGE
+  ICON
+  TEXT
+  SHAPE
+  ARROW
+}
+
+enum DiagramNodeKind {
+  FLOW_NODE
+  DFD_NODE
+  DATA_OBJECT
+}
+
+model ImageBoard {
+  id        String         @id @default(uuid())
+  projectId String         @map("project_id")
+  kind      ImageBoardKind @default(ASIS)
+  title     String         @default("")
+  order     Int            @default(0)
+  // Excalidraw のシーン（{ elements, appState, files }）をそのまま保持する。
+  scene     Json?
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("image_boards")
+}
+
+// 機能①: 3図共通の装飾フリー要素（移動/リサイズ可な画像など）
+model DiagramElement {
+  id          String             @id @default(uuid())
+  projectId   String             @map("project_id")
+  diagramKind DiagramKind        @map("diagram_kind")
+  diagramId   String             @map("diagram_id") // FLOW=BusinessFlow.id / DFD=DfdDiagram.id / OBJECT_MAP=projectId
+  type        DiagramElementType @default(IMAGE)
+  positionX   Float              @default(0) @map("position_x")
+  positionY   Float              @default(0) @map("position_y")
+  width       Float?
+  height      Float?
+  rotation    Float              @default(0)
+  z           Int                @default(0)
+  attachmentId String?           @map("attachment_id")
+  text        String             @default("") @db.Text
+  color       String?
+  style       Json?
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attachment Attachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  @@index([projectId])
+  @@index([diagramKind, diagramId])
+  @@map("diagram_elements")
+}
+
+// 機能②: 3図のノードへの添付（ノード側はポリモーフィック=FKなし）
+model NodeAttachment {
+  id           String          @id @default(uuid())
+  projectId    String          @map("project_id")
+  nodeKind     DiagramNodeKind @map("node_kind")
+  nodeId       String          @map("node_id")
+  attachmentId String          @map("attachment_id")
+  order        Int             @default(0)
+  caption      String?
+  createdAt    DateTime        @default(now()) @map("created_at")
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attachment Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  @@unique([nodeKind, nodeId, attachmentId])
+  @@index([projectId])
+  @@index([nodeKind, nodeId])
+  @@map("node_attachments")
+}
+
+// 機能③: KGエンティティ ⟷ 図ノード の橋渡し（net-new）
+model KnowledgeNodeLink {
+  id              String      @id @default(cuid())
+  projectId       String      @map("project_id")
+  knowledgeNodeId String      @map("knowledge_node_id")
+  diagramKind     DiagramKind @map("diagram_kind")
+  diagramNodeId   String      @map("diagram_node_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  knowledgeNode KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+  @@unique([knowledgeNodeId, diagramKind, diagramNodeId])
+  @@index([projectId])
+  @@index([diagramKind, diagramNodeId])
+  @@map("knowledge_node_links")
 }
