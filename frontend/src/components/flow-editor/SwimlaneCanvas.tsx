@@ -106,6 +106,7 @@ import {
   BoxSelect,
   Plug,
   Search,
+  Paperclip,
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -3405,10 +3406,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             // ノードプロパティと SCOPE 入出力パネルは右サイドを取り合うため排他にする。
             setSelectedScopeId(null);
             setEditingNodeId(node.id);
-            // ノードインスペクタパネル（添付ファイル / ナレッジグラフ）を開く。
-            // ダブルクリック（子フロー遷移）・右クリック（コンテキストメニュー）とは独立。
-            const label = flowData.nodes.find((n) => n.id === node.id)?.label ?? '';
-            setPanel({ nodeId: node.id, nodeLabel: label });
+            // 添付・ナレッジグラフは NodePropertyPanel 内の「添付・ナレッジグラフ」ボタンで開く。
+            // ここでは inspector を開かず、編集パネルのみ開く（右辺衝突回避）。
             return;
           }
           // imageElement クリックはドラッグ/リサイズのみ。パネルは開かない。
@@ -3810,10 +3809,18 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           informationTypes={props.informationTypes ?? []}
           onSaveNodeInformationLinks={props.onSaveNodeInformationLinks}
           onCreateInformationType={props.onCreateInformationType}
+          onOpenAttachments={
+            !props.embedded && props.projectId
+              ? (nodeId, nodeLabel) => {
+                  setEditingNodeId(null);
+                  setPanel({ nodeId, nodeLabel });
+                }
+              : undefined
+          }
         />
       )}
 
-      {/* ノードインスペクタパネル（添付ファイル / ナレッジグラフ。content ノード単一クリック時） */}
+      {/* ノードインスペクタパネル（添付ファイル / ナレッジグラフ。NodePropertyPanel の「添付・ナレッジグラフ」ボタン経由で開く） */}
       {!props.embedded && panel && props.projectId && (
         <NodeInspectorPanel
           projectId={props.projectId}
@@ -4942,6 +4949,7 @@ function NodePropertyPanel({
   onCreateNodeLink,
   onDeleteNodeLink,
   onFetchFlowNodes,
+  onOpenAttachments,
 }: {
   node: FlowDataNode | null;
   roles: Role[];
@@ -4965,6 +4973,8 @@ function NodePropertyPanel({
   ) => Promise<void>;
   onDeleteNodeLink?: (linkId: string) => Promise<void>;
   onFetchFlowNodes?: (flowId: string) => Promise<Array<{ id: string; label: string }>>;
+  /** 添付ファイル / ナレッジグラフ inspector を開く（embedded or projectId 未設定時は undefined）。 */
+  onOpenAttachments?: (nodeId: string, nodeLabel: string) => void;
 }) {
   const [label, setLabel] = useState(node?.label ?? '');
   const [type, setType] = useState(node?.type ?? 'PROCESS');
@@ -5053,14 +5063,27 @@ function NodePropertyPanel({
     <div className="absolute top-0 right-0 h-full w-full sm:w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900">ノードのプロパティ</h3>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-1 rounded hover:bg-gray-100 text-gray-500"
-          title="閉じる"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onOpenAttachments && (
+            <button
+              type="button"
+              onClick={() => onOpenAttachments(node.id, node.label ?? '')}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-gray-100 text-gray-600"
+              title="添付・ナレッジグラフ"
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+              添付・ナレッジグラフ
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded hover:bg-gray-100 text-gray-500"
+            title="閉じる"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
