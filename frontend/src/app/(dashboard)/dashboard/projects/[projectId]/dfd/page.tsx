@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Boxes, Loader2, Network, Table2, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -243,8 +243,12 @@ export default function ProjectDfdPage() {
   // 更新後の flow をローカル diagram.flows にマージし、ブロッキングな再取得（load）はしない。
   // フロー更新はノード編集と違い他エンティティ（オブジェクト等）への波及がないため loadDataObjects も不要。
   // 失敗時のみ load() で再同期する。
+  // フローごとの更新リクエスト世代（連打/連続変更で「最後に解決した応答が勝つ」のを防ぐ）。
+  const updateFlowGenRef = useRef<Map<string, number>>(new Map());
   const handleUpdateFlow = useCallback(
     async (id: string, patch: Partial<DfdFlowModel>) => {
+      const gen = (updateFlowGenRef.current.get(id) ?? 0) + 1;
+      updateFlowGenRef.current.set(id, gen);
       // 楽観更新: 先にローカルへ patch を反映（線/pathStyle 変更がサーバ往復を待たず即座に画面へ出る）。
       setDiagram((prev) =>
         prev
@@ -253,15 +257,23 @@ export default function ProjectDfdPage() {
       );
       try {
         const updated = await dfdApi.updateFlow(id, patch);
-        // サーバ確定値で整合（情報種別名の解決など）。
+        // 自分が最新リクエストのときだけサーバ確定値を反映（古い応答で最新編集を巻き戻さない）。
+        if (updateFlowGenRef.current.get(id) !== gen) return;
         setDiagram((prev) =>
           prev ? { ...prev, flows: prev.flows.map((f) => (f.id === id ? updated : f)) } : prev,
         );
       } catch {
-        await load(); // 失敗時のみ再取得で巻き戻し
+        if (updateFlowGenRef.current.get(id) !== gen) return;
+        // 失敗時は最新状態へ静かに再同期（load() の setError でエラー画面化＝canvas アンマウントを避ける）。
+        try {
+          const d = await dfdApi.getByProject(projectId);
+          setDiagram(d);
+        } catch {
+          /* 再取得も失敗したら現状維持（楽観反映のまま） */
+        }
       }
     },
-    [load],
+    [projectId],
   );
 
   // データフロー再ルーティング（端点ドラッグで source/target ノード・接続側を付け替え）
