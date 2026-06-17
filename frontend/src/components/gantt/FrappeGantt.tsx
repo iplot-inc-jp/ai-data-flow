@@ -26,6 +26,8 @@ import Gantt, {
 // frappe-gantt の package.json exports は CSS サブパスを公開しないため、
 // dist/frappe-gantt.css をローカルにベンダリングして読み込む（MIT）。
 import './frappe-gantt.vendor.css';
+// 初期スクロール位置（今日 or タスク最早開始日）を決める純粋関数。
+import { computeInitialScroll } from './frappe-scroll';
 
 export type { FrappeTask, FrappeViewMode };
 
@@ -90,6 +92,10 @@ export default function FrappeGantt({
       bar_height: 22,
       padding: 14,
       popup_on: 'hover',
+      // 初期スクロール: 今日がタスク期間内なら今日、期間外なら最早開始日へ寄せる。
+      // 既定の 'today' 固定だと、タスクが今日付近に無いプロジェクトで開いた瞬間に
+      // 空白のタイムラインへ飛び「表示期間が広すぎ/狭すぎ・バーが見えない」状態になるため。
+      scroll_to: computeInitialScroll(initial),
       // 端に近づくと列を継ぎ足して scrollLeft を付け替える無限パディングは
       // 「瞬間移動・ズレ」の原因なので無効化（vendor 既定も false だが明示）。
       infinite_padding: false,
@@ -109,7 +115,7 @@ export default function FrappeGantt({
     });
     ganttRef.current = gantt;
     // この直後に流れる tasks effect の refresh は不要（初期タスクは渡し済み）。
-    // 実行させると scroll_to:'today' の初期スクロールが scrollLeft=0 で上書きされる。
+    // 実行させると scroll_to（今日 or 最早開始日）の初期スクロールが scrollLeft=0 で上書きされる。
     skipNextRefreshRef.current = true;
 
     // 矢印クリックは委譲リスナーで拾う。refresh() で矢印 <path> が作り直されても、
@@ -141,8 +147,8 @@ export default function FrappeGantt({
   // vendor 側 refresh が「左端に見えている日付」を保ったまま再描画するため、
   // 保存→refresh のたびに today へスクロールが飛ぶことはない。
   // インスタンス生成直後の 1 回はスキップする: 初期タスクはコンストラクタに渡し済みで
-  // refresh は不要な上、マウント直後の refresh が scroll_to:'today' の smooth スクロールを
-  // scrollLeft=0 の保存/復元で中断し、初期表示が today でなく左端になってしまうため。
+  // refresh は不要な上、マウント直後の refresh が scroll_to（今日 or 最早開始日）の smooth スクロールを
+  // scrollLeft=0 の保存/復元で中断し、初期表示が目的位置でなく左端になってしまうため。
   // （単純な「初回フラグ」だと StrictMode の二重マウントで再マウント後の refresh を
   //  スキップできないので、生成側 effect が立てるフラグを消費する形にする。）
   useEffect(() => {

@@ -47,6 +47,8 @@ declare module 'frappe-gantt' {
     popup_on?: 'click' | 'hover';
     lines?: 'both' | 'horizontal' | 'vertical' | 'none';
     infinite_padding?: boolean;
+    /** 初期スクロール位置。'today' / 'start' / 'end' / 'YYYY-MM-DD'。 */
+    scroll_to?: string;
     /** バー本体を左右ドラッグしたとき（id でなく task と新しい start/end）。 */
     on_date_change?: (task: FrappeTask, start: Date, end: Date) => void;
     /** 進捗ハンドルを動かしたとき。 */
