@@ -137,6 +137,13 @@ describe('serializeSnapshot', () => {
     });
   });
 
+  it('スイムレーン幅(laneHeights)を履歴に含める（無ければ空オブジェクト）', () => {
+    const withLanes: FlowData = { ...baseFlow, laneHeights: { r1: 120, r2: 200 } };
+    expect(serializeSnapshot(withLanes).laneHeights).toEqual({ r1: 120, r2: 200 });
+    // 未設定なら {}（undo 時に誤ってレーン幅をクリアしないよう、新スナップは必ず値を持つ）。
+    expect(serializeSnapshot(baseFlow).laneHeights).toEqual({});
+  });
+
   it('同一 flowData からは安定した（等価な）スナップショットを返す', () => {
     const flow: FlowData = {
       ...baseFlow,

@@ -53,6 +53,8 @@ export type SnapshotEdge = {
 export type FlowSnapshotData = {
   nodes: SnapshotNode[];
   edges: SnapshotEdge[];
+  /** レーン(ロール)別の手動幅。スイムレーン幅の Undo/Redo 用（未保持の旧スナップは undefined）。 */
+  laneHeights?: Record<string, number>;
 };
 
 type PersistedStack = {
@@ -107,7 +109,8 @@ export function serializeSnapshot(flowData: FlowData): FlowSnapshotData {
     infoT: e.infoT ?? null,
   }));
 
-  return { nodes, edges };
+  // スイムレーン幅（laneHeights）も履歴に含める（幅調整も Cmd+Z で戻せるように）。
+  return { nodes, edges, laneHeights: flowData.laneHeights ?? {} };
 }
 
 // 2 スナップショットが等価か（捕捉ループ・無変化 push の抑止用）。
@@ -232,6 +235,16 @@ export function useFlowUndoRedo(
           },
         );
         if (!res.ok) throw new Error('Failed to restore flow');
+        // スイムレーン幅(laneHeights)もスナップショットへ戻す。snapshot に含まれる場合のみ
+        // 復元する（旧スナップは未保持＝undefined なので現状のレーン幅を維持し、誤ってクリアしない）。
+        if (snap.laneHeights !== undefined) {
+          const lh = await fetch(`${API_URL}/api/business-flows/${flowId}`, {
+            method: 'PUT',
+            headers: getHeaders(),
+            body: JSON.stringify({ laneHeights: snap.laneHeights }),
+          });
+          if (!lh.ok) throw new Error('Failed to restore lane heights');
+        }
         await refetch(flowId);
       } catch (err) {
         console.error('Failed to restore flow snapshot:', err);
