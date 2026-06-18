@@ -19,11 +19,13 @@ export const liveblocksClient = createClient({
   throttle: 100,
   authEndpoint: async (room) => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
+    // 実 room を送る（project:{id} もしくは meetingdoc:{id}）。サーバが room→project を解決し認可する。
+    // projectId は project ルームの後方互換用に併せて送る。
     const projectId = projectIdFromRoom(room ?? '')
     const res = await fetch(`${API_URL}/api/liveblocks/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token ?? ''}` },
-      body: JSON.stringify({ projectId }),
+      body: JSON.stringify({ room, projectId }),
     })
     if (!res.ok) throw new Error(`liveblocks auth failed: ${res.status}`)
     return res.json()

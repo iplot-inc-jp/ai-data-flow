@@ -7,7 +7,10 @@ import { deterministicColor } from '../../../infrastructure/services/presence-co
 export interface IssueLiveblocksTokenInput {
   userId: string;
   apiKeyId?: string;
+  /** 認可対象プロジェクト（room から解決済み）。 */
   projectId: string;
+  /** 付与するルーム。未指定なら project:{projectId}（プレゼンス）。 */
+  roomId?: string;
 }
 
 /**
@@ -53,7 +56,7 @@ export class IssueLiveblocksTokenUseCase {
         avatarUrl: user.avatarUrl,
         color: deterministicColor(input.userId),
       },
-      roomId: `project:${input.projectId}`,
+      roomId: input.roomId ?? `project:${input.projectId}`,
       fullAccess: level === 'EDIT',
     });
   }
