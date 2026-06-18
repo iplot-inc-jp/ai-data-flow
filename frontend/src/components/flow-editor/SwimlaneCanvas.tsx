@@ -3328,9 +3328,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         const SCOPE_MIN_PAD = 12;
         for (const a of annos) {
           const { w, h } = annotationSizeOf(a);
-          if (a.kind === 'ICON') {
-            // ICON（DB/人/アイコン）はレーン相対で移し替える。レーンが取れない場合のみ
-            // 下の最寄りアンカー追従へフォールバックする。
+          if (a.kind !== 'SCOPE') {
+            // ICON(DB/人/アイコン)・付箋(STICKY)・コメント(COMMENT)はレーン相対で移し替える。
+            // レーンが取れない場合のみ下の最寄りアンカー追従へフォールバックする。
+            // （SCOPE 囲みは下の専用ロジック＝メンバーノードの新バウンディングボックスで再配置。）
             const np = transposeFree({ x: a.positionX + w / 2, y: a.positionY + h / 2 }, w, h);
             if (np) {
               props.onUpdateAnnotation(a.id, np);
