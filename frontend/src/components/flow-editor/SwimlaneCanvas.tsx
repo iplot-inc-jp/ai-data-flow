@@ -2273,19 +2273,24 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const [imageElements, setImageElements] = useState<DiagramElementDto[]>([]);
   const flowId = flowData.id;
   const prevImageFlowIdRef = useRef<string | null>(null);
+  // 実ロード完了フラグ。マウント/フロー切替の空配列は「未ロード」として親へ通知しない。
+  const imagesLoadedRef = useRef(false);
   useEffect(() => {
     const pid = props.projectId;
     if (!pid || !flowId) return;
-    // フロー切替時は前フローの画像を即クリア（古い画像を新フローへ報告して親の
-    // baseline ガードを誤作動させないため）。imagesReloadKey だけの変化ではクリアしない
-    // （Undo 復元後の再同期では空フラッシュを挟まず復元結果へ差し替えたい）。
+    // フロー切替時は前フローの画像を即クリアし未ロード扱いに戻す（古い画像を新フローへ
+    // 報告して親の baseline ガードを誤作動させないため）。imagesReloadKey だけの変化では
+    // クリアしない（Undo 復元後の再同期は空フラッシュを挟まず復元結果へ差し替えたい）。
     if (prevImageFlowIdRef.current !== flowId) {
       prevImageFlowIdRef.current = flowId;
+      imagesLoadedRef.current = false;
       setImageElements([]);
     }
     let cancelled = false;
     void diagramElementApi.list(pid, 'FLOW', flowId).then((list) => {
-      if (!cancelled) setImageElements(list.filter((e) => e.type === 'IMAGE'));
+      if (cancelled) return;
+      imagesLoadedRef.current = true; // 実ロード完了。これ以降の変化のみ親へ通知する。
+      setImageElements(list.filter((e) => e.type === 'IMAGE'));
     }).catch(() => { /* 取得失敗は致命ではない */ });
     return () => { cancelled = true; };
     // imagesReloadKey が変わると再取得（Undo/Redo 復元後にサーバの復元結果へ再同期）。
@@ -2294,6 +2299,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // 画像要素の変化を親へ通知（親が Undo 用ミラー state を保持しスナップショットへ含める）。
   const onImageElementsChange = props.onImageElementsChange;
   useEffect(() => {
+    // 実ロード完了前の空配列（マウント/フロー切替クリア）は通知しない。通知すると親の
+    // extraReady が画像ロード前に true になり、初回ロード自体が履歴の1ステップに乗り
+    // 初回 Cmd+Z で全画像が消える。ロード後・編集後の変化だけを通知する。
+    if (!imagesLoadedRef.current) return;
     onImageElementsChange?.(imageElements);
   }, [imageElements, onImageElementsChange]);
 

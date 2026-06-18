@@ -2377,15 +2377,19 @@ export default function ProjectFlowDetailPage() {
   // 履歴に入れる画像は安定射影に正規化する（createdAt 等の揮発フィールドを落とす）。
   // これをしないと undo 復元後にサーバ再取得した形と snapshot がズレ、JSON 等価判定が
   // 誤って「変化あり」になり、復元直後に余計な capture が走って redo が消える。
+  // 画像 DTO → 安定射影（createdAt 等の揮発フィールドを落とす）。capture/restore で共通利用。
+  const toRestoreInput = useCallback(
+    (e: DiagramElementDto): DiagramElementRestoreInput => ({
+      id: e.id, type: e.type,
+      positionX: e.positionX, positionY: e.positionY,
+      width: e.width, height: e.height, rotation: e.rotation, z: e.z,
+      attachmentId: e.attachmentId, text: e.text, color: e.color,
+    }),
+    [],
+  );
   const flowImagesSnapshot = useMemo<DiagramElementRestoreInput[]>(
-    () =>
-      flowImages.map((e) => ({
-        id: e.id, type: e.type,
-        positionX: e.positionX, positionY: e.positionY,
-        width: e.width, height: e.height, rotation: e.rotation, z: e.z,
-        attachmentId: e.attachmentId, text: e.text, color: e.color,
-      })),
-    [flowImages],
+    () => flowImages.map(toRestoreInput),
+    [flowImages, toRestoreInput],
   );
   // フロー切替で undo 基準をリセット（前フローの画像で baseline ガードが誤作動しないように）。
   useEffect(() => {
@@ -2401,11 +2405,14 @@ export default function ProjectFlowDetailPage() {
     extraState: flowImagesSnapshot,
     extraReady: imagesReported,
     restoreExtra: async (extra) => {
-      if (!undoFlowId) return;
+      if (!undoFlowId) return undefined;
       const images = Array.isArray(extra) ? (extra as DiagramElementRestoreInput[]) : [];
-      await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
+      const restored = await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
       // SwimlaneCanvas にサーバの復元結果を再読込させる（楽観 state と DB を再同期）。
       setImagesReloadKey((k) => k + 1);
+      // サーバ正規化後の結果（例: 削除済み添付→null）を返す。フックがこれで現在の
+      // snapshot.extra を上書きし、再同期後の capture が等価判定で一致 → redo が消えないようにする。
+      return restored.map(toRestoreInput);
     },
   });
 

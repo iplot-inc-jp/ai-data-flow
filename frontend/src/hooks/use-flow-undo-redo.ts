@@ -141,8 +141,10 @@ export interface UseFlowUndoRedoOptions {
   /**
    * undo/redo 時に snap.extra をサーバ＋クライアントへ適用する
    * （例: 画像要素を id 保持で一括復元し、キャンバスを再読込）。
+   * サーバ正規化後の extra を返すと、フックが現在の snapshot.extra をそれで上書きして
+   * 再同期後の capture と等価にし、redo 消失を防ぐ（返さない＝上書きしない）。
    */
-  restoreExtra?: (extra: unknown) => Promise<void> | void;
+  restoreExtra?: (extra: unknown) => Promise<unknown> | unknown;
   /**
    * extra（画像要素など）が初期ロード済みかどうか。false の間は baseline 確立を待つ。
    * extra は flowData より後に非同期ロードされるため、これを待たないと baseline が
@@ -272,9 +274,22 @@ export function useFlowUndoRedo(
           if (!lh.ok) throw new Error('Failed to restore lane heights');
         }
         // 付随状態(extra=画像要素など)も復元する（snapshot に含まれる場合のみ）。
-        // restoreExtra 内でサーバ復元＋キャンバス再読込を行う（page 側が実装）。
+        // restoreExtra 内でサーバ復元＋キャンバス再読込を行い、サーバ正規化後の extra を返す。
+        // 返り値で現在の snapshot.extra を上書きし、再同期後の capture が等価判定で一致して
+        // redo が消えないようにする（例: 削除済み添付が null へ正規化されるケース）。
         if (restoreExtraRef.current && snap.extra !== undefined) {
-          await restoreExtraRef.current(snap.extra);
+          const canonical = await restoreExtraRef.current(snap.extra);
+          if (canonical !== undefined) {
+            const i = indexRef.current;
+            const cur = stackRef.current;
+            if (cur[i]) {
+              const nextStack = cur.slice();
+              nextStack[i] = { ...nextStack[i], extra: canonical };
+              setStack(nextStack);
+              stackRef.current = nextStack;
+              persist(nextStack, i);
+            }
+          }
         }
         await refetch(flowId);
       } catch (err) {
@@ -288,7 +303,7 @@ export function useFlowUndoRedo(
         }, 0);
       }
     },
-    [flowId, getHeaders, refetch],
+    [flowId, getHeaders, refetch, persist],
   );
 
   // ===========================================
