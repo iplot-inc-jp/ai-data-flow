@@ -115,6 +115,37 @@ describe('DiagramElementController', () => {
     expect(de2.projectId).toBe('p1');
     expect(de2.attachmentId).toBeNull();
   });
+
+  it('applyOps: delete は IMAGE+id 限定、upsert は id 保持で update(既存)/create(新規)、notIn 一括削除なし', async () => {
+    const prisma = makePrisma({
+      attachment: {
+        findFirst: jest.fn(async () => ({ id: 'a1' })),
+        findMany: jest.fn(async () => [{ id: 'a1' }]),
+      },
+    });
+    prisma.diagramElement.findMany = jest.fn(async () => [{ id: 'de1' }]); // 現存は de1 のみ
+    const c = new DiagramElementController(prisma);
+    await c.applyOps('p1', {
+      diagramKind: 'FLOW',
+      diagramId: 'f1',
+      ops: [
+        { type: 'delete', ids: ['gone'] },
+        {
+          type: 'upsert',
+          elements: [
+            { id: 'de1', type: 'IMAGE', positionX: 1, positionY: 2, attachmentId: 'a1' }, // 既存→update
+            { id: 'de2', type: 'IMAGE', positionX: 3, positionY: 4 }, // 新規→create
+          ],
+        },
+      ],
+    } as any);
+    // delete は id:in + type:IMAGE スコープ（notIn は使わない＝巻き添え削除なし）。
+    expect(prisma.diagramElement.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['gone'] }, projectId: 'p1', diagramKind: 'FLOW', diagramId: 'f1', type: 'IMAGE' },
+    });
+    expect(prisma.diagramElement.update.mock.calls.some((x: any) => x[0].where.id === 'de1')).toBe(true);
+    expect(prisma.diagramElement.create.mock.calls.some((x: any) => x[0].data.id === 'de2')).toBe(true);
+  });
 });
 
 describe('DiagramElementByIdController', () => {

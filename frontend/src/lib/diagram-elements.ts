@@ -33,6 +33,11 @@ export type DiagramElementRestoreInput = Pick<
   | 'rotation' | 'z' | 'attachmentId' | 'text' | 'color'
 >;
 
+/** Undo/Redo op-log の1操作: 指定要素の upsert（id 保持）または 指定 id の delete。 */
+export type DiagramElementOp =
+  | { type: 'upsert'; elements: DiagramElementRestoreInput[] }
+  | { type: 'delete'; ids: string[] };
+
 export const diagramElementApi = {
   async list(projectId: string, diagramKind: DiagramKind, diagramId: string): Promise<DiagramElementDto[]> {
     const q = new URLSearchParams({ diagramKind, diagramId });
@@ -83,6 +88,22 @@ export const diagramElementApi = {
       body: JSON.stringify({ diagramKind, diagramId, elements }),
     });
     if (!res.ok) throw new Error('図要素の復元に失敗しました');
+    return res.json();
+  },
+
+  /** Undo/Redo: op-log の操作列を冪等適用（upsert は id 保持、delete は id 限定。notIn 削除なし）。 */
+  async applyOps(
+    projectId: string,
+    diagramKind: DiagramKind,
+    diagramId: string,
+    ops: DiagramElementOp[],
+  ): Promise<DiagramElementDto[]> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/diagram-elements/ops`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ diagramKind, diagramId, ops }),
+    });
+    if (!res.ok) throw new Error('図要素の更新に失敗しました');
     return res.json();
   },
 };
