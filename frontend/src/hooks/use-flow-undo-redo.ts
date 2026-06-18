@@ -55,6 +55,8 @@ export type FlowSnapshotData = {
   edges: SnapshotEdge[];
   /** レーン(ロール)別の手動幅。スイムレーン幅の Undo/Redo 用（未保持の旧スナップは undefined）。 */
   laneHeights?: Record<string, number>;
+  /** flowData 以外の付随状態（例: 画像要素配列）。型は呼び出し側(restoreExtra)が解釈する。 */
+  extra?: unknown;
 };
 
 type PersistedStack = {
@@ -131,6 +133,23 @@ export interface UseFlowUndoRedoOptions {
    * isRestoring=true の間は捕捉 useEffect が push しないようにフラグを立てる。
    */
   refetch: (id: string) => Promise<void> | void;
+  /**
+   * flowData 以外で履歴に含めたい付随状態（例: 画像要素配列）。
+   * これが変わると（移動/リサイズ/追加/削除）新スナップを capture する。
+   */
+  extraState?: unknown;
+  /**
+   * undo/redo 時に snap.extra をサーバ＋クライアントへ適用する
+   * （例: 画像要素を id 保持で一括復元し、キャンバスを再読込）。
+   */
+  restoreExtra?: (extra: unknown) => Promise<void> | void;
+  /**
+   * extra（画像要素など）が初期ロード済みかどうか。false の間は baseline 確立を待つ。
+   * extra は flowData より後に非同期ロードされるため、これを待たないと baseline が
+   * extra 抜きで確立され、初回ロード自体が「全削除」スナップとして履歴に乗ってしまう。
+   * 未指定（undefined）は従来どおり即 baseline 化する（extra を使わない呼び出し用）。
+   */
+  extraReady?: boolean;
 }
 
 export interface UseFlowUndoRedoResult {
@@ -154,7 +173,14 @@ export interface UseFlowUndoRedoResult {
 export function useFlowUndoRedo(
   options: UseFlowUndoRedoOptions,
 ): UseFlowUndoRedoResult {
-  const { flowId, flowData, getHeaders, refetch } = options;
+  const { flowId, flowData, getHeaders, refetch, extraState, restoreExtra, extraReady } = options;
+  // 付随状態(extra)と復元関数は最新参照を ref に保持（依存配列を増やさない）。
+  const extraStateRef = useRef<unknown>(extraState);
+  extraStateRef.current = extraState;
+  const restoreExtraRef = useRef(restoreExtra);
+  restoreExtraRef.current = restoreExtra;
+  const extraReadyRef = useRef(extraReady);
+  extraReadyRef.current = extraReady;
 
   const [stack, setStack] = useState<FlowSnapshotData[]>([]);
   const [index, setIndex] = useState(0);
@@ -244,6 +270,11 @@ export function useFlowUndoRedo(
             body: JSON.stringify({ laneHeights: snap.laneHeights }),
           });
           if (!lh.ok) throw new Error('Failed to restore lane heights');
+        }
+        // 付随状態(extra=画像要素など)も復元する（snapshot に含まれる場合のみ）。
+        // restoreExtra 内でサーバ復元＋キャンバス再読込を行う（page 側が実装）。
+        if (restoreExtraRef.current && snap.extra !== undefined) {
+          await restoreExtraRef.current(snap.extra);
         }
         await refetch(flowId);
       } catch (err) {
@@ -372,10 +403,16 @@ export function useFlowUndoRedo(
     if (stackFlowIdRef.current !== flowId) return;
     if (flowData.id !== flowId) return; // refetch 中で別フローの残骸が来ても無視
 
-    const snap = serializeSnapshot(flowData);
+    // flowData 由来のスナップに付随状態(extra=画像要素など)を合成する。
+    const snap: FlowSnapshotData = {
+      ...serializeSnapshot(flowData),
+      extra: extraStateRef.current,
+    };
 
     // baseline 未確立（スタック空）→ 即時に index=0 で baseline 化（POST しない）。
     if (stackRef.current.length === 0) {
+      // extra（画像など）が未ロードなら baseline を待つ（初回ロードを履歴に乗せない）。
+      if (extraReadyRef.current === false) return;
       setStack([snap]);
       setIndex(0);
       persist([snap], 0);
@@ -406,7 +443,8 @@ export function useFlowUndoRedo(
     return () => {
       if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
     };
-  }, [flowId, flowData, persist, postSnapshot]);
+    // extraState（画像要素など）が変わったときも capture を走らせる。
+  }, [flowId, flowData, extraState, persist, postSnapshot]);
 
   // ---- Undo / Redo ----
   const undo = useCallback(() => {

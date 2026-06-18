@@ -71,6 +71,7 @@ import {
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useFlowUndoRedo } from '@/hooks/use-flow-undo-redo';
+import { diagramElementApi, type DiagramElementDto } from '@/lib/diagram-elements';
 import {
   flowDefinitionApi,
   EMPTY_DEFINITION,
@@ -2362,11 +2363,32 @@ export default function ProjectFlowDetailPage() {
   // Undo/Redo は「今表示しているフロー」を対象にする。子フローへドリルダウン中は
   // flowData.id がルートの params.flowId と異なる（router は変えず flowData だけ差し替える）ため、
   // ルート固定だと ⌘Z で親フローに飛んでしまう。表示中フロー id を渡してフローごとに履歴を持つ。
+  // 画像要素(DiagramElement)を Undo 履歴へ含めるためのミラー state（SwimlaneCanvas が通知する）。
+  const [flowImages, setFlowImages] = useState<DiagramElementDto[]>([]);
+  // 画像の初回ロード完了フラグ（baseline を画像込みで確立させ、初回ロードを履歴に乗せない）。
+  const [imagesReported, setImagesReported] = useState(false);
+  // Undo/Redo の画像復元後、SwimlaneCanvas にサーバ再取得させるためのキー。
+  const [imagesReloadKey, setImagesReloadKey] = useState(0);
+  const handleImageElementsChange = useCallback((els: DiagramElementDto[]) => {
+    setFlowImages(els);
+    setImagesReported(true);
+  }, []);
+  const undoFlowId = flowData?.id ?? flowId;
   const { canUndo, canRedo, undo, redo } = useFlowUndoRedo({
-    flowId: flowData?.id ?? flowId,
+    flowId: undoFlowId,
     flowData,
     getHeaders,
     refetch: refetchSilent,
+    // 画像要素も履歴対象に含める（移動/リサイズ/追加/削除を Cmd+Z で戻せる）。
+    extraState: flowImages,
+    extraReady: imagesReported,
+    restoreExtra: async (extra) => {
+      if (!undoFlowId) return;
+      const images = Array.isArray(extra) ? (extra as DiagramElementDto[]) : [];
+      await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
+      // SwimlaneCanvas にサーバの復元結果を再読込させる（楽観 state と DB を再同期）。
+      setImagesReloadKey((k) => k + 1);
+    },
   });
 
   // ⌘Z=Undo / ⌘⇧Z（＋⌘Y）=Redo の専用キーバインド。
@@ -2791,6 +2813,8 @@ export default function ProjectFlowDetailPage() {
           flowData={flowData}
           roles={visibleRoles}
           projectId={projectId}
+          onImageElementsChange={handleImageElementsChange}
+          imagesReloadKey={imagesReloadKey}
           otherFlows={otherFlows}
           informationTypes={informationTypes}
           onSaveNodeInformationLinks={ro(handleSaveNodeInformationLinks)}

@@ -61,4 +61,20 @@ export const diagramElementApi = {
     const res = await fetch(`${API_URL}/api/diagram-elements/${id}`, { method: 'DELETE', headers: headers() });
     if (!res.ok && res.status !== 204) throw new Error('図要素の削除に失敗しました');
   },
+
+  /** Undo/Redo: スナップショットに一致するよう id 保持で一括復元（差分置換）。 */
+  async restore(
+    projectId: string,
+    diagramKind: DiagramKind,
+    diagramId: string,
+    elements: DiagramElementDto[],
+  ): Promise<DiagramElementDto[]> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/diagram-elements/restore`, {
+      method: 'PUT',
+      headers: headers(),
+      body: JSON.stringify({ diagramKind, diagramId, elements }),
+    });
+    if (!res.ok) throw new Error('図要素の復元に失敗しました');
+    return res.json();
+  },
 };

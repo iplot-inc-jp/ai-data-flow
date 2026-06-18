@@ -222,6 +222,10 @@ export interface SwimlaneCanvasProps {
   roles: Role[];
   /** 現在のプロジェクトID（連携先フロー絞り込み・子フロー遷移URL組み立てに使用）。 */
   projectId?: string;
+  /** 画像要素(DiagramElement)が変わるたびに親へ通知する（Undo 用にスナップショットへ含める）。 */
+  onImageElementsChange?: (elements: DiagramElementDto[]) => void;
+  /** インクリメントすると画像要素をサーバから再取得する（Undo 復元後の再同期）。 */
+  imagesReloadKey?: number;
   /** 連携先フロー選択用の、同プロジェクトの他フロー一覧。 */
   otherFlows?: FlowSummary[];
   onBack?: () => void;
@@ -2276,7 +2280,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       if (!cancelled) setImageElements(list.filter((e) => e.type === 'IMAGE'));
     }).catch(() => { /* 取得失敗は致命ではない */ });
     return () => { cancelled = true; };
-  }, [props.projectId, flowId]);
+    // imagesReloadKey が変わると再取得（Undo/Redo 復元後にサーバの復元結果へ再同期）。
+  }, [props.projectId, flowId, props.imagesReloadKey]);
+
+  // 画像要素の変化を親へ通知（親が Undo 用ミラー state を保持しスナップショットへ含める）。
+  const onImageElementsChange = props.onImageElementsChange;
+  useEffect(() => {
+    onImageElementsChange?.(imageElements);
+  }, [imageElements, onImageElementsChange]);
 
   // --- ノードインスペクタパネル（content ノード単一クリック時） ---
   const [panel, setPanel] = useState<{ nodeId: string; nodeLabel: string } | null>(null);
