@@ -1481,7 +1481,7 @@ function AnnotationNode({
             minWidth={24}
             minHeight={24}
             isVisible={!!selected}
-            keepAspectRatio={false}
+            keepAspectRatio
             onResizeEnd={(_, params) =>
               data.onResizeEnd?.(id, {
                 width: Math.round(params.width),
@@ -1490,7 +1490,8 @@ function AnnotationNode({
             }
           />
         )}
-        <IconComp className="h-8 w-8" style={{ color: iconColor }} strokeWidth={2} />
+        {/* アイコンは箱いっぱいに描画＝リサイズで拡大縮小する（keepAspectRatio で正方形維持）。 */}
+        <IconComp className="h-full w-full p-1" style={{ color: iconColor }} strokeWidth={2} />
         {/* ホバーで出る削除ボタン（付箋・コメントと同じ✕） */}
         <button
           type="button"
