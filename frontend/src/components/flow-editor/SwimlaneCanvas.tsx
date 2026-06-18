@@ -3091,7 +3091,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       // 画像要素ノードは DiagramElement API へ位置を保存する（flow ノード系とは独立）。
       // 整形バッチ（onTidyNodes）には渡さず、常にこのブランチで完結する。
       if (node.type === 'imageElement') {
-        void diagramElementApi.patch(node.id, { positionX: node.position.x, positionY: node.position.y });
+        const np = { positionX: node.position.x, positionY: node.position.y };
+        void diagramElementApi.patch(node.id, np);
+        // ローカル state も更新する。さもないと imageElementRfNodes が旧座標のままになり、
+        // 次の allRfNodes 再同期(setDragNodes)でドラッグ位置が巻き戻る（スナップバック）。
+        setImageElements((prev) => prev.map((el) => (el.id === node.id ? { ...el, ...np } : el)));
         return;
       }
       if (node.type !== 'content') return;
@@ -3152,7 +3156,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           });
         } else if (node.type === 'imageElement') {
           // 画像要素は DiagramElement API へ位置を保存する（flow バッチとは独立）。
-          void diagramElementApi.patch(node.id, { positionX: node.position.x, positionY: node.position.y });
+          const np = { positionX: node.position.x, positionY: node.position.y };
+          void diagramElementApi.patch(node.id, np);
+          setImageElements((prev) => prev.map((el) => (el.id === node.id ? { ...el, ...np } : el)));
         }
       }
     },
