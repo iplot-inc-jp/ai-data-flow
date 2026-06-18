@@ -222,6 +222,10 @@ export interface SwimlaneCanvasProps {
   roles: Role[];
   /** 現在のプロジェクトID（連携先フロー絞り込み・子フロー遷移URL組み立てに使用）。 */
   projectId?: string;
+  /** 画像要素(DiagramElement)が変わるたびに親へ通知する（Undo 用にスナップショットへ含める）。 */
+  onImageElementsChange?: (elements: DiagramElementDto[]) => void;
+  /** インクリメントすると画像要素をサーバから再取得する（Undo 復元後の再同期）。 */
+  imagesReloadKey?: number;
   /** 連携先フロー選択用の、同プロジェクトの他フロー一覧。 */
   otherFlows?: FlowSummary[];
   onBack?: () => void;
@@ -1481,7 +1485,7 @@ function AnnotationNode({
             minWidth={24}
             minHeight={24}
             isVisible={!!selected}
-            keepAspectRatio={false}
+            keepAspectRatio
             onResizeEnd={(_, params) =>
               data.onResizeEnd?.(id, {
                 width: Math.round(params.width),
@@ -1490,7 +1494,8 @@ function AnnotationNode({
             }
           />
         )}
-        <IconComp className="h-8 w-8" style={{ color: iconColor }} strokeWidth={2} />
+        {/* アイコンは箱いっぱいに描画＝リサイズで拡大縮小する（keepAspectRatio で正方形維持）。 */}
+        <IconComp className="h-full w-full p-1" style={{ color: iconColor }} strokeWidth={2} />
         {/* ホバーで出る削除ボタン（付箋・コメントと同じ✕） */}
         <button
           type="button"
@@ -2267,15 +2272,46 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // --- 画像要素（DiagramElement.type=IMAGE）— flow ノード/注釈とは別系統 ---
   const [imageElements, setImageElements] = useState<DiagramElementDto[]>([]);
   const flowId = flowData.id;
+  const prevImageFlowIdRef = useRef<string | null>(null);
+  // 実ロード完了フラグ。マウント/フロー切替の空配列は「未ロード」として親へ通知しない。
+  const imagesLoadedRef = useRef(false);
   useEffect(() => {
     const pid = props.projectId;
     if (!pid || !flowId) return;
+    // フロー切替時は前フローの画像を即クリアし未ロード扱いに戻す（古い画像を新フローへ
+    // 報告して親の baseline ガードを誤作動させないため）。imagesReloadKey だけの変化では
+    // クリアしない（Undo 復元後の再同期は空フラッシュを挟まず復元結果へ差し替えたい）。
+    if (prevImageFlowIdRef.current !== flowId) {
+      prevImageFlowIdRef.current = flowId;
+      imagesLoadedRef.current = false;
+      setImageElements([]);
+    }
     let cancelled = false;
     void diagramElementApi.list(pid, 'FLOW', flowId).then((list) => {
-      if (!cancelled) setImageElements(list.filter((e) => e.type === 'IMAGE'));
-    }).catch(() => { /* 取得失敗は致命ではない */ });
+      if (cancelled) return;
+      imagesLoadedRef.current = true; // 実ロード完了。これ以降の変化のみ親へ通知する。
+      setImageElements(list.filter((e) => e.type === 'IMAGE'));
+    }).catch(() => {
+      // 取得失敗時も「ロード完了（画像0件）」として親へ通知する。さもないと
+      // imagesLoadedRef が false のまま → 親の extraReady が立たず、ノード/エッジ/レーン幅を
+      // 含む Undo 全体が baseline を作れず永久に無効化されてしまう。
+      if (cancelled) return;
+      imagesLoadedRef.current = true;
+      props.onImageElementsChange?.([]);
+    });
     return () => { cancelled = true; };
-  }, [props.projectId, flowId]);
+    // imagesReloadKey が変わると再取得（Undo/Redo 復元後にサーバの復元結果へ再同期）。
+  }, [props.projectId, flowId, props.imagesReloadKey]);
+
+  // 画像要素の変化を親へ通知（親が Undo 用ミラー state を保持しスナップショットへ含める）。
+  const onImageElementsChange = props.onImageElementsChange;
+  useEffect(() => {
+    // 実ロード完了前の空配列（マウント/フロー切替クリア）は通知しない。通知すると親の
+    // extraReady が画像ロード前に true になり、初回ロード自体が履歴の1ステップに乗り
+    // 初回 Cmd+Z で全画像が消える。ロード後・編集後の変化だけを通知する。
+    if (!imagesLoadedRef.current) return;
+    onImageElementsChange?.(imageElements);
+  }, [imageElements, onImageElementsChange]);
 
   // --- ノードインスペクタパネル（content ノード単一クリック時） ---
   const [panel, setPanel] = useState<{ nodeId: string; nodeLabel: string } | null>(null);
@@ -3091,7 +3127,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       // 画像要素ノードは DiagramElement API へ位置を保存する（flow ノード系とは独立）。
       // 整形バッチ（onTidyNodes）には渡さず、常にこのブランチで完結する。
       if (node.type === 'imageElement') {
-        void diagramElementApi.patch(node.id, { positionX: node.position.x, positionY: node.position.y });
+        const np = { positionX: node.position.x, positionY: node.position.y };
+        void diagramElementApi.patch(node.id, np);
+        // ローカル state も更新する。さもないと imageElementRfNodes が旧座標のままになり、
+        // 次の allRfNodes 再同期(setDragNodes)でドラッグ位置が巻き戻る（スナップバック）。
+        setImageElements((prev) => prev.map((el) => (el.id === node.id ? { ...el, ...np } : el)));
         return;
       }
       if (node.type !== 'content') return;
@@ -3152,7 +3192,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           });
         } else if (node.type === 'imageElement') {
           // 画像要素は DiagramElement API へ位置を保存する（flow バッチとは独立）。
-          void diagramElementApi.patch(node.id, { positionX: node.position.x, positionY: node.position.y });
+          const np = { positionX: node.position.x, positionY: node.position.y };
+          void diagramElementApi.patch(node.id, np);
+          setImageElements((prev) => prev.map((el) => (el.id === node.id ? { ...el, ...np } : el)));
         }
       }
     },

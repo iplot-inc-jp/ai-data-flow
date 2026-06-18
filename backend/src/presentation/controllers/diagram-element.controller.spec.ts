@@ -2,20 +2,28 @@
 import { DiagramElementController, DiagramElementByIdController } from './diagram-element.controller';
 
 function makePrisma(overrides: any = {}) {
-  return {
+  const p: any = {
     diagramElement: {
       findMany: jest.fn(async () => []),
       create: jest.fn(async ({ data }: any) => ({ id: 'de1', rotation: 0, z: 0, text: '', ...data })),
       findUnique: jest.fn(async () => ({ id: 'de1', projectId: 'p1' })),
       update: jest.fn(async ({ data }: any) => ({ id: 'de1', projectId: 'p1', ...data })),
       delete: jest.fn(async () => undefined),
+      deleteMany: jest.fn(async () => ({ count: 0 })),
+      upsert: jest.fn(async ({ create }: any) => ({ ...create })),
     },
     // diagramId / attachmentId のクロステナント検証用（既定は projectId 一致）。
     businessFlow: { findUnique: jest.fn(async () => ({ projectId: 'p1' })) },
     dfdDiagram: { findUnique: jest.fn(async () => ({ projectId: 'p1' })) },
-    attachment: { findFirst: jest.fn(async () => ({ id: 'a1' })) },
+    attachment: {
+      findFirst: jest.fn(async () => ({ id: 'a1' })),
+      findMany: jest.fn(async () => []),
+    },
     ...overrides,
-  } as any;
+  };
+  // $transaction はコールバックに自身(tx)を渡す簡易モック。
+  p.$transaction = jest.fn(async (cb: any) => cb(p));
+  return p as any;
 }
 const access = () => ({ assertProjectAccess: jest.fn(async () => undefined) }) as any;
 const user = { id: 'u1' } as any;
@@ -71,6 +79,41 @@ describe('DiagramElementController', () => {
       c.create('p1', { diagramKind: 'FLOW', diagramId: 'f1', attachmentId: 'a-other' } as any),
     ).rejects.toThrow();
     expect(prisma.diagramElement.create).not.toHaveBeenCalled();
+  });
+
+  it('restore: scope内既存idはupdate・未存在idはcreate(id保持)、不在の要素は削除、未知添付はnull', async () => {
+    const prisma = makePrisma({
+      attachment: {
+        findFirst: jest.fn(async () => ({ id: 'a1' })),
+        findMany: jest.fn(async () => [{ id: 'a1' }]), // a1 のみ実在、a-deleted は無い
+      },
+    });
+    // このスコープの現存要素は de1 のみ（de2 は削除済み＝undo で復活させる）。
+    prisma.diagramElement.findMany = jest.fn(async () => [{ id: 'de1' }]);
+    const c = new DiagramElementController(prisma);
+    await c.restore('p1', {
+      diagramKind: 'FLOW',
+      diagramId: 'f1',
+      elements: [
+        { id: 'de1', type: 'IMAGE', positionX: 5, positionY: 6, attachmentId: 'a1' },
+        { id: 'de2', type: 'IMAGE', positionX: 7, positionY: 8, attachmentId: 'a-deleted' },
+      ],
+    } as any);
+    // スナップショットに無い要素を削除（id 保持の差分置換）。
+    expect(prisma.diagramElement.deleteMany).toHaveBeenCalledWith({
+      where: { projectId: 'p1', diagramKind: 'FLOW', diagramId: 'f1', type: 'IMAGE', id: { notIn: ['de1', 'de2'] } },
+    });
+    // 既存 de1 は update（クロステナント書込防止＝スコープ内 id のみ update）。
+    const upd = prisma.diagramElement.update.mock.calls.map((x: any) => x[0]);
+    expect(upd.some((u: any) => u.where.id === 'de1')).toBe(true);
+    const de1Upd = upd.find((u: any) => u.where.id === 'de1');
+    expect(de1Upd.data.attachmentId).toBe('a1'); // 実在する添付は維持
+    // 未存在 de2 は id 指定で create（= 削除の undo で同一 id 復活）。未知添付は null。
+    const cre = prisma.diagramElement.create.mock.calls.map((x: any) => x[0].data);
+    const de2 = cre.find((d: any) => d.id === 'de2');
+    expect(de2).toBeTruthy();
+    expect(de2.projectId).toBe('p1');
+    expect(de2.attachmentId).toBeNull();
   });
 });
 

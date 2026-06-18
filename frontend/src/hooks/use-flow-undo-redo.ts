@@ -53,6 +53,10 @@ export type SnapshotEdge = {
 export type FlowSnapshotData = {
   nodes: SnapshotNode[];
   edges: SnapshotEdge[];
+  /** レーン(ロール)別の手動幅。スイムレーン幅の Undo/Redo 用（未保持の旧スナップは undefined）。 */
+  laneHeights?: Record<string, number>;
+  /** flowData 以外の付随状態（例: 画像要素配列）。型は呼び出し側(restoreExtra)が解釈する。 */
+  extra?: unknown;
 };
 
 type PersistedStack = {
@@ -107,13 +111,25 @@ export function serializeSnapshot(flowData: FlowData): FlowSnapshotData {
     infoT: e.infoT ?? null,
   }));
 
-  return { nodes, edges };
+  // スイムレーン幅（laneHeights）も履歴に含める（幅調整も Cmd+Z で戻せるように）。
+  return { nodes, edges, laneHeights: flowData.laneHeights ?? {} };
 }
 
-// 2 スナップショットが等価か（捕捉ループ・無変化 push の抑止用）。
-// 安定したキー順で文字列化して比較する（serializeSnapshot がキー順を固定するので JSON で十分）。
-function snapshotsEqual(a: FlowSnapshotData, b: FlowSnapshotData): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+// オブジェクトキーを再帰的にソートして文字列化する（キー順非依存の安定比較）。
+// laneHeights / node.metadata は Postgres jsonb 由来でキー順が保存時に正規化され、
+// 楽観値（挿入順）と再取得値（jsonb順）で JSON.stringify がズレる。素の stringify 比較だと
+// 同値なのに「変化あり」と誤判定し、復元直後に余計な capture が走って redo が消える。
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  const obj = v as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+}
+
+// 2 スナップショットが等価か（捕捉ループ・無変化 push の抑止用）。キー順非依存で比較する。
+export function snapshotsEqual(a: FlowSnapshotData, b: FlowSnapshotData): boolean {
+  return stableStringify(a) === stableStringify(b);
 }
 
 export interface UseFlowUndoRedoOptions {
@@ -128,6 +144,25 @@ export interface UseFlowUndoRedoOptions {
    * isRestoring=true の間は捕捉 useEffect が push しないようにフラグを立てる。
    */
   refetch: (id: string) => Promise<void> | void;
+  /**
+   * flowData 以外で履歴に含めたい付随状態（例: 画像要素配列）。
+   * これが変わると（移動/リサイズ/追加/削除）新スナップを capture する。
+   */
+  extraState?: unknown;
+  /**
+   * undo/redo 時に snap.extra をサーバ＋クライアントへ適用する
+   * （例: 画像要素を id 保持で一括復元し、キャンバスを再読込）。
+   * サーバ正規化後の extra を返すと、フックが現在の snapshot.extra をそれで上書きして
+   * 再同期後の capture と等価にし、redo 消失を防ぐ（返さない＝上書きしない）。
+   */
+  restoreExtra?: (extra: unknown) => Promise<unknown> | unknown;
+  /**
+   * extra（画像要素など）が初期ロード済みかどうか。false の間は baseline 確立を待つ。
+   * extra は flowData より後に非同期ロードされるため、これを待たないと baseline が
+   * extra 抜きで確立され、初回ロード自体が「全削除」スナップとして履歴に乗ってしまう。
+   * 未指定（undefined）は従来どおり即 baseline 化する（extra を使わない呼び出し用）。
+   */
+  extraReady?: boolean;
 }
 
 export interface UseFlowUndoRedoResult {
@@ -151,7 +186,14 @@ export interface UseFlowUndoRedoResult {
 export function useFlowUndoRedo(
   options: UseFlowUndoRedoOptions,
 ): UseFlowUndoRedoResult {
-  const { flowId, flowData, getHeaders, refetch } = options;
+  const { flowId, flowData, getHeaders, refetch, extraState, restoreExtra, extraReady } = options;
+  // 付随状態(extra)と復元関数は最新参照を ref に保持（依存配列を増やさない）。
+  const extraStateRef = useRef<unknown>(extraState);
+  extraStateRef.current = extraState;
+  const restoreExtraRef = useRef(restoreExtra);
+  restoreExtraRef.current = restoreExtra;
+  const extraReadyRef = useRef(extraReady);
+  extraReadyRef.current = extraReady;
 
   const [stack, setStack] = useState<FlowSnapshotData[]>([]);
   const [index, setIndex] = useState(0);
@@ -232,6 +274,34 @@ export function useFlowUndoRedo(
           },
         );
         if (!res.ok) throw new Error('Failed to restore flow');
+        // スイムレーン幅(laneHeights)もスナップショットへ戻す。snapshot に含まれる場合のみ
+        // 復元する（旧スナップは未保持＝undefined なので現状のレーン幅を維持し、誤ってクリアしない）。
+        if (snap.laneHeights !== undefined) {
+          const lh = await fetch(`${API_URL}/api/business-flows/${flowId}`, {
+            method: 'PUT',
+            headers: getHeaders(),
+            body: JSON.stringify({ laneHeights: snap.laneHeights }),
+          });
+          if (!lh.ok) throw new Error('Failed to restore lane heights');
+        }
+        // 付随状態(extra=画像要素など)も復元する（snapshot に含まれる場合のみ）。
+        // restoreExtra 内でサーバ復元＋キャンバス再読込を行い、サーバ正規化後の extra を返す。
+        // 返り値で現在の snapshot.extra を上書きし、再同期後の capture が等価判定で一致して
+        // redo が消えないようにする（例: 削除済み添付が null へ正規化されるケース）。
+        if (restoreExtraRef.current && snap.extra !== undefined) {
+          const canonical = await restoreExtraRef.current(snap.extra);
+          if (canonical !== undefined) {
+            const i = indexRef.current;
+            const cur = stackRef.current;
+            if (cur[i]) {
+              const nextStack = cur.slice();
+              nextStack[i] = { ...nextStack[i], extra: canonical };
+              setStack(nextStack);
+              stackRef.current = nextStack;
+              persist(nextStack, i);
+            }
+          }
+        }
         await refetch(flowId);
       } catch (err) {
         console.error('Failed to restore flow snapshot:', err);
@@ -244,7 +314,7 @@ export function useFlowUndoRedo(
         }, 0);
       }
     },
-    [flowId, getHeaders, refetch],
+    [flowId, getHeaders, refetch, persist],
   );
 
   // ===========================================
@@ -359,10 +429,16 @@ export function useFlowUndoRedo(
     if (stackFlowIdRef.current !== flowId) return;
     if (flowData.id !== flowId) return; // refetch 中で別フローの残骸が来ても無視
 
-    const snap = serializeSnapshot(flowData);
+    // flowData 由来のスナップに付随状態(extra=画像要素など)を合成する。
+    const snap: FlowSnapshotData = {
+      ...serializeSnapshot(flowData),
+      extra: extraStateRef.current,
+    };
 
     // baseline 未確立（スタック空）→ 即時に index=0 で baseline 化（POST しない）。
     if (stackRef.current.length === 0) {
+      // extra（画像など）が未ロードなら baseline を待つ（初回ロードを履歴に乗せない）。
+      if (extraReadyRef.current === false) return;
       setStack([snap]);
       setIndex(0);
       persist([snap], 0);
@@ -393,7 +469,8 @@ export function useFlowUndoRedo(
     return () => {
       if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
     };
-  }, [flowId, flowData, persist, postSnapshot]);
+    // extraState（画像要素など）が変わったときも capture を走らせる。
+  }, [flowId, flowData, extraState, persist, postSnapshot]);
 
   // ---- Undo / Redo ----
   const undo = useCallback(() => {
