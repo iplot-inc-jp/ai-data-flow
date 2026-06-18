@@ -428,6 +428,10 @@ import {
   ImageBoardByIdController,
 } from './presentation/controllers/image-board.controller';
 import {
+  MeetingDocumentController,
+  MeetingDocumentByIdController,
+} from './presentation/controllers/meeting-document.controller';
+import {
   DiagramElementController,
   DiagramElementByIdController,
 } from './presentation/controllers/diagram-element.controller';
@@ -549,6 +553,9 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // 業務イメージ（スライド）ボード
     ImageBoardController,
     ImageBoardByIdController,
+    // ミーティングドキュメント（会議ごとに複数・INTERNAL=Liveblocks/GOOGLE_DOC=リンク）
+    MeetingDocumentController,
+    MeetingDocumentByIdController,
     // 図要素（FLOW/DFD/OBJECT_MAP 共通 movable canvas 要素）
     DiagramElementController,
     DiagramElementByIdController,

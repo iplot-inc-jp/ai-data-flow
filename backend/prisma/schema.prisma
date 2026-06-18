@@ -248,6 +248,7 @@ model Project {
   informationTypes  InformationType[]
   stakeholders      Stakeholder[]
   meetings          Meeting[]
+  meetingDocuments  MeetingDocument[]
   risks             Risk[]
   riskCategories    RiskCategory[]
   suppliers         Supplier[]
@@ -1925,6 +1926,7 @@ model Meeting {
   reportCalendars ReportCalendar[]
   risks           Risk[]
   subProjects     MeetingSubProject[]
+  documents       MeetingDocument[]
 
   @@map("meetings")
 }
@@ -2950,4 +2952,35 @@ model FlowStakeholder {
   @@index([flowId])
   @@index([stakeholderId])
   @@map("flow_stakeholders")
+}
+
+// ========================================================================
+// ミーティングドキュメント（会議ごとに複数）。
+//   INTERNAL  = アプリ内ドキュメント。本文は Liveblocks(Yjs) ルーム
+//               `meetingdoc:{id}` が真実源（DBには本文を持たない＝共同編集の標準形）。
+//   GOOGLE_DOC = 外部 Google Document へのリンク（googleDocUrl を保持）。
+// ========================================================================
+enum MeetingDocumentKind {
+  INTERNAL
+  GOOGLE_DOC
+}
+
+model MeetingDocument {
+  id           String              @id @default(uuid())
+  projectId    String              @map("project_id")
+  meetingId    String              @map("meeting_id")
+  kind         MeetingDocumentKind @default(INTERNAL)
+  title        String              @default("")
+  // GOOGLE_DOC のとき：外部 Google Document の URL。
+  googleDocUrl String?             @map("google_doc_url")
+  order        Int                 @default(0)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([meetingId])
+  @@map("meeting_documents")
 }

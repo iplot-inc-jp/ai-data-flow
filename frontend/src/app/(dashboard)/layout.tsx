@@ -637,6 +637,7 @@ export default function DashboardLayout({
           { name: '制約条件', href: `${base}/constraints`, icon: Lock },
           { name: 'ロール', href: `${base}/roles`, icon: UserCog },
           { name: '会議マスタ', href: `${base}/meetings`, icon: CalendarClock },
+          { name: 'ミーティングドキュメント', href: `${base}/meeting-documents`, icon: FileText },
         ],
       },
       {
