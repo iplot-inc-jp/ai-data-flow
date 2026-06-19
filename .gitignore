@@ -47,3 +47,6 @@ backend/prisma/*.db-journal
 
 # superpowers brainstorm visual companion
 .superpowers/
+
+# Claude scratch diffs
+.claude/tmp/

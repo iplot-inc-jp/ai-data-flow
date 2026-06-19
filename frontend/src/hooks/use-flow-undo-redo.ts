@@ -224,6 +224,10 @@ export function useFlowUndoRedo(
   // 今セッションの新規操作（seq≥1）が必ず上回るようにする。undo/redo は index だけ動かすので
   // この配列は不変。capture/baseline/reset/hydrate で stack と同じ加工を施し整合を保つ。
   const seqStackRef = useRef<number[]>([]);
+  // 次の capture（debounce 満了時の push）に使う「予約 seq」。変化を検知した時点（=操作時刻に近い）で
+  // 採番してここに置き、満了時にこれを使う。満了時に採番すると debounce 窓(400ms)の間に同期採番される
+  // 画像 op より新しい seq になり、⌘Z が直近の画像操作でなくフローを取り消してしまう（誤チャンネル）。
+  const pendingCaptureSeqRef = useRef<number | null>(null);
 
   const storageKey = useMemo(
     () => (flowId ? `flow-undo-${flowId}` : null),
@@ -344,6 +348,7 @@ export function useFlowUndoRedo(
     stackRef.current = [];
     indexRef.current = 0;
     seqStackRef.current = [];
+    pendingCaptureSeqRef.current = null;
   }, [flowId]);
 
   // ===========================================
@@ -464,19 +469,32 @@ export function useFlowUndoRedo(
     const current = stackRef.current[indexRef.current];
     if (current && snapshotsEqual(current, snap)) return;
 
+    // 変化を検知した「今」（≒操作時刻）で seq を予約する。満了時に採番すると、debounce 窓内に
+    // 同期採番される画像 op より新しくなって ⌘Z の振り先がズレる。窓内の連続変化では最新で上書き
+    // （集約スナップの seq＝最後の変化の時刻）。
+    pendingCaptureSeqRef.current = nextUndoSeq();
+
     // debounce で集約（連続ドラッグ等を 1 スナップに）。
     if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
     captureTimerRef.current = setTimeout(() => {
-      if (isRestoringRef.current) return;
+      if (isRestoringRef.current) {
+        pendingCaptureSeqRef.current = null; // 復元由来でキャンセル：予約 seq を持ち越さない
+        return;
+      }
       const base = stackRef.current.slice(0, indexRef.current + 1);
       const last = base[base.length - 1];
-      if (last && snapshotsEqual(last, snap)) return; // 二重抑止
+      if (last && snapshotsEqual(last, snap)) {
+        pendingCaptureSeqRef.current = null;
+        return; // 二重抑止
+      }
 
       const next = [...base, snap].slice(-MAX_STACK);
       const nextIndex = next.length - 1;
-      // seqStack も stack と同じ加工（index+1 で truncate → 新 seq 追記 → 同じ -MAX_STACK）。
+      // seqStack も stack と同じ加工（index+1 で truncate → 予約 seq 追記 → 同じ -MAX_STACK）。
+      const capturedSeq = pendingCaptureSeqRef.current ?? nextUndoSeq();
+      pendingCaptureSeqRef.current = null;
       const seqBase = seqStackRef.current.slice(0, indexRef.current + 1);
-      seqStackRef.current = [...seqBase, nextUndoSeq()].slice(-MAX_STACK);
+      seqStackRef.current = [...seqBase, capturedSeq].slice(-MAX_STACK);
       setStack(next);
       setIndex(nextIndex);
       persist(next, nextIndex);
