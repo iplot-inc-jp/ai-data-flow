@@ -69,15 +69,14 @@ export function useImageOpLog(params: {
   // 失敗を握りつぶすと、ローカルは undo 済み表示のままサーバは未反映 → フロー切替/リロードの
   // list() 上書きで undo が黙って消える（ユーザ intent の喪失）。
   const applyWithRollback = useCallback(
-    (op: DiagramElementOp, inverseOp: DiagramElementOp, rollbackStacks: () => void) => {
+    (op: DiagramElementOp, onServerError: () => void) => {
       setImageElements((prev) => applyDelta(prev, op));
       if (!projectId) return;
       void diagramElementApi
         .applyOps(projectId, 'FLOW', diagramId, [op])
         .catch((e) => {
-          console.error('[image-undo] applyOps failed; rolling back local state', e);
-          setImageElements((prev) => applyDelta(prev, inverseOp));
-          rollbackStacks();
+          console.error('[image-undo] applyOps failed; rolling back', e);
+          onServerError();
         });
     },
     [projectId, diagramId, setImageElements],
@@ -99,15 +98,18 @@ export function useImageOpLog(params: {
     pastRef.current.pop();
     futureRef.current.push(entry);
     rerender();
-    // 逆操作を反映。失敗時は do を再適用してローカルを戻し、entry がまだ future 先頭なら past へ復帰。
-    applyWithRollback(entry.undo, entry.do, () => {
+    // 逆操作を反映。サーバ失敗時は entry がまだ future 先頭の時だけ、ローカル(do 再適用)とスタックを
+    // 同一ガード下で巻き戻す。その後に新 op が入っていれば一切触らず、次の list() 再取得で自己回復させる
+    // （順序敏感な applyDelta の部分適用で local/server を乖離させないため）。
+    applyWithRollback(entry.undo, () => {
       if (futureRef.current[futureRef.current.length - 1] === entry) {
         futureRef.current.pop();
         pastRef.current.push(entry);
+        setImageElements((prev) => applyDelta(prev, entry.do));
         rerender();
       }
     });
-  }, [applyWithRollback, rerender]);
+  }, [applyWithRollback, rerender, setImageElements]);
 
   const redo = useCallback(() => {
     const entry = futureRef.current[futureRef.current.length - 1];
@@ -115,14 +117,15 @@ export function useImageOpLog(params: {
     futureRef.current.pop();
     pastRef.current.push(entry);
     rerender();
-    applyWithRollback(entry.do, entry.undo, () => {
+    applyWithRollback(entry.do, () => {
       if (pastRef.current[pastRef.current.length - 1] === entry) {
         pastRef.current.pop();
         futureRef.current.push(entry);
+        setImageElements((prev) => applyDelta(prev, entry.undo));
         rerender();
       }
     });
-  }, [applyWithRollback, rerender]);
+  }, [applyWithRollback, rerender, setImageElements]);
 
   return {
     recordImageOp,

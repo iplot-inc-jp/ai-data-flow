@@ -467,7 +467,10 @@ export function useFlowUndoRedo(
 
     // 現在位置のスナップと同値なら何もしない（refetch ループ・冪等操作の抑止）。
     const current = stackRef.current[indexRef.current];
-    if (current && snapshotsEqual(current, snap)) return;
+    if (current && snapshotsEqual(current, snap)) {
+      pendingCaptureSeqRef.current = null; // 無変化なら予約 seq を持ち越さない（stale 防止）
+      return;
+    }
 
     // 変化を検知した「今」（≒操作時刻）で seq を予約する。満了時に採番すると、debounce 窓内に
     // 同期採番される画像 op より新しくなって ⌘Z の振り先がズレる。窓内の連続変化では最新で上書き
