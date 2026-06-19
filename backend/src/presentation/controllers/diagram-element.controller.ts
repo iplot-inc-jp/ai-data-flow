@@ -66,6 +66,21 @@ class RestoreDiagramElementsDto {
   elements!: RestoreElementDto[];
 }
 
+// Undo/Redo の op-log 適用用: 1操作 = 指定要素の upsert（id 保持）または 指定 id の delete。
+class DiagramElementOpDto {
+  @IsIn(['upsert', 'delete']) type!: 'upsert' | 'delete';
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => RestoreElementDto)
+  elements?: RestoreElementDto[];
+  @IsOptional() @IsArray() @IsString({ each: true })
+  ids?: string[];
+}
+class ApplyDiagramElementOpsDto {
+  @IsIn(DIAGRAM_KINDS) diagramKind!: (typeof DIAGRAM_KINDS)[number];
+  @IsString() diagramId!: string;
+  @IsArray() @ValidateNested({ each: true }) @Type(() => DiagramElementOpDto)
+  ops!: DiagramElementOpDto[];
+}
+
 function toDto(e: any) {
   return {
     id: e.id, projectId: e.projectId, diagramKind: e.diagramKind, diagramId: e.diagramId,
@@ -205,6 +220,71 @@ export class DiagramElementController {
     });
     const out = await this.prisma.diagramElement.findMany({
       where: { projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId },
+      orderBy: [{ z: 'asc' }, { createdAt: 'asc' }],
+    });
+    return out.map(toDto);
+  }
+
+  // Undo/Redo（op-log）適用: 各 op を1トランザクションで適用する。upsert は id 保持で
+  // update(スコープ内)/create(未存在)、delete は指定 id のみ削除。restore と違い
+  // notIn の一括削除が無いので、適用は冪等かつ途中状態に対して self-healing（取りこぼし
+  // race を生まない）。スコープ外/別テナントの id は update 対象にならず create に回り、
+  // PK 衝突時はロールバックする（クロステナント書込み不可）。
+  @Post('ops')
+  async applyOps(@Param('projectId') projectId: string, @Body() dto: ApplyDiagramElementOpsDto) {
+    await this.assertDiagramInProject(projectId, dto.diagramKind, dto.diagramId);
+    const attIds = dto.ops.flatMap((o) =>
+      o.type === 'upsert'
+        ? (o.elements ?? []).map((e) => e.attachmentId).filter((a): a is string => !!a)
+        : [],
+    );
+    const validAtt = new Set<string>();
+    if (attIds.length > 0) {
+      const rows = await this.prisma.attachment.findMany({
+        where: { id: { in: attIds }, projectId },
+        select: { id: true },
+      });
+      for (const r of rows) validAtt.add(r.id);
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.diagramElement.findMany({
+        where: { projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId },
+        select: { id: true },
+      });
+      const existingIds = new Set(existing.map((e) => e.id));
+      for (const op of dto.ops) {
+        if (op.type === 'delete') {
+          await tx.diagramElement.deleteMany({
+            where: {
+              id: { in: op.ids ?? [] },
+              projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId, type: 'IMAGE',
+            },
+          });
+          for (const id of op.ids ?? []) existingIds.delete(id);
+        } else {
+          for (const el of op.elements ?? []) {
+            const attachmentId = el.attachmentId && validAtt.has(el.attachmentId) ? el.attachmentId : null;
+            const fields = {
+              type: el.type ?? 'IMAGE',
+              positionX: el.positionX ?? 0, positionY: el.positionY ?? 0,
+              width: el.width ?? null, height: el.height ?? null,
+              z: el.z ?? 0, rotation: el.rotation ?? 0,
+              attachmentId, text: el.text ?? '', color: el.color ?? null,
+            };
+            if (existingIds.has(el.id)) {
+              await tx.diagramElement.update({ where: { id: el.id }, data: fields });
+            } else {
+              await tx.diagramElement.create({
+                data: { id: el.id, projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId, ...fields },
+              });
+              existingIds.add(el.id);
+            }
+          }
+        }
+      }
+    });
+    const out = await this.prisma.diagramElement.findMany({
+      where: { projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId, type: 'IMAGE' },
       orderBy: [{ z: 'asc' }, { createdAt: 'asc' }],
     });
     return out.map(toDto);

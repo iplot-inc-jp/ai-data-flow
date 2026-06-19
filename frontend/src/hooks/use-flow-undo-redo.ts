@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FlowData } from '@/components/flow-editor/flow-types';
+import { nextUndoSeq } from './undo-seq';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -172,6 +173,10 @@ export interface UseFlowUndoRedoResult {
   redo: () => void;
   /** restore 由来の再取得中フラグ（capture を抑止する間 true）。 */
   isRestoring: boolean;
+  /** 次の undo が取り消す捕捉の seq（端＝null）。画像 op-log と比較して ⌘Z の振り先を決める。 */
+  peekUndoSeq: () => number | null;
+  /** 次の redo が再適用する捕捉の seq（端＝null）。 */
+  peekRedoSeq: () => number | null;
 }
 
 // ===========================================
@@ -214,6 +219,15 @@ export function useFlowUndoRedo(
   const indexRef = useRef(index);
   stackRef.current = stack;
   indexRef.current = index;
+  // stack と同順・同長で各エントリを「いつ捕捉したか」の単調 seq を保持する（画像 op-log と
+  // 横断比較して ⌘Z の振り先を決める）。hydrate 由来（前セッションの履歴）は 0＝最古とし、
+  // 今セッションの新規操作（seq≥1）が必ず上回るようにする。undo/redo は index だけ動かすので
+  // この配列は不変。capture/baseline/reset/hydrate で stack と同じ加工を施し整合を保つ。
+  const seqStackRef = useRef<number[]>([]);
+  // 次の capture（debounce 満了時の push）に使う「予約 seq」。変化を検知した時点（=操作時刻に近い）で
+  // 採番してここに置き、満了時にこれを使う。満了時に採番すると debounce 窓(400ms)の間に同期採番される
+  // 画像 op より新しい seq になり、⌘Z が直近の画像操作でなくフローを取り消してしまう（誤チャンネル）。
+  const pendingCaptureSeqRef = useRef<number | null>(null);
 
   const storageKey = useMemo(
     () => (flowId ? `flow-undo-${flowId}` : null),
@@ -333,6 +347,8 @@ export function useFlowUndoRedo(
     setIndex(0);
     stackRef.current = [];
     indexRef.current = 0;
+    seqStackRef.current = [];
+    pendingCaptureSeqRef.current = null;
   }, [flowId]);
 
   // ===========================================
@@ -367,6 +383,7 @@ export function useFlowUndoRedo(
             if (!cancelled) {
               setStack(s);
               setIndex(i);
+              seqStackRef.current = s.map(() => 0); // 復元分は最古扱い
               restored = true;
             }
           }
@@ -393,6 +410,7 @@ export function useFlowUndoRedo(
             if (dbStack.length > 0) {
               setStack(dbStack);
               setIndex(dbStack.length - 1);
+              seqStackRef.current = dbStack.map(() => 0); // 復元分は最古扱い
               persist(dbStack, dbStack.length - 1);
               restored = true;
             }
@@ -441,6 +459,7 @@ export function useFlowUndoRedo(
       if (extraReadyRef.current === false) return;
       setStack([snap]);
       setIndex(0);
+      seqStackRef.current = [0]; // baseline は操作ではない＝最古
       persist([snap], 0);
       hydratedFlowIdRef.current = flowId;
       return;
@@ -448,18 +467,37 @@ export function useFlowUndoRedo(
 
     // 現在位置のスナップと同値なら何もしない（refetch ループ・冪等操作の抑止）。
     const current = stackRef.current[indexRef.current];
-    if (current && snapshotsEqual(current, snap)) return;
+    if (current && snapshotsEqual(current, snap)) {
+      pendingCaptureSeqRef.current = null; // 無変化なら予約 seq を持ち越さない（stale 防止）
+      return;
+    }
+
+    // 変化を検知した「今」（≒操作時刻）で seq を予約する。満了時に採番すると、debounce 窓内に
+    // 同期採番される画像 op より新しくなって ⌘Z の振り先がズレる。窓内の連続変化では最新で上書き
+    // （集約スナップの seq＝最後の変化の時刻）。
+    pendingCaptureSeqRef.current = nextUndoSeq();
 
     // debounce で集約（連続ドラッグ等を 1 スナップに）。
     if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
     captureTimerRef.current = setTimeout(() => {
-      if (isRestoringRef.current) return;
+      if (isRestoringRef.current) {
+        pendingCaptureSeqRef.current = null; // 復元由来でキャンセル：予約 seq を持ち越さない
+        return;
+      }
       const base = stackRef.current.slice(0, indexRef.current + 1);
       const last = base[base.length - 1];
-      if (last && snapshotsEqual(last, snap)) return; // 二重抑止
+      if (last && snapshotsEqual(last, snap)) {
+        pendingCaptureSeqRef.current = null;
+        return; // 二重抑止
+      }
 
       const next = [...base, snap].slice(-MAX_STACK);
       const nextIndex = next.length - 1;
+      // seqStack も stack と同じ加工（index+1 で truncate → 予約 seq 追記 → 同じ -MAX_STACK）。
+      const capturedSeq = pendingCaptureSeqRef.current ?? nextUndoSeq();
+      pendingCaptureSeqRef.current = null;
+      const seqBase = seqStackRef.current.slice(0, indexRef.current + 1);
+      seqStackRef.current = [...seqBase, capturedSeq].slice(-MAX_STACK);
       setStack(next);
       setIndex(nextIndex);
       persist(next, nextIndex);
@@ -498,5 +536,19 @@ export function useFlowUndoRedo(
   const canUndo = index > 0;
   const canRedo = index < stack.length - 1;
 
-  return { canUndo, canRedo, undo, redo, isRestoring };
+  // ルーター用 peek（呼び出し時に最新 ref を読む）。undo は stack[index] を生んだ捕捉を、
+  // redo は stack[index+1] を生んだ捕捉を取り消す/再適用するので、その seq を返す。
+  const peekUndoSeq = useCallback(
+    () => (indexRef.current > 0 ? seqStackRef.current[indexRef.current] ?? null : null),
+    [],
+  );
+  const peekRedoSeq = useCallback(
+    () =>
+      indexRef.current < stackRef.current.length - 1
+        ? seqStackRef.current[indexRef.current + 1] ?? null
+        : null,
+    [],
+  );
+
+  return { canUndo, canRedo, undo, redo, isRestoring, peekUndoSeq, peekRedoSeq };
 }

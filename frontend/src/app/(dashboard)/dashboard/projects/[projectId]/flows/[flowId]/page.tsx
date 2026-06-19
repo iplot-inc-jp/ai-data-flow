@@ -71,7 +71,7 @@ import {
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useFlowUndoRedo } from '@/hooks/use-flow-undo-redo';
-import { diagramElementApi, type DiagramElementDto, type DiagramElementRestoreInput } from '@/lib/diagram-elements';
+import { type ImageUndoApi } from '@/hooks/use-image-op-log';
 import {
   flowDefinitionApi,
   EMPTY_DEFINITION,
@@ -449,6 +449,9 @@ function FlowDefinitionPanel({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // 自動保存用: 編集があったか（初期ロードと区別）＋最新 handleSave 参照（stale closure 回避）。
+  const dirtyRef = useRef(false);
+  const handleSaveRef = useRef<() => void | Promise<void>>(() => {});
 
   // 次工程（渡し先ロール）の新規追加フォーム
   const [addingRole, setAddingRole] = useState(false);
@@ -481,6 +484,7 @@ function FlowDefinitionPanel({
   const setField = useCallback(
     (key: keyof FlowDefinition, value: string | null) => {
       setDef((prev) => (prev ? { ...prev, [key]: value } : prev));
+      dirtyRef.current = true;
       setSavedAt(null);
     },
     [],
@@ -494,21 +498,25 @@ function FlowDefinitionPanel({
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
   const updateStep = useCallback((i: number, value: string) => {
     setSteps((s) => s.map((step, k) => (k === i ? value : step)));
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
   const removeStep = useCallback((i: number) => {
     setSteps((s) => s.filter((_, k) => k !== i));
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
   const addStep = useCallback(() => {
     setSteps((s) => [...s, '']);
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
@@ -556,6 +564,7 @@ function FlowDefinitionPanel({
       const updated = await flowDefinitionApi.upsert(flowId, patch);
       setDef(updated);
       setSteps(Array.isArray(updated.doSteps) ? updated.doSteps : []);
+      dirtyRef.current = false;
       setSavedAt(Date.now());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : '保存に失敗しました');
@@ -563,6 +572,20 @@ function FlowDefinitionPanel({
       setSaving(false);
     }
   }, [def, steps, flowId]);
+
+  // 最新の handleSave を ref に保持（自動保存 effect が stale な値を保存しないように）。
+  handleSaveRef.current = handleSave;
+
+  // 自動保存: 編集後 800ms 入力が止まったら保存する（手動「保存」ボタン不要）。
+  // savedAt!==null（保存済み）や未編集（初期ロード）では発火しない。失敗時は手動ボタンで再保存可。
+  useEffect(() => {
+    if (!def || saving) return;
+    if (!dirtyRef.current || savedAt !== null) return;
+    const t = setTimeout(() => {
+      void handleSaveRef.current();
+    }, 800);
+    return () => clearTimeout(t);
+  }, [def, steps, savedAt, saving]);
 
   if (loading) {
     return (
@@ -808,26 +831,32 @@ function FlowDefinitionPanel({
         </CardContent>
       </Card>
 
-      {/* 保存バー */}
-      <div className="flex items-center gap-3">
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
-          保存
-        </Button>
-        {savedAt && (
-          <span className="inline-flex items-center gap-1 text-sm text-emerald-600">
-            <Check className="h-4 w-4" />
-            保存しました
+      {/* 自動保存ステータス（編集すると自動で保存される。手動保存は不要。失敗時のみ「再保存」） */}
+      <div className="flex items-center gap-3 text-sm">
+        {saving ? (
+          <span className="inline-flex items-center gap-1 text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            保存中…
           </span>
-        )}
-        {saveError && (
-          <span className="inline-flex items-center gap-1 text-sm text-red-600">
-            <AlertCircle className="h-4 w-4" />
-            {saveError}
+        ) : saveError ? (
+          <>
+            <span className="inline-flex items-center gap-1 text-red-600">
+              <AlertCircle className="h-4 w-4" />
+              {saveError}
+            </span>
+            <Button size="sm" variant="outline" onClick={handleSave}>
+              再保存
+            </Button>
+          </>
+        ) : savedAt ? (
+          <span className="inline-flex items-center gap-1 text-emerald-600">
+            <Check className="h-4 w-4" />
+            自動保存済み
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-gray-400">
+            <Save className="h-4 w-4" />
+            変更すると自動で保存されます
           </span>
         )}
       </div>
@@ -2363,64 +2392,56 @@ export default function ProjectFlowDetailPage() {
   // Undo/Redo は「今表示しているフロー」を対象にする。子フローへドリルダウン中は
   // flowData.id がルートの params.flowId と異なる（router は変えず flowData だけ差し替える）ため、
   // ルート固定だと ⌘Z で親フローに飛んでしまう。表示中フロー id を渡してフローごとに履歴を持つ。
-  // 画像要素(DiagramElement)を Undo 履歴へ含めるためのミラー state（SwimlaneCanvas が通知する）。
-  const [flowImages, setFlowImages] = useState<DiagramElementDto[]>([]);
-  // 画像の初回ロード完了フラグ（baseline を画像込みで確立させ、初回ロードを履歴に乗せない）。
-  const [imagesReported, setImagesReported] = useState(false);
-  // Undo/Redo の画像復元後、SwimlaneCanvas にサーバ再取得させるためのキー。
-  const [imagesReloadKey, setImagesReloadKey] = useState(0);
-  const handleImageElementsChange = useCallback((els: DiagramElementDto[]) => {
-    setFlowImages(els);
-    setImagesReported(true);
-  }, []);
   const undoFlowId = flowData?.id ?? flowId;
-  // 履歴に入れる画像は安定射影に正規化する（createdAt 等の揮発フィールドを落とす）。
-  // これをしないと undo 復元後にサーバ再取得した形と snapshot がズレ、JSON 等価判定が
-  // 誤って「変化あり」になり、復元直後に余計な capture が走って redo が消える。
-  // 画像 DTO → 安定射影（createdAt 等の揮発フィールドを落とす）。capture/restore で共通利用。
-  const toRestoreInput = useCallback(
-    (e: DiagramElementDto): DiagramElementRestoreInput => ({
-      id: e.id, type: e.type,
-      positionX: e.positionX, positionY: e.positionY,
-      width: e.width, height: e.height, rotation: e.rotation, z: e.z,
-      attachmentId: e.attachmentId, text: e.text, color: e.color,
-    }),
-    [],
-  );
-  const flowImagesSnapshot = useMemo<DiagramElementRestoreInput[]>(
-    () => flowImages.map(toRestoreInput),
-    [flowImages, toRestoreInput],
-  );
-  // フロー切替で undo 基準をリセット（前フローの画像で baseline ガードが誤作動しないように）。
-  useEffect(() => {
-    setImagesReported(false);
-    setFlowImages([]);
-  }, [undoFlowId]);
-  // 画像要素の Undo/Redo は再設計まで一時無効。デプロイ前アドバーサリアル・レビューで、非同期
-  // 再同期・jsonbキー順・画像ロード失敗パスに起因する data-loss / redo 破壊が繰り返し検出された
-  // ため。レーン幅 Undo・スナップバック修正・アイコン拡大は本フラグと無関係に有効。画像自体の
-  // 作成/移動/リサイズ/削除も通常どおり動く（Cmd+Z で戻せないだけ）。再有効化は true に。
-  const IMAGE_UNDO_ENABLED = false;
-  const { canUndo, canRedo, undo, redo } = useFlowUndoRedo({
+
+  // 画像Undo（op-log）は SwimlaneCanvas 内の useImageOpLog が保持する。ここでは命令的ハンドルと
+  // 操作可否だけを受け取り、フローのスナップショット Undo と ⌘Z を seq で統合する。
+  const imageUndoApiRef = useRef<ImageUndoApi | null>(null);
+  const [imgCanUndo, setImgCanUndo] = useState(false);
+  const [imgCanRedo, setImgCanRedo] = useState(false);
+  const handleImageUndoState = useCallback((s: { canUndo: boolean; canRedo: boolean }) => {
+    setImgCanUndo(s.canUndo);
+    setImgCanRedo(s.canRedo);
+  }, []);
+
+  const {
+    canUndo: flowCanUndo,
+    canRedo: flowCanRedo,
+    undo: flowUndo,
+    redo: flowRedo,
+    peekUndoSeq: flowPeekUndo,
+    peekRedoSeq: flowPeekRedo,
+  } = useFlowUndoRedo({
     flowId: undoFlowId,
     flowData,
     getHeaders,
     refetch: refetchSilent,
-    // 画像要素を履歴対象に含める（移動/リサイズ/追加/削除を Cmd+Z で戻せる）。無効時は undefined。
-    extraState: IMAGE_UNDO_ENABLED ? flowImagesSnapshot : undefined,
-    extraReady: IMAGE_UNDO_ENABLED ? imagesReported : undefined,
-    restoreExtra: IMAGE_UNDO_ENABLED
-      ? async (extra) => {
-          if (!undoFlowId) return undefined;
-          const images = Array.isArray(extra) ? (extra as DiagramElementRestoreInput[]) : [];
-          const restored = await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
-          // SwimlaneCanvas にサーバの復元結果を再読込させる（楽観 state と DB を再同期）。
-          setImagesReloadKey((k) => k + 1);
-          // サーバ正規化後の結果（例: 削除済み添付→null）を返し、フックが snapshot.extra を上書き。
-          return restored.map(toRestoreInput);
-        }
-      : undefined,
   });
+
+  // ⌘Z ルーター: フロー履歴と画像 op-log のうち「直近の操作」を seq で選んで取り消す/やり直す。
+  // seq が大きいほど新しい。undo は大きい seq から、redo は（mirror として）小さい seq から戻す。
+  // 一方が端（null）なら他方へ振る。両方端なら no-op。
+  const combinedUndo = useCallback(() => {
+    const img = imageUndoApiRef.current;
+    const imgSeq = img ? img.peekUndoSeq() : null;
+    const flowSeq = flowPeekUndo();
+    if (imgSeq === null && flowSeq === null) return;
+    if (flowSeq === null || (imgSeq !== null && imgSeq > flowSeq)) img?.undo();
+    else flowUndo();
+  }, [flowUndo, flowPeekUndo]);
+  const combinedRedo = useCallback(() => {
+    const img = imageUndoApiRef.current;
+    const imgSeq = img ? img.peekRedoSeq() : null;
+    const flowSeq = flowPeekRedo();
+    if (imgSeq === null && flowSeq === null) return;
+    if (flowSeq === null || (imgSeq !== null && imgSeq < flowSeq)) img?.redo();
+    else flowRedo();
+  }, [flowRedo, flowPeekRedo]);
+
+  const canUndo = flowCanUndo || imgCanUndo;
+  const canRedo = flowCanRedo || imgCanRedo;
+  const undo = combinedUndo;
+  const redo = combinedRedo;
 
   // ⌘Z=Undo / ⌘⇧Z（＋⌘Y）=Redo の専用キーバインド。
   // 共有の useKeyboardShortcuts は mod 系を「入力中でも常に発火」させる仕様（mod+s/i 用）のため、
@@ -2844,8 +2865,8 @@ export default function ProjectFlowDetailPage() {
           flowData={flowData}
           roles={visibleRoles}
           projectId={projectId}
-          onImageElementsChange={handleImageElementsChange}
-          imagesReloadKey={imagesReloadKey}
+          onImageUndoStateChange={handleImageUndoState}
+          imageUndoApiRef={imageUndoApiRef}
           otherFlows={otherFlows}
           informationTypes={informationTypes}
           onSaveNodeInformationLinks={ro(handleSaveNodeInformationLinks)}
