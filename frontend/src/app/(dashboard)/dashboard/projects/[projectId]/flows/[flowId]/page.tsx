@@ -449,6 +449,9 @@ function FlowDefinitionPanel({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // 自動保存用: 編集があったか（初期ロードと区別）＋最新 handleSave 参照（stale closure 回避）。
+  const dirtyRef = useRef(false);
+  const handleSaveRef = useRef<() => void | Promise<void>>(() => {});
 
   // 次工程（渡し先ロール）の新規追加フォーム
   const [addingRole, setAddingRole] = useState(false);
@@ -481,6 +484,7 @@ function FlowDefinitionPanel({
   const setField = useCallback(
     (key: keyof FlowDefinition, value: string | null) => {
       setDef((prev) => (prev ? { ...prev, [key]: value } : prev));
+      dirtyRef.current = true;
       setSavedAt(null);
     },
     [],
@@ -494,21 +498,25 @@ function FlowDefinitionPanel({
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
   const updateStep = useCallback((i: number, value: string) => {
     setSteps((s) => s.map((step, k) => (k === i ? value : step)));
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
   const removeStep = useCallback((i: number) => {
     setSteps((s) => s.filter((_, k) => k !== i));
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
   const addStep = useCallback(() => {
     setSteps((s) => [...s, '']);
+    dirtyRef.current = true;
     setSavedAt(null);
   }, []);
 
@@ -556,6 +564,7 @@ function FlowDefinitionPanel({
       const updated = await flowDefinitionApi.upsert(flowId, patch);
       setDef(updated);
       setSteps(Array.isArray(updated.doSteps) ? updated.doSteps : []);
+      dirtyRef.current = false;
       setSavedAt(Date.now());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : '保存に失敗しました');
@@ -563,6 +572,20 @@ function FlowDefinitionPanel({
       setSaving(false);
     }
   }, [def, steps, flowId]);
+
+  // 最新の handleSave を ref に保持（自動保存 effect が stale な値を保存しないように）。
+  handleSaveRef.current = handleSave;
+
+  // 自動保存: 編集後 800ms 入力が止まったら保存する（手動「保存」ボタン不要）。
+  // savedAt!==null（保存済み）や未編集（初期ロード）では発火しない。失敗時は手動ボタンで再保存可。
+  useEffect(() => {
+    if (!def || saving) return;
+    if (!dirtyRef.current || savedAt !== null) return;
+    const t = setTimeout(() => {
+      void handleSaveRef.current();
+    }, 800);
+    return () => clearTimeout(t);
+  }, [def, steps, savedAt, saving]);
 
   if (loading) {
     return (
@@ -808,26 +831,32 @@ function FlowDefinitionPanel({
         </CardContent>
       </Card>
 
-      {/* 保存バー */}
-      <div className="flex items-center gap-3">
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
-          保存
-        </Button>
-        {savedAt && (
-          <span className="inline-flex items-center gap-1 text-sm text-emerald-600">
-            <Check className="h-4 w-4" />
-            保存しました
+      {/* 自動保存ステータス（編集すると自動で保存される。手動保存は不要。失敗時のみ「再保存」） */}
+      <div className="flex items-center gap-3 text-sm">
+        {saving ? (
+          <span className="inline-flex items-center gap-1 text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            保存中…
           </span>
-        )}
-        {saveError && (
-          <span className="inline-flex items-center gap-1 text-sm text-red-600">
-            <AlertCircle className="h-4 w-4" />
-            {saveError}
+        ) : saveError ? (
+          <>
+            <span className="inline-flex items-center gap-1 text-red-600">
+              <AlertCircle className="h-4 w-4" />
+              {saveError}
+            </span>
+            <Button size="sm" variant="outline" onClick={handleSave}>
+              再保存
+            </Button>
+          </>
+        ) : savedAt ? (
+          <span className="inline-flex items-center gap-1 text-emerald-600">
+            <Check className="h-4 w-4" />
+            自動保存済み
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-gray-400">
+            <Save className="h-4 w-4" />
+            変更すると自動で保存されます
           </span>
         )}
       </div>
