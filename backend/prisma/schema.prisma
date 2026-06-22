@@ -2973,6 +2973,11 @@ model MeetingDocument {
   title        String              @default("")
   // GOOGLE_DOC のとき：外部 Google Document の URL。
   googleDocUrl String?             @map("google_doc_url")
+  // GOOGLE_DOC を Drive 連携経由で取得したときの本文スナップショット（検索/AI参照用にこちらにも保存）。
+  fetchedContent String?           @map("fetched_content") @db.Text
+  fetchedTitle   String?           @map("fetched_title")
+  fetchedMime    String?           @map("fetched_mime")
+  fetchedAt      DateTime?         @map("fetched_at")
   order        Int                 @default(0)
   createdAt    DateTime            @default(now()) @map("created_at")
   updatedAt    DateTime            @updatedAt @map("updated_at")
