@@ -30,6 +30,7 @@ import { ManualButton } from '@/components/ui/manual-dialog';
 import { BacklogImportDialog } from '@/components/backlog-import-dialog';
 import { JiraImportDialog } from '@/components/jira-import-dialog';
 import { ExcelAiImportDialog } from '@/components/excel-ai-import-dialog';
+import { ImportSourceDialog, type ImportSource } from '@/components/import-source-dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
@@ -46,7 +47,6 @@ import {
   Pencil,
   Flag,
   GanttChartSquare,
-  FileSpreadsheet,
   Search,
   X,
   ListChecks,
@@ -57,7 +57,7 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
-  Sparkles,
+  Download,
 } from 'lucide-react';
 import {
   tasksApi,
@@ -167,9 +167,18 @@ export default function TasksPage() {
   // ダイアログ
   const [dialogOpen, setDialogOpen] = useState(false);
   // Backlog CSV 取込ダイアログ
+  const [importHubOpen, setImportHubOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [jiraImportOpen, setJiraImportOpen] = useState(false);
   const [excelImportOpen, setExcelImportOpen] = useState(false);
+
+  // 取り込み元の選択 → 対応するダイアログを開く。
+  const handleSelectImport = (source: ImportSource) => {
+    setImportHubOpen(false);
+    if (source === 'backlog') setImportOpen(true);
+    else if (source === 'jira') setJiraImportOpen(true);
+    else if (source === 'excel') setExcelImportOpen(true);
+  };
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -700,34 +709,12 @@ export default function TasksPage() {
             {canEdit && (
               <Button
                 variant="outline"
-                onClick={() => setImportOpen(true)}
+                onClick={() => setImportHubOpen(true)}
                 className="gap-1.5"
-                title="Backlog（nulab）の課題エクスポート CSV を取り込みます"
+                title="Backlog / Jira のCSV、または Excel(AI) からタスクを取り込みます"
               >
-                <FileSpreadsheet className="h-4 w-4" />
-                Backlogから取込
-              </Button>
-            )}
-            {canEdit && (
-              <Button
-                variant="outline"
-                onClick={() => setJiraImportOpen(true)}
-                className="gap-1.5"
-                title="Jira（Atlassian）の課題エクスポート CSV を取り込みます"
-              >
-                <FileSpreadsheet className="h-4 w-4" />
-                Jiraから取込
-              </Button>
-            )}
-            {canEdit && (
-              <Button
-                variant="outline"
-                onClick={() => setExcelImportOpen(true)}
-                className="gap-1.5 border-purple-300 text-purple-700 hover:bg-purple-50"
-                title="Excel(.xlsx)を生成AIで読み取り、大項目/中項目などの階層を推測してタスクを自動生成します"
-              >
-                <Sparkles className="h-4 w-4" />
-                Excelから取込（AI）
+                <Download className="h-4 w-4" />
+                取り込み
               </Button>
             )}
             {canEdit && (
@@ -1579,6 +1566,13 @@ export default function TasksPage() {
       </Dialog>
 
       {/* Backlog CSV 取込ダイアログ（文字コード対応・結果表示・一覧リフレッシュ） */}
+      {/* 取り込み入口モーダル（元を選択 → 各取り込みダイアログへ） */}
+      <ImportSourceDialog
+        open={importHubOpen}
+        onOpenChange={setImportHubOpen}
+        onSelect={handleSelectImport}
+      />
+
       <BacklogImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
