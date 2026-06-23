@@ -198,6 +198,93 @@ function useFlowTree(projectId: string | null) {
   return { subProjects, flows }
 }
 
+// フローの子タブ（メニューダウン）。flows/[flowId] の ?tab= と一致させる。
+const FLOW_LEAF_TABS = [
+  { tab: 'flow', name: 'フロー図' },
+  { tab: 'definition', name: '個別定義' },
+  { tab: 'cruoa', name: '情報の地図(CRUOA)' },
+  { tab: 'dfd', name: 'DFD' },
+] as const
+
+// フロー1本のサイドメニュー項目。名前リンク＋右端シェブロンで子タブの開閉。
+// アクティブなフローのみ初期展開し、各子タブは ?tab= へ deep-link する
+// （ページ内タブと双方向同期。useTabParam 参照）。
+function FlowLeaf({
+  flow,
+  projectId,
+  pathname,
+  onNavigate,
+}: {
+  flow: BusinessFlow
+  projectId: string
+  pathname: string
+  onNavigate: () => void
+}) {
+  const href = `/dashboard/projects/${projectId}/flows/${flow.id}`
+  const isActive = pathname === href
+  const searchParams = useSearchParams()
+  const currentTab = isActive ? searchParams.get('tab') ?? 'flow' : null
+  const [open, setOpen] = useState(isActive)
+
+  return (
+    <div>
+      <div
+        className={cn(
+          'flex items-center gap-1 pr-1 rounded-md transition-colors',
+          'text-muted-foreground hover:text-foreground hover:bg-secondary',
+          isActive && 'text-primary font-medium bg-primary/10'
+        )}
+      >
+        <Link
+          href={href}
+          onClick={onNavigate}
+          title={flow.name}
+          className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 text-xs"
+        >
+          <GitBranch className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+          <span className="truncate">{flow.name}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          title={open ? 'タブを閉じる' : 'タブを開く'}
+          aria-expanded={open}
+          className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/80 flex-shrink-0"
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      {open && (
+        <div className="ml-5 pl-2 mt-0.5 space-y-0.5 border-l border-border/60">
+          {FLOW_LEAF_TABS.map((t) => {
+            const tabHref = t.tab === 'flow' ? href : `${href}?tab=${t.tab}`
+            const tabActive = currentTab === t.tab
+            return (
+              <Link
+                key={t.tab}
+                href={tabHref}
+                onClick={onNavigate}
+                title={t.name}
+                className={cn(
+                  'block px-3 py-1 rounded-md text-[11px] transition-colors',
+                  'text-muted-foreground hover:text-foreground hover:bg-secondary',
+                  tabActive && 'text-primary font-medium bg-primary/10'
+                )}
+              >
+                {t.name}
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ASIS/TOBE サブグループ
 function FlowKindGroup({
   label,
@@ -238,26 +325,15 @@ function FlowKindGroup({
       </button>
       {open && (
         <div className="space-y-0.5 pl-3">
-          {flows.map((flow) => {
-            const href = `/dashboard/projects/${projectId}/flows/${flow.id}`
-            const isActive = pathname === href
-            return (
-              <Link
-                key={flow.id}
-                href={href}
-                onClick={onNavigate}
-                title={flow.name}
-                className={cn(
-                  'flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors',
-                  'text-muted-foreground hover:text-foreground hover:bg-secondary',
-                  isActive && 'text-primary font-medium bg-primary/10'
-                )}
-              >
-                <GitBranch className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
-                <span className="truncate">{flow.name}</span>
-              </Link>
-            )
-          })}
+          {flows.map((flow) => (
+            <FlowLeaf
+              key={flow.id}
+              flow={flow}
+              projectId={projectId}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
+          ))}
         </div>
       )}
     </div>

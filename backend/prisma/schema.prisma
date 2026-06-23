@@ -2901,6 +2901,7 @@ enum DiagramNodeKind {
   FLOW_NODE
   DFD_NODE
   DATA_OBJECT
+  FLOW_EDGE
 }
 
 model ImageBoard {
