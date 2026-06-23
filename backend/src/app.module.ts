@@ -395,6 +395,10 @@ import { RequirementController } from './presentation/controllers/requirement.co
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
 import { ApiKeyController } from './presentation/controllers/api-key.controller';
 import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
+import {
+  PageScreenshotController,
+  PageScreenshotByIdController,
+} from './presentation/controllers/page-screenshot.controller';
 import { CronController } from './presentation/controllers/cron.controller';
 import { CodeCatalogController } from './presentation/controllers/code-catalog.controller';
 import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
@@ -448,6 +452,7 @@ import { CodeExtractionService } from './infrastructure/services/code-extraction
 import { LlmUsageRecorder } from './infrastructure/services/llm-usage-recorder.service';
 import { AttachmentRegisterService } from './infrastructure/services/attachment-register.service';
 import { SyncService } from './infrastructure/services/sync.service';
+import { ScreenshotImportService } from './infrastructure/services/screenshot-import.service';
 import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.service';
 import { QStashService } from './infrastructure/services/qstash.service';
 import { JobService } from './infrastructure/services/job.service';
@@ -540,6 +545,8 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     UserSettingsController,
     ApiKeyController,
     GithubConnectionController,
+    PageScreenshotController,
+    PageScreenshotByIdController,
     CodeCatalogController,
     DatabaseConnectionController,
     AttachmentController,
@@ -1054,6 +1061,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     LlmUsageRecorder,
     AttachmentRegisterService,
     SyncService,
+    ScreenshotImportService,
     SyncSchedulerService,
     QStashService,
     JobService,

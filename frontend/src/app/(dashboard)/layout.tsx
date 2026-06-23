@@ -52,6 +52,7 @@ import {
   Gauge,
   Activity,
   ListChecks,
+  Image as ImageIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -521,6 +522,7 @@ const COLLAPSED_SHORT_LABELS: Record<string, string> = {
   '背景・目的': '背景',
   '変更履歴': '履歴',
   'GAP（課題）': 'GAP',
+  'ページ別スクリーンショット': 'スクショ',
 }
 
 function collapsedLabel(name: string): string {
@@ -946,6 +948,7 @@ export default function DashboardLayout({
         label: '現状システム把握',
         items: [
           { name: 'コード連携', href: `${base}/integrations`, icon: Github },
+          { name: 'ページ別スクリーンショット', href: `${base}/page-screenshots`, icon: ImageIcon },
           { name: 'DFD', href: `${base}/dfd`, icon: Share2 },
           { name: 'オブジェクト関係性マップ', href: `${base}/object-map`, icon: Boxes },
           { name: 'ER図', href: `${base}/er-diagram`, icon: Table2 },
