@@ -40,7 +40,8 @@ import {
   Network,
   ChevronRight,
 } from 'lucide-react';
-import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/SwimlaneCanvas';
+import { SwimlaneCanvas, type NodeLinksResult, type NodeImageRef } from '@/components/flow-editor/SwimlaneCanvas';
+import { nodeAttachmentApi } from '@/lib/node-attachments';
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
@@ -1007,6 +1008,45 @@ export default function ProjectFlowDetailPage() {
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
+
+  // ノードの画像添付（ノードID → 画像）。ノード右上にバッジを出し、ホバーで拡大プレビューする。
+  const [nodeImages, setNodeImages] = useState<Map<string, NodeImageRef[]>>(new Map());
+  // ノード集合が変わったときだけまとめて取得（編集のたびの flowData 変化では再取得しない）。
+  const flowNodeIdsKey = (flowData?.nodes ?? []).map((n) => n.id).join(',');
+  useEffect(() => {
+    if (!projectId || !flowNodeIdsKey) {
+      setNodeImages(new Map());
+      return;
+    }
+    const ids = flowNodeIdsKey.split(',');
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        ids.map((id) =>
+          nodeAttachmentApi
+            .list(projectId, 'FLOW_NODE', id)
+            .then((rows) => [id, rows] as const)
+            .catch(() => [id, []] as const),
+        ),
+      );
+      if (cancelled) return;
+      const map = new Map<string, NodeImageRef[]>();
+      for (const [id, rows] of results) {
+        const imgs = rows
+          .filter((r) => r.attachment && r.attachment.kind === 'IMAGE')
+          .map((r) => ({
+            id: r.attachment!.id,
+            url: r.attachment!.url,
+            filename: r.attachment!.displayName || r.attachment!.filename,
+          }));
+        if (imgs.length) map.set(id, imgs);
+      }
+      setNodeImages(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, flowNodeIdsKey]);
   const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
   // システムマスタ（ロールの type==='SYSTEM' のとき紐づけ先選択肢）
   const [systems, setSystems] = useState<SystemMaster[]>([]);
@@ -3011,6 +3051,7 @@ export default function ProjectFlowDetailPage() {
           flowData={flowData}
           roles={visibleRoles}
           projectId={projectId}
+          nodeImages={nodeImages}
           onImageUndoStateChange={handleImageUndoState}
           imageUndoApiRef={imageUndoApiRef}
           otherFlows={otherFlows}

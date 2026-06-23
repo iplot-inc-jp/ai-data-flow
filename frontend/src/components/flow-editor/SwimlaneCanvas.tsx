@@ -61,6 +61,7 @@ import { toPng } from 'html-to-image';
 import {
   ChevronLeft,
   Layers,
+  Image as ImageIcon,
   Plus,
   Trash2,
   GitBranch,
@@ -229,6 +230,8 @@ export interface SwimlaneCanvasProps {
   roles: Role[];
   /** 現在のプロジェクトID（連携先フロー絞り込み・子フロー遷移URL組み立てに使用）。 */
   projectId?: string;
+  /** ノードID → 添付画像。ノード右上にバッジを出し、ホバーで拡大プレビューする。 */
+  nodeImages?: Map<string, NodeImageRef[]>;
   /** 画像Undo(op-log)の操作可否が変わるたびに親へ通知（ツールバー活性/⌘Z のチャンネル統合用）。 */
   onImageUndoStateChange?: (s: { canUndo: boolean; canRedo: boolean }) => void;
   /** 親が ⌘Z ルーターから画像Undoの undo/redo/peek を呼ぶための命令的ハンドル。 */
@@ -505,6 +508,9 @@ interface FlowLayoutView {
 // ノードの見た目
 // ===========================================
 
+/** ノードに添付された画像（ホバープレビュー用の最小情報）。 */
+export type NodeImageRef = { id: string; url: string; filename: string };
+
 type ContentNodeData = {
   label: string;
   ntype: string;
@@ -512,6 +518,8 @@ type ContentNodeData = {
   hasLinks?: boolean;
   roleColor?: string;
   orientation: FlowOrientation;
+  /** このノードに添付された画像（あればノード右上にバッジ＋ホバーで拡大プレビュー）。 */
+  attachmentImages?: NodeImageRef[];
   /** リサイズ確定時に呼ぶ（width/height を永続化）。embedded（閲覧）では未設定。 */
   onResizeEnd?: (id: string, size: { width: number; height: number }) => void;
 };
@@ -581,6 +589,37 @@ function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData
           className="nodrag !w-2 !h-2 !min-w-0 !min-h-0 !bg-transparent !border-0"
         />
       ))}
+      {/* 画像添付バッジ（右上）。ホバーすると画像をポップアップで拡大プレビュー。 */}
+      {data.attachmentImages && data.attachmentImages.length > 0 && (
+        <div className="group/att nodrag absolute -right-1.5 -top-1.5 z-10">
+          <div
+            className="flex h-5 w-5 cursor-help items-center justify-center rounded-full border border-white bg-blue-600 text-white shadow"
+            title={`画像 ${data.attachmentImages.length} 件`}
+          >
+            <ImageIcon className="h-3 w-3" />
+            {data.attachmentImages.length > 1 && (
+              <span className="absolute -bottom-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-gray-800 px-0.5 text-[8px] font-bold leading-none text-white">
+                {data.attachmentImages.length}
+              </span>
+            )}
+          </div>
+          {/* ホバーポップアップ（先頭画像を拡大表示。複数枚は枚数を併記） */}
+          <div className="pointer-events-none invisible absolute right-0 top-6 z-50 opacity-0 transition-opacity duration-100 group-hover/att:visible group-hover/att:opacity-100">
+            <div className="rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={data.attachmentImages[0].url}
+                alt={data.attachmentImages[0].filename}
+                className="max-h-56 max-w-[260px] rounded object-contain"
+              />
+              <div className="mt-1 max-w-[260px] truncate text-center text-[10px] text-gray-500">
+                {data.attachmentImages[0].filename}
+                {data.attachmentImages.length > 1 && ` ほか ${data.attachmentImages.length - 1} 件`}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="font-medium text-sm leading-tight line-clamp-2">{data.label}</div>
       {(data.hasChildFlow || data.hasLinks) && (
         <div className="mt-0.5 flex items-center justify-center gap-1.5">
@@ -2613,6 +2652,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           hasLinks: (src.links?.length ?? 0) > 0,
           roleColor: src.role?.color,
           orientation,
+          attachmentImages: props.nodeImages?.get(src.id),
           // embedded（閲覧）ではリサイズ不可（ハンドルを出さない）。
           onResizeEnd: props.embedded
             ? undefined
@@ -2702,6 +2742,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     props.annotations,
     props.onUpdateAnnotation,
     props.onDeleteAnnotation,
+    props.nodeImages,
   ]);
 
   // 画像要素ノード（type:'imageElement'）— flow ノード/注釈とは別系統。connectable:false。
