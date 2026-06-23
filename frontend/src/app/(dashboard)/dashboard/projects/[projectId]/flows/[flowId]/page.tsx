@@ -122,6 +122,18 @@ const MERMAID_SAMPLE = `flowchart TD
   end
   B --> C`;
 
+// シーケンス図（プロトコル図）サンプル。スイムレーンに最も自然に対応する記法。
+// participant＝レーン（ロール）、各メッセージ＝送信側レーンのノード、出現順＝フロー順。
+const MERMAID_SEQUENCE_SAMPLE = `sequenceDiagram
+  participant 顧客
+  participant 営業
+  participant 物流
+  顧客->>営業: 注文を送る
+  営業->>営業: 与信確認
+  営業->>物流: 出荷を依頼
+  物流->>物流: 配送手配
+  物流-->>顧客: 配送完了を通知`;
+
 // ===========================================
 // DFDタブ：このフローのデータフロー図（get-or-generate）＋ 図 / 一覧表 サブ切替
 // ===========================================
@@ -3283,10 +3295,11 @@ export default function ProjectFlowDetailPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5 text-gray-900">
               mermaidから生成
-              <HelpTooltip text="Mermaid はテキストで図を書く記法です。flowchart の定義を貼り付けると、ロール・ノード・接続を解析してこのフローへ一括で追加します。" />
+              <HelpTooltip text="Mermaid はテキストで図を書く記法です。flowchart に加え、sequenceDiagram（シーケンス図／プロトコル図）も解析できます。シーケンス図は participant がそのままレーン（ロール）、各メッセージが送信側レーンのノードになるため、スイムレーンに最も自然に変換できます。" />
             </DialogTitle>
             <DialogDescription className="text-gray-500">
-              Mermaid記法のテキストを貼り付けると、ロール・ノード・接続をこのフローに追加します。
+              Mermaid記法のテキスト（flowchart / sequenceDiagram）を貼り付けると、ロール・ノード・接続をこのフローに追加します。
+              シーケンス図（プロトコル図）はレーンへの変換が特にきれいです。
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -3304,15 +3317,29 @@ export default function ProjectFlowDetailPage() {
             </div>
           )}
           <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
-              disabled={mermaidImporting}
-              className="mr-auto text-gray-600"
-              title="サンプルで上書きします"
-            >
-              サンプルを表示
-            </Button>
+            <div className="mr-auto flex items-center gap-1">
+              <span className="text-xs text-gray-400">サンプル:</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMermaidImportText(MERMAID_SEQUENCE_SAMPLE)}
+                disabled={mermaidImporting}
+                className="text-gray-600"
+                title="シーケンス図（プロトコル図）のサンプルで上書きします。スイムレーンに最も自然に対応します。"
+              >
+                シーケンス図
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
+                disabled={mermaidImporting}
+                className="text-gray-600"
+                title="flowchart のサンプルで上書きします。"
+              >
+                flowchart
+              </Button>
+            </div>
             <Button
               variant="outline"
               onClick={() => setShowMermaidImport(false)}
