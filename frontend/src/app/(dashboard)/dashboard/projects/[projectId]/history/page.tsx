@@ -13,7 +13,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { History, Loader2, RefreshCw } from 'lucide-react';
+import {
+  History,
+  Loader2,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card, CardContent } from '@/components/ui/card';
@@ -151,6 +157,9 @@ function entityLabel(entity: string | null): string {
   return ENTITY_LABELS[entity] ?? entity;
 }
 
+/** 1ページあたりの表示件数。 */
+const PAGE_SIZE = 50;
+
 /** アクションバッジ（作成=emerald / 更新=blue / 削除=rose）。 */
 const ACTION_META: Record<string, { label: string; badge: string }> = {
   CREATE: { label: '作成', badge: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
@@ -270,6 +279,19 @@ export default function HistoryPage() {
 
   // ヘッダークリックソート（昇順 → 降順 → 解除で新しい順に戻る）
   const { sorted, sortKey, sortDir, toggleSort } = useTableSort(filtered, SORT_ACCESSORS);
+
+  // ページネーション（クライアント側。取得済みの sorted を 50 件ずつ分割）。
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const paged = useMemo(
+    () => sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [sorted, safePage],
+  );
+  // フィルタ／ソート変更で件数が変わったら 1 ページ目へ戻す。
+  useEffect(() => {
+    setPage(1);
+  }, [entityFilter, actionFilter, sortKey, sortDir]);
 
   return (
     <div className="space-y-6">
@@ -425,7 +447,7 @@ export default function HistoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map((log) => {
+                  {paged.map((log) => {
                     const failed = isFailed(log.statusCode);
                     const meta = log.action ? ACTION_META[log.action] : undefined;
                     return (
@@ -516,6 +538,39 @@ export default function HistoryPage() {
                 </tbody>
               </table>
             </div>
+            {sorted.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-4 py-3">
+                <span className="text-xs text-gray-500">
+                  {(safePage - 1) * PAGE_SIZE + 1}–
+                  {Math.min(safePage * PAGE_SIZE, sorted.length)} / {sorted.length} 件
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={safePage <= 1}
+                    onClick={() => setPage(safePage - 1)}
+                    className="gap-1"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    前へ
+                  </Button>
+                  <span className="px-2 text-xs text-gray-600">
+                    {safePage} / {pageCount}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={safePage >= pageCount}
+                    onClick={() => setPage(safePage + 1)}
+                    className="gap-1"
+                  >
+                    次へ
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
