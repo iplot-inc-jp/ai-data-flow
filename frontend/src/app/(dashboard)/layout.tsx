@@ -56,6 +56,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
+import { CompanySwitcher } from '@/components/company/CompanySwitcher'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
 
@@ -1173,6 +1174,7 @@ export default function DashboardLayout({
               <PanelLeftClose className="h-4 w-4" />
             </button>
           </div>
+          <CompanySwitcher />
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
