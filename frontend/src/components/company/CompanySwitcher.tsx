@@ -23,7 +23,7 @@ export function CompanySwitcher() {
     <div className="px-3 py-2">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="w-full flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-left text-sm hover:bg-secondary transition-colors">
+          <button aria-label="会社を切り替え" className="w-full flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-left text-sm hover:bg-secondary transition-colors">
             <Building2 className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
             <span className="truncate flex-1 text-foreground">
               {selectedOrganization?.name ?? '会社を選択'}

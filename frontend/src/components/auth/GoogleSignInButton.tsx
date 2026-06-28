@@ -35,6 +35,10 @@ export function GoogleSignInButton({
         text="signin_with"
         width="320"
         onSuccess={async (cred) => {
+          if (!cred.credential) {
+            onError?.('Google 認証に失敗しました');
+            return;
+          }
           try {
             const res = await fetch(`${API_URL}/api/auth/google`, {
               method: 'POST',

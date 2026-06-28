@@ -32,6 +32,7 @@ export function InviteLinksPanel({ orgId }: { orgId: string }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError('');
     setLoading(true);
     try {
       setInvites(await invitesApi.list(orgId));
@@ -74,9 +75,13 @@ export function InviteLinksPanel({ orgId }: { orgId: string }) {
   }
 
   async function copy(token: string, id: string) {
-    await navigator.clipboard.writeText(inviteUrl(token));
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
+    try {
+      await navigator.clipboard.writeText(inviteUrl(token));
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      setError('クリップボードへのコピーに失敗しました');
+    }
   }
 
   return (
