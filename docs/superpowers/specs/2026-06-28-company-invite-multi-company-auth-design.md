@@ -79,10 +79,10 @@ model OrganizationInvite {
 
 ### 5.2 `User` 拡張
 
-- `googleId String? @unique @map("google_id")` を追加。
-- `password` を **nullable** に変更（`password String?`）。
-  - password 未設定（null / 空）= Google のみ / 招待中ユーザー。**メアド/パス ログインは password 設定済みのユーザーのみ通す**（login use-case で空/null を拒否）。
-  - 既存の「空文字パス＝招待中」運用と整合（移行で `''` を許容、新規は null）。
+- `googleId String? @unique @map("google_id")` を追加（マイグレーションはこのカラム追加のみ）。
+- `password` は **NOT NULL の String を維持**し、`''`（空文字）= 「パスワード未設定（Google のみ / 招待中）」とする。
+  - 既存のメアドログイン use-case は既に `if (!user.password)` で空を弾く（**変更不要**）。Google ユーザーは `User.createWithGoogle(...)` で `password: ''` として作成。
+  - 既存の「空文字パス＝招待中」運用と完全に整合し、既存 `password` カラムの nullable 移行（リスク）を回避する。
 
 ## 6. バックエンド設計（NestJS・既存クリーンアーキ準拠）
 
@@ -183,7 +183,7 @@ model OrganizationInvite {
 
 ## 11. リスク / 留意点
 
-- `password` の nullable 化は既存データ移行を伴う（既存 `''` は維持可、login 側で空/null を一律「メアドログイン不可」に）。
+- `password` は NOT NULL のまま `''`=未設定の規約で扱うため、`password` カラムのデータ移行は不要（追加カラムは `googleId` のみ）。既存の login use-case が空パスを弾く挙動を踏襲する。
 - Google で作成したアカウントと同一メールの既存メアドアカウントは自動リンクする（同一メール = 同一人物前提）。
 - 招待リンクは URL を知る全員が参加可能なため、期限・最大回数・revoke の運用を UI で明示する。
 - スイッチャー追加に伴い `ProjectContext` の初期選択ロジックが変わる（リロード時の挙動を要確認）。
