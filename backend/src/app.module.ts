@@ -48,6 +48,7 @@ import {
   INGESTION_FILE_REPOSITORY,
   KNOWLEDGE_REPOSITORY,
   PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
+  ORGANIZATION_INVITE_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -318,6 +319,7 @@ import {
   IngestionFileRepositoryImpl,
   KnowledgeRepositoryImpl,
   ProjectKnowledgeSettingsRepositoryImpl,
+  OrganizationInviteRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
   ProjectAccessService,
@@ -826,6 +828,10 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     {
       provide: PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
       useClass: ProjectKnowledgeSettingsRepositoryImpl,
+    },
+    {
+      provide: ORGANIZATION_INVITE_REPOSITORY,
+      useClass: OrganizationInviteRepositoryImpl,
     },
 
     // ========== Use Cases ==========
