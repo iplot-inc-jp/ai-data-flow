@@ -51,6 +51,7 @@ import {
   ORGANIZATION_INVITE_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
+  GOOGLE_VERIFIER_SERVICE,
 } from './domain';
 
 // Application
@@ -325,6 +326,7 @@ import {
   ProjectAccessService,
   ProjectBundleService,
   EntityJsonService,
+  GoogleAuthLibraryVerifierService,
 } from './infrastructure';
 
 // Presentation
@@ -661,6 +663,10 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     {
       provide: TOKEN_SERVICE,
       useClass: JwtTokenService,
+    },
+    {
+      provide: GOOGLE_VERIFIER_SERVICE,
+      useClass: GoogleAuthLibraryVerifierService,
     },
 
     // ========== Repository Implementations ==========
