@@ -1,6 +1,7 @@
 'use client';
 
-import { Building2, Check, ChevronDown } from 'lucide-react';
+import { useState } from 'react';
+import { Building2, Check, ChevronDown, Plus } from 'lucide-react';
 import { useProject } from '@/contexts/ProjectContext';
 import {
   DropdownMenu,
@@ -10,12 +11,17 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import { CreateCompanyDialog } from '@/components/company/CreateCompanyDialog';
 
 /**
- * 所属会社を切り替えるドロップダウン。会社が無ければ何も表示しない。
+ * 所属会社を切り替えるドロップダウン。会社が無ければ何も表示しない
+ * （所属0の導線はダッシュボードのオンボーディングが担当）。
+ * 末尾の「新しい会社を作成」から、既存ユーザーも追加の会社を作れる。
  */
 export function CompanySwitcher() {
-  const { organizations, selectedOrganization, selectOrganization } = useProject();
+  const { organizations, selectedOrganization, selectOrganization, fetchOrganizations } =
+    useProject();
+  const [createOpen, setCreateOpen] = useState(false);
 
   if (!organizations || organizations.length === 0) return null;
 
@@ -48,8 +54,31 @@ export function CompanySwitcher() {
               <span className="truncate">{org.name}</span>
             </DropdownMenuItem>
           ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => setCreateOpen(true)}
+            className="flex items-center gap-2 text-blue-600 focus:text-blue-700"
+          >
+            <Plus className="h-4 w-4" />
+            <span className="truncate">新しい会社を作成</span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <CreateCompanyDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={async (org) => {
+          await fetchOrganizations();
+          // 作成した会社をそのまま選択して切り替える
+          selectOrganization({
+            id: org.id,
+            name: org.name,
+            slug: org.slug,
+            description: org.description ?? undefined,
+          });
+        }}
+      />
     </div>
   );
 }
