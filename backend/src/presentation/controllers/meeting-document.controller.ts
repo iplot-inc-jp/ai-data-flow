@@ -11,6 +11,7 @@ import {
   HttpStatus,
   BadRequestException,
   NotFoundException,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -26,6 +27,7 @@ import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.se
 import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 import { DriveService } from '../../infrastructure/knowledge/drive.service';
 import { FileExtractionService } from '../../infrastructure/knowledge/file-extraction.service';
+import { classifyDriveFetchError } from '../../infrastructure/knowledge/lib/drive-error';
 import {
   CurrentUser,
   CurrentUserPayload,
@@ -238,10 +240,15 @@ export class MeetingDocumentByIdController {
     try {
       // Google ネイティブ形式は DriveService が Office 形式（docx/xlsx/pptx）へ変換して返す。
       download = await this.drive.downloadFile(projectId, fileId);
-    } catch {
-      throw new BadRequestException(
-        'Google Drive からの取得に失敗しました。プロジェクトの Drive 連携と、対象ファイルの共有設定を確認してください。',
+    } catch (e) {
+      // 生エラーを握りつぶさず、原因（未連携 / 未構成 / 共有漏れ）を具体化して返す。
+      const info = classifyDriveFetchError(
+        e instanceof Error ? e.message : String(e),
       );
+      if (info.kind === 'unconfigured') {
+        throw new ServiceUnavailableException(info.userMessage);
+      }
+      throw new BadRequestException(info.userMessage);
     }
 
     const kind = this.fileExtraction.classify(download.mimeType, download.filename);
