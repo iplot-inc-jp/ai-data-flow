@@ -104,7 +104,7 @@ export function RoleOrderDialog({
           <DragDropContext onDragEnd={onDragEnd}>
             <Droppable droppableId="role-order">
               {(provided) => (
-                <ul
+                <div
                   ref={provided.innerRef}
                   {...provided.droppableProps}
                   className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1"
@@ -112,7 +112,7 @@ export function RoleOrderDialog({
                   {items.map((r, i) => (
                     <Draggable key={r.id} draggableId={r.id} index={i}>
                       {(p, snapshot) => (
-                        <li
+                        <div
                           ref={p.innerRef}
                           {...p.draggableProps}
                           className={
@@ -155,12 +155,12 @@ export function RoleOrderDialog({
                           >
                             <ArrowDown className="h-4 w-4" />
                           </button>
-                        </li>
+                        </div>
                       )}
                     </Draggable>
                   ))}
                   {provided.placeholder}
-                </ul>
+                </div>
               )}
             </Droppable>
           </DragDropContext>
