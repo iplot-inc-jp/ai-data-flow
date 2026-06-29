@@ -59,13 +59,13 @@ type Member = {
   role: MemberRole;
 };
 
-// 会社管理者 = OWNER/ADMIN, 一般ユーザー = MEMBER/VIEWER
+// 会社管理者 = OWNER/ADMIN, 会社メンバー = MEMBER/VIEWER
 function isCompanyAdminRole(role: MemberRole): boolean {
   return role === 'OWNER' || role === 'ADMIN';
 }
 
 function roleLabel(role: MemberRole): string {
-  return isCompanyAdminRole(role) ? '会社管理者' : '一般ユーザー';
+  return isCompanyAdminRole(role) ? '会社管理者' : '会社メンバー';
 }
 
 export default function CompanySettingsPage() {
@@ -172,7 +172,7 @@ export default function CompanySettingsPage() {
       // メンバー
       const memberList = await fetchMembers();
 
-      // 認可: 全体管理者 もしくは その会社の会社管理者(OWNER/ADMIN)
+      // 認可: すべての管理者 もしくは その会社の会社管理者(OWNER/ADMIN)
       const myMembership = memberList.find((m) => m.userId === userId);
       const companyAdmin = myMembership ? isCompanyAdminRole(myMembership.role) : false;
       setAuthorized(superAdmin || companyAdmin);
@@ -258,7 +258,7 @@ export default function CompanySettingsPage() {
     if (!newMemberEmail) return;
     setAddingMember(true);
     setMessage(null);
-    // 会社管理者 → OWNER, 一般ユーザー → MEMBER
+    // 会社管理者 → OWNER, 会社メンバー → MEMBER
     const role: MemberRole = newMemberRole === 'admin' ? 'OWNER' : 'MEMBER';
     try {
       const res = await fetch(`${API_URL}/api/organizations/${orgId}/members`, {
@@ -386,7 +386,7 @@ export default function CompanySettingsPage() {
           <ShieldAlert className="h-8 w-8 text-amber-500" />
         </div>
         <h1 className="text-xl font-bold text-gray-900">この会社を管理する権限がありません</h1>
-        <p className="text-gray-500 mt-2">会社管理者または全体管理者のみ利用できます。</p>
+        <p className="text-gray-500 mt-2">会社管理者またはすべての管理者のみ利用できます。</p>
       </div>
     );
   }
@@ -418,7 +418,7 @@ export default function CompanySettingsPage() {
           steps={[
             '「AI設定」タブで、この会社専用のAnthropic APIキーを設定できます（設定の有無のみ表示されます）。',
             '「ステータス」タブで、会社の稼働 / 停止を切り替えます。停止中はサービスを利用できません。',
-            '「メンバー」タブで、メールアドレスと権限（会社管理者 / 一般ユーザー）を指定してメンバーを追加します。',
+            '「メンバー」タブで、メールアドレスと権限（会社管理者 / 会社メンバー）を指定してメンバーを追加します。',
             '既存メンバーは権限の変更や削除ができます。会社管理者はメンバーの追加・権限変更ができます。',
           ]}
           shortcuts={[{ keys: '?', desc: 'この操作方法を開く' }]}
@@ -583,7 +583,7 @@ export default function CompanySettingsPage() {
             <CardHeader>
               <CardTitle className="text-gray-900 flex items-center gap-2">
                 メンバー管理
-                <HelpTooltip text="会社管理者(OWNER/ADMIN)は会社全体の管理ができます。一般ユーザー(MEMBER/VIEWER)はプロジェクトの作業を行います。" />
+                <HelpTooltip text="会社管理者(OWNER/ADMIN)は会社全体の管理ができます。会社メンバー(MEMBER/VIEWER)はプロジェクトの作業を行います。" />
               </CardTitle>
               <CardDescription className="text-gray-500">
                 メールアドレスでメンバーを追加し、権限を管理します
@@ -607,7 +607,7 @@ export default function CompanySettingsPage() {
                   <div className="space-y-1.5">
                     <Label className="text-gray-700 text-sm flex items-center gap-1.5">
                       権限
-                      <HelpTooltip text="会社管理者はメンバー管理や会社設定が可能です。一般ユーザーはプロジェクト作業を行います。" />
+                      <HelpTooltip text="会社管理者はメンバー管理や会社設定が可能です。会社メンバーはプロジェクト作業を行います。" />
                     </Label>
                     <Select
                       value={newMemberRole}
@@ -618,7 +618,7 @@ export default function CompanySettingsPage() {
                       </SelectTrigger>
                       <SelectContent className="bg-white border-gray-200">
                         <SelectItem value="general" className="text-gray-700">
-                          一般ユーザー
+                          会社メンバー
                         </SelectItem>
                         <SelectItem value="admin" className="text-gray-700">
                           会社管理者
@@ -697,7 +697,7 @@ export default function CompanySettingsPage() {
                             </SelectTrigger>
                             <SelectContent className="bg-white border-gray-200">
                               <SelectItem value="general" className="text-gray-700">
-                                一般ユーザー
+                                会社メンバー
                               </SelectItem>
                               <SelectItem value="admin" className="text-gray-700">
                                 会社管理者

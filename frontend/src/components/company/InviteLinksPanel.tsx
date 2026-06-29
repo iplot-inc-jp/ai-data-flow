@@ -6,12 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { invitesApi, type InviteView } from '@/lib/api';
+import { COMPANY_ROLE_OPTIONS, companyRoleLabel } from '@/lib/roles';
 
-const ROLE_OPTIONS = [
-  { value: 'MEMBER', label: '一般ユーザー' },
-  { value: 'ADMIN', label: '会社管理者' },
-  { value: 'VIEWER', label: '閲覧のみ' },
-];
+const ROLE_OPTIONS = COMPANY_ROLE_OPTIONS;
 
 function inviteUrl(token: string): string {
   if (typeof window === 'undefined') return `/invite/${token}`;
@@ -138,7 +135,7 @@ export function InviteLinksPanel({ orgId }: { orgId: string }) {
               <span className={'inline-block rounded px-2 py-0.5 text-xs ' + (inv.valid ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500')}>
                 {inv.revoked ? '無効' : inv.valid ? '有効' : '失効'}
               </span>
-              <span className="rounded bg-secondary px-2 py-0.5 text-xs">{inv.role}</span>
+              <span className="rounded bg-secondary px-2 py-0.5 text-xs">{companyRoleLabel(inv.role)}</span>
               <span className="text-xs text-muted-foreground">
                 {inv.expiresAt ? `期限: ${new Date(inv.expiresAt).toLocaleDateString('ja-JP')}` : '無期限'} ・ {inv.maxUses != null ? `${inv.useCount}/${inv.maxUses}` : `${inv.useCount}回`}
               </span>

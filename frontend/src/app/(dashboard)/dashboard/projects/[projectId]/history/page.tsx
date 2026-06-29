@@ -62,7 +62,7 @@ async function listChangeLogs(projectId: string): Promise<ChangeLogRow[]> {
   });
   if (res.status === 403) {
     throw new ForbiddenHistoryError(
-      '操作履歴の閲覧は会社管理者・全体管理者のみ可能です。',
+      '操作履歴の閲覧は会社管理者・すべての管理者のみ可能です。',
     );
   }
   if (!res.ok) throw new Error('変更履歴の取得に失敗しました');
@@ -302,8 +302,8 @@ export default function HistoryPage() {
             変更履歴
           </span>
         }
-        description="このプロジェクトに対する作成・更新・削除の操作が自動で記録されます。「いつ・誰が・何を・どんな内容で」変更したかを確認できます（会社管理者・全体管理者のみ閲覧可）。"
-        help="各画面での書き込み操作（作成・更新・削除）はサーバー側で自動記録されます（操作者・リクエスト内容を含む。パスワード等の機微情報は[REDACTED]でマスク）。「内容を表示」で送信内容を展開できます。失敗した操作（4xx/5xx）はグレーの打消し表示になります。閲覧は会社管理者・全体管理者に限定されています。"
+        description="このプロジェクトに対する作成・更新・削除の操作が自動で記録されます。「いつ・誰が・何を・どんな内容で」変更したかを確認できます（会社管理者・すべての管理者のみ閲覧可）。"
+        help="各画面での書き込み操作（作成・更新・削除）はサーバー側で自動記録されます（操作者・リクエスト内容を含む。パスワード等の機微情報は[REDACTED]でマスク）。「内容を表示」で送信内容を展開できます。失敗した操作（4xx/5xx）はグレーの打消し表示になります。閲覧は会社管理者・すべての管理者に限定されています。"
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
@@ -386,7 +386,7 @@ export default function HistoryPage() {
           <CardContent className="flex flex-col items-center justify-center gap-2 py-12 text-center">
             <History className="h-8 w-8 text-amber-400" />
             <p className="text-sm font-medium text-gray-700">
-              操作履歴は会社管理者・全体管理者のみ閲覧できます
+              操作履歴は会社管理者・すべての管理者のみ閲覧できます
             </p>
             <p className="text-xs text-gray-400">
               閲覧が必要な場合は、会社の管理者にお問い合わせください。

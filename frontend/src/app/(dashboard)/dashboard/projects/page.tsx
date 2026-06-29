@@ -78,7 +78,7 @@ export default function ProjectsPage() {
     try {
       const headers = getHeaders();
 
-      // 会社作成は全体管理者のみ。ここでは自動作成せず、権限と一覧のみ取得する。
+      // 会社作成はすべての管理者のみ。ここでは自動作成せず、権限と一覧のみ取得する。
       const [meRes, orgRes] = await Promise.all([
         fetch(`${API_URL}/api/auth/me`, { headers }),
         fetch(`${API_URL}/api/organizations`, { headers }),
@@ -94,7 +94,11 @@ export default function ProjectsPage() {
 
       setOrganizations(orgs);
       if (orgs.length > 0) {
-        setSelectedOrg(orgs[0]); // → projects 取得 effect が loading を解除
+        // 「会社」ページ等で選択した会社があればそれを開く。無ければ先頭。
+        const savedId =
+          typeof window !== 'undefined' ? localStorage.getItem('selectedOrganizationId') : null;
+        const saved = savedId ? orgs.find((o) => o.id === savedId) : null;
+        setSelectedOrg(saved ?? orgs[0]); // → projects 取得 effect が loading を解除
       } else {
         setLoading(false); // 会社が無い → スピナー解除（メッセージ表示へ）
       }

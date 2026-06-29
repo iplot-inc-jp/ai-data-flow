@@ -965,11 +965,12 @@ export default function DashboardLayout({
     const nav = [
       { name: 'ダッシュボード', href: '/dashboard', icon: Home },
       { name: 'ガイド', href: '/dashboard/guide', icon: Compass },
+      { name: '会社', href: '/dashboard/organizations', icon: Building2 },
       { name: 'プロジェクト', href: '/dashboard/projects', icon: FolderOpen },
       { name: '取り込みバッチ', href: '/dashboard/batches', icon: Inbox },
     ]
 
-    // 全体管理者のみ「会社管理」を表示
+    // すべての管理者のみ「会社管理（全社）」を表示
     if (isSuperAdmin) {
       nav.push({ name: '会社管理', href: '/dashboard/companies', icon: Building2 })
     }
