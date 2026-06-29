@@ -65,6 +65,7 @@ import type {
   Role,
 } from '@/components/flow-editor/flow-types';
 import { applyEdgePatch } from '@/components/flow-editor/flow-types';
+import { computeFlowLayout } from '@/components/flow-editor/flow-layout';
 import {
   deriveDefinitionFromFlow,
   hasDerivableContent,
@@ -1022,8 +1023,6 @@ export default function ProjectFlowDetailPage() {
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [roleOrderOpen, setRoleOrderOpen] = useState(false);
-  // レーン並び替えが保存されるたびに +1。SwimlaneCanvas はこれを見て自動「整形」する。
-  const [reorderNonce, setReorderNonce] = useState(0);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
 
   // ノードの画像添付（ノードID → 画像）。ノード右上にバッジを出し、ホバーで拡大プレビューする。
@@ -1114,13 +1113,15 @@ export default function ProjectFlowDetailPage() {
   }, []);
 
   // ロール一覧取得（フロー途中でのロール追加後の再取得でも再利用する）
-  const fetchRoles = useCallback(async () => {
+  const fetchRoles = useCallback(async (): Promise<Role[] | undefined> => {
     const headers = getHeaders();
     const rolesRes = await fetch(`${API_URL}/api/roles/project/${projectId}`, { headers });
     if (rolesRes.ok) {
-      const rolesData = await rolesRes.json();
+      const rolesData = (await rolesRes.json()) as Role[];
       setRoles(rolesData);
+      return rolesData;
     }
+    return undefined;
   }, [projectId, getHeaders]);
 
   // 注釈（付箋・コメント）一覧を取得（GET /business-flows/:flowId/annotations）。
@@ -3084,10 +3085,53 @@ export default function ProjectFlowDetailPage() {
           open={roleOrderOpen}
           onOpenChange={setRoleOrderOpen}
           onReordered={async () => {
-            // 新しいロール順を取り込んでから整形トリガーを進める。
-            // SwimlaneCanvas が reorderNonce の変化を見て自動整形し、ノードを新順へ追従させる。
-            await fetchRoles();
-            setReorderNonce((n) => n + 1);
+            // 並び替え保存後、取得し直した「新ロール順」でその場で整形し、ノードを新レーンへ追従させる。
+            // SwimlaneCanvas の tidyLayout と同条件で computeFlowLayout を回す。state 反映の
+            // タイミングに依存しないよう、fetchRoles の戻り値の新ロールを直接使う。
+            const newRoles = await fetchRoles();
+            if (!newRoles || !flowData) return;
+            const orientation =
+              typeof window !== 'undefined' &&
+              window.localStorage.getItem('flow-orientation-' + flowData.id) === 'vertical'
+                ? 'vertical'
+                : 'horizontal';
+            const laneRoles = newRoles.map((r) => ({
+              id: r.id,
+              name: r.name,
+              color: r.color,
+              laneHeight: (r as { laneHeight?: number }).laneHeight,
+            }));
+            const inputNodes = flowData.nodes.map((n) => ({
+              id: n.id,
+              type: n.type,
+              roleId: n.roleId ?? n.role?.id ?? null,
+              order: n.order,
+              width: typeof n.width === 'number' && n.width > 0 ? n.width : undefined,
+              height: typeof n.height === 'number' && n.height > 0 ? n.height : undefined,
+            }));
+            const inputEdges = flowData.edges.map((e) => ({
+              id: e.id,
+              source: e.sourceNodeId,
+              target: e.targetNodeId,
+            }));
+            const layout = computeFlowLayout(inputNodes, inputEdges, laneRoles, {
+              orientation,
+              laneHeightOverrides: flowData.laneHeights ?? {},
+            });
+            const roleIdSet = new Set(newRoles.map((r) => r.id));
+            const positions = layout.nodes.map((pn) => ({
+              id: pn.id,
+              positionX: pn.x - pn.width / 2,
+              positionY: pn.y - pn.height / 2,
+              roleId: roleIdSet.has(pn.roleId) ? pn.roleId : null,
+              order: typeof pn.order === 'number' ? pn.order : undefined,
+            }));
+            const edges = layout.edges.map((e) => ({
+              id: e.id,
+              sourceHandle: e.sourceHandle,
+              targetHandle: e.targetHandle,
+            }));
+            await handleTidyNodes(positions, edges);
           }}
         />
         <SwimlaneCanvas
@@ -3138,7 +3182,6 @@ export default function ProjectFlowDetailPage() {
           apiEndpoints={apiEndpoints}
           onSaveEdgeApiLinks={ro(handleSaveEdgeApiLinks)}
           onOpenRoleOrder={ro(() => setRoleOrderOpen(true))}
-          reorderNonce={reorderNonce}
         />
       </div>
 

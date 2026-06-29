@@ -459,12 +459,6 @@ export interface SwimlaneCanvasProps {
    * ページ側が RoleOrderDialog を所有し、このコールバックで開く。
    */
   onOpenRoleOrder?: () => void;
-  /**
-   * レーン（ロール）並び替えが保存された直後にインクリメントされるカウンタ。
-   * 値が変わると自動で「整形」を実行し、ノード/コンポーネントを新しいレーン順へ追従させる
-   * （並び替えただけでは旧座標のまま残り、レーン幅・配置がずれて見えるため）。
-   */
-  reorderNonce?: number;
 }
 
 // ===========================================
@@ -3406,19 +3400,6 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     setMenu(null);
     persistLayout(tidyLayout);
   }, [tidyLayout, persistLayout, layoutSaving]);
-
-  // レーン並び替え直後の自動整形。reorderNonce が変わったら、最新の tidyLayout
-  // （新しいロール順で再計算済み）でノードを綺麗な座標へ追従させる。
-  // ref 経由で常に最新の handleTidy を呼ぶ（nonce 変更コミット時点の新ロール順を使う）。
-  const handleTidyRef = useRef(handleTidy);
-  handleTidyRef.current = handleTidy;
-  const prevReorderNonceRef = useRef(props.reorderNonce);
-  useEffect(() => {
-    if (props.reorderNonce === undefined) return;
-    if (prevReorderNonceRef.current === props.reorderNonce) return;
-    prevReorderNonceRef.current = props.reorderNonce;
-    handleTidyRef.current();
-  }, [props.reorderNonce]);
 
   // --- 向きトグル: 「整形」ではなく座標変換（転置）で手動配置を保持する ---
   // 縦↔横の切替で再整形すると、手で並べた配置が毎回潰れてしまう。

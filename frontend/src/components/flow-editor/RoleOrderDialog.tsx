@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import {
   DragDropContext,
   Droppable,
@@ -111,7 +112,8 @@ export function RoleOrderDialog({
                 >
                   {items.map((r, i) => (
                     <Draggable key={r.id} draggableId={r.id} index={i}>
-                      {(p, snapshot) => (
+                      {(p, snapshot) => {
+                        const row = (
                         <div
                           ref={p.innerRef}
                           {...p.draggableProps}
@@ -157,7 +159,14 @@ export function RoleOrderDialog({
                             <ArrowDown className="h-4 w-4" />
                           </button>
                         </div>
-                      )}
+                        );
+                        // Radix Dialog は中央寄せに transform を使うため、ドラッグ中の
+                        // position:fixed がその transform 基準になり項目が画面外へ飛んで
+                        // 消える。ドラッグ中だけ body へポータルして transform から逃がす。
+                        return snapshot.isDragging && typeof document !== 'undefined'
+                          ? createPortal(row, document.body)
+                          : row;
+                      }}
                     </Draggable>
                   ))}
                   {provided.placeholder}
