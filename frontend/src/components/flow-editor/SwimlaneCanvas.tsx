@@ -5227,6 +5227,59 @@ function EdgePropertyPanel({
           </div>
         )}
 
+        {/* 接続位置（矢印が出入りするノードの辺）を手動で固定する。 */}
+        {onRepoint && (
+          <div>
+            <label className="block text-[11px] font-medium text-gray-500 mb-1">
+              接続位置（矢印が出入りする辺）
+            </label>
+            {([
+              { key: 'source' as const, rowLabel: '起点側', cur: edge.sourceHandle },
+              { key: 'target' as const, rowLabel: '先側', cur: edge.targetHandle },
+            ]).map((row) => (
+              <div key={row.key} className="flex items-center gap-1.5 mb-1">
+                <span className="w-9 shrink-0 text-[11px] text-gray-500">{row.rowLabel}</span>
+                <div className="grid grid-cols-4 gap-1 flex-1">
+                  {([
+                    { v: 'top', label: '上' },
+                    { v: 'right', label: '右' },
+                    { v: 'bottom', label: '下' },
+                    { v: 'left', label: '左' },
+                  ] as const).map((opt) => {
+                    const active = (row.cur ?? '') === opt.v;
+                    return (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() =>
+                          onRepoint({
+                            sourceNodeId: edge.sourceNodeId,
+                            targetNodeId: edge.targetNodeId,
+                            sourceHandle:
+                              row.key === 'source' ? opt.v : edge.sourceHandle ?? null,
+                            targetHandle:
+                              row.key === 'target' ? opt.v : edge.targetHandle ?? null,
+                          })
+                        }
+                        className={`px-1 py-1 text-xs rounded border transition-colors ${
+                          active
+                            ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                            : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <p className="text-[10px] text-gray-400 leading-snug">
+              矢印がノードのどの辺から出入りするかを固定します。「整形」やレーン並び替えをすると最近接の辺に戻ります。
+            </p>
+          </div>
+        )}
+
         {/* 跨がない矢印でも API は紐づけ可能（通常位置に表示）。 */}
         {!crossesHumanSystem && apiSection}
 
