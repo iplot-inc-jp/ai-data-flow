@@ -89,6 +89,7 @@ import {
   MessageSquarePlus,
   GripVertical,
   Pencil,
+  ArrowDownUp,
   Check,
   Star,
   Flag,
@@ -452,6 +453,18 @@ export interface SwimlaneCanvasProps {
    * true のとき編集系UIを描画しない（MiniMap/Controls/ロール編集パネルは従来どおり）。
    */
   embedded?: boolean;
+  /**
+   * 「レーン（ロール）の順番」ダイアログを開く。ロールパネルの専用ボタンから呼ぶ。
+   * 並び替え対象は全ロールなので、表示中ロールに限定される SwimlaneCanvas ではなく
+   * ページ側が RoleOrderDialog を所有し、このコールバックで開く。
+   */
+  onOpenRoleOrder?: () => void;
+  /**
+   * レーン（ロール）並び替えが保存された直後にインクリメントされるカウンタ。
+   * 値が変わると自動で「整形」を実行し、ノード/コンポーネントを新しいレーン順へ追従させる
+   * （並び替えただけでは旧座標のまま残り、レーン幅・配置がずれて見えるため）。
+   */
+  reorderNonce?: number;
 }
 
 // ===========================================
@@ -1661,18 +1674,34 @@ function DraggableFloating({
   style?: CSSProperties;
 }) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    originLeft: number;
+    originTop: number;
+    elW: number;
+    elH: number;
+  } | null>(null);
 
   const onHeaderPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       // 左クリック以外は無視。React Flow のパンへ伝播させない。
       if (e.button !== 0) return;
       e.stopPropagation();
+      const rect = rootRef.current?.getBoundingClientRect();
       dragRef.current = {
         startX: e.clientX,
         startY: e.clientY,
         baseX: offset.x,
         baseY: offset.y,
+        // 現在の transform(offset) を差し引いた「素のレイアウト原点」をビューポート座標で保持。
+        originLeft: (rect?.left ?? 0) - offset.x,
+        originTop: (rect?.top ?? 0) - offset.y,
+        elW: rect?.width ?? 0,
+        elH: rect?.height ?? 0,
       };
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     },
@@ -1683,10 +1712,18 @@ function DraggableFloating({
     const d = dragRef.current;
     if (!d) return;
     e.stopPropagation();
-    setOffset({
-      x: d.baseX + (e.clientX - d.startX),
-      y: d.baseY + (e.clientY - d.startY),
-    });
+    const nx = d.baseX + (e.clientX - d.startX);
+    const ny = d.baseY + (e.clientY - d.startY);
+    // パネルが画面外へ完全に消えないようクランプ（最低 KEEP px はビューポート内に残す）。
+    const KEEP = 48;
+    const vw = typeof window !== 'undefined' ? window.innerWidth : Infinity;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : Infinity;
+    let left = d.originLeft + nx;
+    let top = d.originTop + ny;
+    left = Math.min(vw - KEEP, Math.max(KEEP - d.elW, left));
+    // ヘッダー（掴む所）が常に見えるよう上端は 0 以上、下端は画面内に KEEP 残す。
+    top = Math.min(vh - KEEP, Math.max(0, top));
+    setOffset({ x: left - d.originLeft, y: top - d.originTop });
   }, []);
 
   const endDrag = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1698,7 +1735,7 @@ function DraggableFloating({
   const transform = `${baseTransform} translate(${offset.x}px, ${offset.y}px)`.trim();
 
   return (
-    <div className={`nodrag nopan ${className}`} style={{ ...style, transform }}>
+    <div ref={rootRef} className={`nodrag nopan ${className}`} style={{ ...style, transform }}>
       <div
         onPointerDown={onHeaderPointerDown}
         onPointerMove={onHeaderPointerMove}
@@ -2066,6 +2103,7 @@ function AddRoleControl({
   onDeleteRole,
   editingRoleId,
   onEditRole,
+  onOpenRoleOrder,
 }: {
   roles: Role[];
   onAddRole?: (name: string, type: RoleType) => Promise<void>;
@@ -2076,6 +2114,8 @@ function AddRoleControl({
   editingRoleId?: string | null;
   /** 編集対象ロールIDの変更を親へ通知（チップクリック / 閉じる）。 */
   onEditRole?: (roleId: string | null) => void;
+  /** 「レーンの順番」ダイアログを開く（並び替え対象は全ロール）。 */
+  onOpenRoleOrder?: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
@@ -2215,6 +2255,18 @@ function AddRoleControl({
         >
           <Plus className="h-3 w-3" />
           ロール追加
+        </button>
+      )}
+      {/* レーン（ロール）の並び順を変更（保存すると自動で整形され、ノードが新順へ追従）。 */}
+      {onOpenRoleOrder && roles.length > 1 && (
+        <button
+          type="button"
+          onClick={onOpenRoleOrder}
+          className="flex items-center justify-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50"
+          title="レーン（ロール）の並び順を変更"
+        >
+          <ArrowDownUp className="h-3 w-3" />
+          レーンの順番
         </button>
       )}
     </DraggableFloating>
@@ -3355,6 +3407,19 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     persistLayout(tidyLayout);
   }, [tidyLayout, persistLayout, layoutSaving]);
 
+  // レーン並び替え直後の自動整形。reorderNonce が変わったら、最新の tidyLayout
+  // （新しいロール順で再計算済み）でノードを綺麗な座標へ追従させる。
+  // ref 経由で常に最新の handleTidy を呼ぶ（nonce 変更コミット時点の新ロール順を使う）。
+  const handleTidyRef = useRef(handleTidy);
+  handleTidyRef.current = handleTidy;
+  const prevReorderNonceRef = useRef(props.reorderNonce);
+  useEffect(() => {
+    if (props.reorderNonce === undefined) return;
+    if (prevReorderNonceRef.current === props.reorderNonce) return;
+    prevReorderNonceRef.current = props.reorderNonce;
+    handleTidyRef.current();
+  }, [props.reorderNonce]);
+
   // --- 向きトグル: 「整形」ではなく座標変換（転置）で手動配置を保持する ---
   // 縦↔横の切替で再整形すると、手で並べた配置が毎回潰れてしまう。
   // そこで各ノード中心の x↔y を入れ替えて図を転置し、相対配置をそのまま新しい向きへ移す。
@@ -3764,7 +3829,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
         {/* ロール一覧 + フロー途中でのロール追加 + ロール編集（左上、パンくずの下）。
             ヘッダーを掴んで自由に動かせる（box は AddRoleControl 内の DraggableFloating が持つ）。 */}
-        {(props.onAddRole || props.onUpdateRole) && (
+        {(props.onAddRole || props.onUpdateRole || props.onOpenRoleOrder) && (
           <Panel position="top-left" className="mt-14">
             <AddRoleControl
               roles={roles}
@@ -3774,6 +3839,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
               onDeleteRole={props.onDeleteRole}
               editingRoleId={editingRoleId}
               onEditRole={setEditingRoleId}
+              onOpenRoleOrder={props.onOpenRoleOrder}
             />
           </Panel>
         )}

@@ -1022,6 +1022,8 @@ export default function ProjectFlowDetailPage() {
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [roleOrderOpen, setRoleOrderOpen] = useState(false);
+  // レーン並び替えが保存されるたびに +1。SwimlaneCanvas はこれを見て自動「整形」する。
+  const [reorderNonce, setReorderNonce] = useState(0);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
 
   // ノードの画像添付（ノードID → 画像）。ノード右上にバッジを出し、ホバーで拡大プレビューする。
@@ -3081,7 +3083,12 @@ export default function ProjectFlowDetailPage() {
           roles={roles}
           open={roleOrderOpen}
           onOpenChange={setRoleOrderOpen}
-          onReordered={fetchRoles}
+          onReordered={async () => {
+            // 新しいロール順を取り込んでから整形トリガーを進める。
+            // SwimlaneCanvas が reorderNonce の変化を見て自動整形し、ノードを新順へ追従させる。
+            await fetchRoles();
+            setReorderNonce((n) => n + 1);
+          }}
         />
         <SwimlaneCanvas
           flowData={flowData}
@@ -3130,6 +3137,8 @@ export default function ProjectFlowDetailPage() {
           onDeleteAnnotation={ro(handleDeleteAnnotation)}
           apiEndpoints={apiEndpoints}
           onSaveEdgeApiLinks={ro(handleSaveEdgeApiLinks)}
+          onOpenRoleOrder={ro(() => setRoleOrderOpen(true))}
+          reorderNonce={reorderNonce}
         />
       </div>
 
