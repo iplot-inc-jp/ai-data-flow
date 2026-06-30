@@ -53,6 +53,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../domain';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService } from '../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
@@ -1124,47 +1125,49 @@ export class BusinessFlowController {
     await this.projectAccess.assertProjectAccess(flow.projectId, user.id, 'edit');
 
     const positions = dto.positions ?? [];
+    const edgePatches = dto.edges ?? [];
+
+    // 整形/一括ドラッグ保存は対象が多い（N ノード + M エッジ）。旧実装は 1 件ずつ
+    // findById→save→update を逐次 await しており、Neon への往復が 3N+2M 回に膨れて
+    // 数秒かかる原因になっていた。所属チェックを where に畳み込んだ updateMany を
+    // $transaction で一括投入し、往復を 1 トランザクションへ圧縮する。
+    //  - updatePosition / assignRole は単純なフィールドセッターなので直接更新と等価。
+    //  - updateMany + where:{ id, flowId } は他フロー/存在しない id を「0 件更新」として
+    //    安全に弾く（旧実装の所属スキップと同じ効果）。
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
 
     for (const pos of positions) {
-      const node = await this.nodeRepository.findById(pos.id);
-      // このフローに属さない / 存在しないノードはスキップ
-      if (!node || node.flowId !== flowId) {
-        continue;
-      }
-
-      node.updatePosition(pos.positionX, pos.positionY);
-      if (pos.roleId !== undefined) {
-        node.assignRole(pos.roleId);
-      }
-      await this.nodeRepository.save(node);
-
-      // `order` はドメインエンティティ/リポジトリが保持していないため直接更新する
-      if (pos.order !== undefined) {
-        await this.prisma.flowNode.update({
-          where: { id: pos.id },
-          data: { order: pos.order },
-        });
-      }
+      const data: {
+        positionX: number;
+        positionY: number;
+        roleId?: string | null;
+        order?: number;
+      } = {
+        positionX: pos.positionX,
+        positionY: pos.positionY,
+      };
+      if (pos.roleId !== undefined) data.roleId = pos.roleId;
+      if (pos.order !== undefined) data.order = pos.order;
+      ops.push(
+        this.prisma.flowNode.updateMany({ where: { id: pos.id, flowId }, data }),
+      );
     }
 
     // 整形が算出した最近接サイド接続ハンドル（任意）。同一リクエストで反映する。
-    // このフローに属さない / 存在しないエッジはスキップする。
-    const edgePatches = dto.edges ?? [];
     for (const patch of edgePatches) {
-      const edge = await this.prisma.flowEdge.findUnique({
-        where: { id: patch.id },
-        select: { id: true, flowId: true },
-      });
-      if (!edge || edge.flowId !== flowId) {
-        continue;
-      }
       const data: { sourceHandle?: string | null; targetHandle?: string | null } =
         {};
       if (patch.sourceHandle !== undefined) data.sourceHandle = patch.sourceHandle;
       if (patch.targetHandle !== undefined) data.targetHandle = patch.targetHandle;
       if (Object.keys(data).length > 0) {
-        await this.prisma.flowEdge.update({ where: { id: patch.id }, data });
+        ops.push(
+          this.prisma.flowEdge.updateMany({ where: { id: patch.id, flowId }, data }),
+        );
       }
+    }
+
+    if (ops.length > 0) {
+      await this.prisma.$transaction(ops);
     }
 
     // 更新後のフローのノード一覧を返す

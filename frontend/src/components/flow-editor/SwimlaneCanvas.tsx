@@ -529,6 +529,8 @@ type ContentNodeData = {
   attachmentImages?: NodeImageRef[];
   /** リサイズ確定時に呼ぶ（width/height を永続化）。embedded（閲覧）では未設定。 */
   onResizeEnd?: (id: string, size: { width: number; height: number }) => void;
+  /** ノードの名前（label）を変更する。embedded（閲覧）では未設定。 */
+  onRename?: (id: string, label: string) => void;
 };
 
 const NODE_STYLE: Record<string, string> = {
@@ -552,6 +554,20 @@ const HANDLE_SIDES: Array<{ id: string; position: Position }> = [
 
 function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData; selected?: boolean }) {
   const cls = NODE_STYLE[data.ntype] ?? NODE_STYLE.PROCESS;
+  // ノード名のインライン編集。ダブルクリックは詳細フロー展開に使われるため、
+  // 改名はホバー/選択時に出るペンシルから入る（onRename があるときだけ）。
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(data.label);
+  useEffect(() => {
+    // 再取得などで外部 label が変わったら追従（編集中は上書きしない）。
+    if (!editing) setValue(data.label);
+  }, [data.label, editing]);
+  const commitRename = () => {
+    setEditing(false);
+    const v = value.trim();
+    if (v && v !== data.label) data.onRename?.(id, v);
+    else setValue(data.label);
+  };
   return (
     <div
       className={`group/node px-3 py-2 rounded-lg border-2 shadow-sm w-full h-full flex flex-col items-center justify-center text-center transition-all ${cls} ${
@@ -627,7 +643,48 @@ function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData
           </div>
         </div>
       )}
-      <div className="font-medium text-sm leading-tight line-clamp-2">{data.label}</div>
+      {data.onRename && editing ? (
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitRename();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setValue(data.label);
+              setEditing(false);
+            }
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          className="nodrag w-full rounded border border-blue-300 px-1 py-0.5 text-center text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+      ) : (
+        <div className="font-medium text-sm leading-tight line-clamp-2">{data.label}</div>
+      )}
+      {/* 名前を変更（ホバー/選択中に左上のペンシル）。ダブルクリックは詳細フロー展開のため別操作にする。 */}
+      {data.onRename && !editing && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setValue(data.label);
+            setEditing(true);
+          }}
+          title="名前を変更"
+          className={`nodrag absolute -left-1.5 -top-1.5 z-10 h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow hover:text-gray-800 ${
+            selected ? 'flex' : 'hidden group-hover/node:flex'
+          }`}
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+      )}
       {(data.hasChildFlow || data.hasLinks) && (
         <div className="mt-0.5 flex items-center justify-center gap-1.5">
           {data.hasChildFlow && (
@@ -2703,6 +2760,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onResizeEnd: props.embedded
             ? undefined
             : (id, size) => props.onUpdateNode?.(id, { width: size.width, height: size.height }),
+          // ノード上で直接「名前を変更」できるようにする（embedded=閲覧では不可）。
+          onRename: props.embedded
+            ? undefined
+            : (id, nextLabel) => props.onUpdateNode?.(id, { label: nextLabel }),
         } as ContentNodeData,
         width: w,
         height: h,
@@ -4257,7 +4318,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       )}
 
       <div className="absolute bottom-4 right-4 bg-white/90 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 z-10">
-        💡 ノードは自由にドラッグして配置（位置は保存されます）｜ 別レーンへ落とすとロール変更 ｜ 乱れたら「整形」で自動整列 ｜ クリックで編集 ｜ ハンドルで接続 ｜ 接続線の「＋」で途中にノード挿入 ｜ レーン境界をドラッグで高さ調整 ｜ 右クリックで追加/削除
+        💡 ノードは自由にドラッグして配置（位置は保存されます）｜ 別レーンへ落とすとロール変更 ｜ 乱れたら「整形」で自動整列 ｜ ✎ボタン/クリックで名前など編集 ｜ ハンドルで接続 ｜ 接続線の「＋」で途中にノード挿入 ｜ レーン境界をドラッグで高さ調整 ｜ 右クリックで追加/削除
       </div>
     </div>
   );
@@ -5403,6 +5464,13 @@ function NodePropertyPanel({
   const [inputIds, setInputIds] = useState<string[]>(initialInputIds);
   const [outputIds, setOutputIds] = useState<string[]>(initialOutputIds);
 
+  // ノード上の ✎ によるインライン改名など、外部で label が変わったら追従する。
+  // これが無いと、開いたままのパネルが持つ古い label が次のフィールド保存時に
+  // patch.label として送られ、インライン改名を黙って巻き戻してしまう。
+  useEffect(() => {
+    setLabel(node?.label ?? '');
+  }, [node?.label]);
+
   // 情報種別リンクが初期値から変化したか（変化時のみ保存して再取得を抑える）
   const sameIds = (a: string[], b: string[]) =>
     a.length === b.length && a.every((id, i) => id === b[i]);
@@ -5486,11 +5554,12 @@ function NodePropertyPanel({
 
       <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
         <div>
-          <label className="block text-[11px] font-medium text-gray-500 mb-1">ラベル</label>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">名前</label>
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             onBlur={save}
+            placeholder="例: 注文を受け付ける"
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
         </div>
